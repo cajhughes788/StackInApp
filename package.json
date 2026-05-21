@@ -1,0 +1,34 @@
+{
+  "name": "stackin-root",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend/functions"
+  ],
+  "scripts": {
+    "clean": "rimraf node_modules frontend/node_modules backend/functions/node_modules",
+    "build": "npm run --workspace frontend build && npm run --workspace backend/functions build",
+    "dev": "npm run --workspace frontend dev",
+    "deploy": "npm run --workspace backend/functions deploy",
+    "typecheck": "tsc --noEmit",
+    "install:all": "npm install --workspaces",
+    "verify": "npm ls zod",
+    "profile:report": "node ./scripts/profile-report.mjs"
+  },
+  "dependencies": {
+    "typescript": "^5.9.3",
+    "ts-node": "^10.9.2",
+    "decimal.js-light": "^2.5.1",
+    "luxon": "^3.7.2",
+    "eslint": "^9.38.0",
+    "@typescript-eslint/eslint-plugin": "^8.46.2",
+    "@typescript-eslint/parser": "^8.46.2",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2",
+    "rimraf": "^6.1.0",
+    "tsc-alias": "^1.8.16"
+  }
+}

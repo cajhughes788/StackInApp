@@ -1,0 +1,29 @@
+workflows:
+  ios-capacitor:
+    name: iOS Capacitor Build
+    environment:
+      vars:
+        BUILD_DIR: "frontend"
+    scripts:
+      - name: Install dependencies
+        script: |
+          cd $BUILD_DIR
+          npm install
+      - name: Build Next.js web assets
+        script: |
+          cd $BUILD_DIR
+          npm run build
+      - name: Sync Capacitor iOS project
+        script: |
+          cd $BUILD_DIR
+          npx cap sync ios
+      - name: Build iOS app
+        script: |
+          cd $BUILD_DIR/ios/App
+          xcodebuild -workspace App.xcworkspace \
+                     -scheme App \
+                     -configuration Release \
+                     -archivePath $CM_BUILD_DIR/build/App.xcarchive archive \
+                     CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+    artifacts:
+      - $CM_BUILD_DIR/build/App.xcarchive

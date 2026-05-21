@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "lib": ["ES2022"],
+    "rootDir": "../..",
+    "outDir": "lib",
+    "strict": true,
+
+    // added for CommonJS/ES interop and decimal.js-light
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "moduleResolution": "NodeNext",
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+
+    // keep base path + alias for shared imports
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": ["../../shared/*"]
+    },
+  
+    //Prevent stale JS by forcing fresh builds
+    "incremental": false,
+    "noEmitOnError": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*", "../shared/**/*"],
+   "exclude": ["lib", "node_modules"]
+}

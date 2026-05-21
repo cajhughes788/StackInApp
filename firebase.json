@@ -1,0 +1,80 @@
+{
+  "functions": [
+    {
+      "source": "backend/functions",
+      "main": "lib/index.js",
+      "codebase": "default",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local"
+      ],
+      "predeploy": ["npm --prefix backend/functions run lint"]
+    }
+  ],
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "hosting": {
+    "target": "stackin",
+    "public": "frontend/out",
+    "cleanUrls": true,
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "headers": [
+      {
+        "source": "**/*.@(js|css|html)",
+        "headers": [
+          { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+        ]
+      },
+      {
+        "source": "index.html",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache" }
+        ]
+      }
+    ],
+    "rewrites": [
+      { "source": "/api/signup", "function": "signup", "method": "POST" },
+      { "source": "/api/subscription", "function": "getSubscription", "method": "GET" },
+
+      { "source": "/api/entries", "function": "getEntries", "method": "GET" },
+      { "source": "/api/entries", "function": "createEntry", "method": "POST" },
+      { "source": "/api/entries/**", "function": "editEntry", "method": "PATCH" },
+      { "source": "/api/entries/**", "function": "deleteEntry", "method": "DELETE" },
+
+      { "source": "/api/paystubs", "function": "getPayStubs", "method": "GET" },
+      { "source": "/api/paystubs/generate", "function": "generatePayStub", "method": "POST" },
+
+      { "source": "/api/settings", "function": "getSettings", "method": "GET" },
+      { "source": "/api/settings", "function": "saveSettings", "method": "POST" },
+
+      { "source": "/api/tax-profile", "function": "getTaxProfile", "method": "GET" },
+      { "source": "/api/tax-profile", "function": "saveTaxProfile", "method": "POST" },
+
+      { "source": "/api/user", "function": "deleteUserData", "method": "DELETE" },
+
+      { "source": "**", "destination": "/index.html" }
+    ]
+  },
+
+  "emulators": {
+    "functions": {
+      "port": 5001
+    },
+    "hosting": {
+      "port": 5000
+    },
+    "ui": {
+      "enabled": true,
+      "port": 4000
+    }
+  }
+}

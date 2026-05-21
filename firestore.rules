@@ -1,0 +1,42 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isWorkspaceMember(workspaceId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(workspaceId));
+    }
+
+    match /users/{uid} {
+      allow read: if isSelf(uid);
+
+      match /consent/{docId} {
+        allow read, write: if isSelf(uid);
+      }
+
+      match /subscription/{docId} {
+        allow read: if isSelf(uid);
+      }
+
+      match /memberships/{workspaceId} {
+        allow read: if isSelf(uid);
+      }
+    }
+
+    match /workspaces/{workspaceId} {
+      allow read: if isWorkspaceMember(workspaceId);
+
+      match /{document=**} {
+        allow read: if isWorkspaceMember(workspaceId);
+      }
+    }
+  }
+}

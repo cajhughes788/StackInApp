@@ -1,0 +1,463 @@
+"use client"
+
+import { Button } from "@/components/ui/button"
+
+type TermsContentProps = {
+  onClose?: () => void
+  showCloseButton?: boolean
+}
+
+export default function TermsContent({
+  onClose,
+  showCloseButton = false,
+}: TermsContentProps) {
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4 text-sm leading-relaxed text-muted-foreground">
+        <section>
+          <p><strong>Effective Date:</strong> 04/27/2026</p>
+          <p><strong>Last Updated:</strong> 04/27/2026</p>
+          <p><strong>Owner:</strong> Optivium AI Solutions LLC</p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">1. Acceptance of These Terms</h3>
+          <p>
+            These Terms and Conditions govern your access to and use of StackIn and any related
+            websites, mobile applications, software, content, and services we provide. By clicking
+            to accept, creating an account, downloading, accessing, subscribing to, or using
+            StackIn, you agree to these terms. If you do not agree, do not use the app.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">2. Eligibility and Authority</h3>
+          <p>
+            You must be at least 18 years old and legally able to enter into a binding agreement
+            to use StackIn. If you use StackIn on behalf of a business, employer, or other entity,
+            you represent that you have authority to bind that entity to these terms.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">3. What StackIn Does</h3>
+          <p>
+            StackIn is a financial organization and income-tracking tool. Depending on your plan
+            and device, features may include work-entry tracking, W-2 and independent income
+            logging, expense tracking, receipt capture, OCR-assisted data extraction, profit and
+            loss summaries, paycheck and withholding estimates, pay stub generation, reminders,
+            workspace management, notifications, and premium features.
+          </p>
+          <p>
+            StackIn is designed to help you organize information. It is not represented as an
+            official bookkeeping system of record, payroll processor, payroll administrator,
+            employer, employer-of-record, consumer reporting agency, bank, lender, money
+            transmitter, tax filing service, tax preparation service, or government reporting
+            platform.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">4. No Tax, Legal, Accounting, Payroll, or Financial Advice</h3>
+          <p>
+            StackIn does not provide tax, legal, accounting, payroll, audit, investment, or
+            financial advice, and no fiduciary, advisory, attorney-client, accountant-client, or
+            similar professional relationship is created by your use of the app.
+          </p>
+          <p>
+            Any estimates, categorizations, summaries, paycheck calculations, withholding
+            projections, pay stubs, tax-related outputs, or other generated materials are for
+            informational and organizational purposes only. You are responsible for getting advice
+            from qualified professionals before relying on any output for taxes, payroll,
+            accounting, wage-and-hour compliance, worker classification, employment verification,
+            lending, housing, immigration, public benefits, insurance, or legal purposes.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">5. No Guarantee of Accuracy or Acceptance</h3>
+          <p>
+            StackIn depends on information from you, your device, and in some cases third-party
+            services. You are solely responsible for ensuring your entries, imported records,
+            expense details, rates, dates, tax profile information, and other inputs are accurate,
+            complete, lawful, and current.
+          </p>
+          <p>
+            You are also solely responsible for reviewing and verifying all outputs before using
+            them. We do not guarantee that any estimate, calculation, category suggestion, report,
+            reminder, or generated record will be accurate, complete, current, accepted by any
+            employer, worker, accountant, lender, insurer, government agency, court, or other
+            third party, or suitable for your intended purpose.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">6. Generated Records and Reports</h3>
+          <p>
+            Any pay stubs, summaries, reports, statements, profit and loss outputs, receipt
+            extractions, tax estimates, or similar materials generated by StackIn are based on
+            user-supplied or third-party-supplied data and app logic. Unless we expressly state
+            otherwise in writing, they are not official payroll records, certified accounting
+            statements, audited financial statements, tax returns, government filings, or legal
+            documents.
+          </p>
+          <p>
+            You may not use StackIn to create, submit, distribute, or present false, misleading,
+            unauthorized, or deceptively altered documents or to misrepresent your identity,
+            employment status, income, expenses, tax position, or business records.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">7. Automated Features, OCR, and Suggestions</h3>
+          <p>
+            Some StackIn features may use automation, OCR, rules, heuristics, machine learning, or
+            similar technologies to extract, suggest, classify, summarize, or generate
+            information. These features are provided for convenience only and may make mistakes,
+            omit information, or produce misleading or incomplete results.
+          </p>
+          <p>
+            You remain responsible for checking and approving anything created or suggested by
+            those features before relying on it.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">8. Device Permissions, Notifications, and Location-Based Features</h3>
+          <p>
+            Certain features may request access to notifications, camera, photos, location, or
+            other device permissions in order to provide receipt capture, reminders, geofence
+            alerts, and similar functionality.
+          </p>
+          <p>
+            If you enable those features, you authorize StackIn to use the relevant permissions for
+            those purposes. You acknowledge that reminders and location-based features may be
+            delayed, inaccurate, incomplete, duplicated, or unavailable due to device settings,
+            battery restrictions, operating system behavior, connectivity, third-party platform
+            limitations, or disabled permissions. These features are convenience tools only and
+            must not be relied on for safety-critical, payroll-critical, tax-critical,
+            compliance-critical, or legal purposes.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">9. Offline Use, Local Storage, and Sync</h3>
+          <p>
+            Some StackIn features may support caching, offline entry, delayed synchronization, or
+            queued actions. Because of that, information shown on your device may temporarily differ
+            from server data, and sync actions may be delayed, duplicated, partially applied, or
+            fail altogether.
+          </p>
+          <p>
+            You are responsible for confirming that important data has been entered, saved, and
+            synchronized properly.
+          </p>
+          <p>
+            You should keep your own backup copies of any information you consider important,
+            including records you may need for tax, payroll, accounting, compliance, employment, or
+            legal purposes.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">10. Accounts and Security</h3>
+          <p>
+            You are responsible for maintaining accurate account information, safeguarding your
+            login credentials, and all activity that occurs under your account. You must notify us
+            promptly if you suspect unauthorized use, credential compromise, or a security issue
+            affecting your account or device. You may not share your account in a way that bypasses
+            plan limits, security controls, or authorized-use restrictions.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">11. Limited License</h3>
+          <p>
+            Subject to your compliance with these terms, we grant you a limited, personal,
+            non-exclusive, non-transferable, non-sublicensable, revocable license to use StackIn
+            for your internal lawful use during your authorized access period. StackIn is licensed,
+            not sold.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">12. Access and Availability</h3>
+          <p>
+            Access to StackIn may depend on account status, eligibility, device compatibility,
+            regional availability, and technical requirements. Features, limits, and availability
+            may change over time as we update, improve, secure, or maintain the service.
+          </p>
+          <p>
+            We may modify, suspend, or discontinue parts of StackIn at any time, with or without
+            notice, to the extent permitted by law. We are not liable for any modification,
+            suspension, interruption, or discontinuation of any feature or part of the service.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">13. Device Platforms</h3>
+          <p>
+            If you download or access StackIn through a third-party device platform or
+            distributor, you acknowledge that the platform provider is not a party to these terms
+            and is not responsible for StackIn, its content, maintenance, support, or claims
+            relating to StackIn, except to the extent required by applicable law or mandatory
+            platform terms.
+          </p>
+          <p>
+            Your use of StackIn must also comply with the applicable platform&apos;s usage rules, terms,
+            and technical limitations. To the extent permitted by law, applicable platform
+            providers are third-party beneficiaries of this section and may enforce it against you.
+          </p>
+        </section>
+
+        <section id="privacy">
+          <h3 className="font-semibold text-foreground">14. Privacy and Electronic Communications</h3>
+          <p>
+            Your use of StackIn is also subject to our Privacy Policy. By using the app, you
+            consent to the collection, use, storage, and processing of information as described in
+            that policy and as reasonably necessary to operate, secure, support, maintain, and
+            improve StackIn.
+          </p>
+          <p>
+            You also agree that we may send you service-related notices and other legally required
+            communications electronically, including through the app, by email, or by other
+            reasonable digital means. You are responsible for keeping your email address and other
+            contact information current.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">15. Your Content and Data</h3>
+          <p>
+            As between you and Optivium AI Solutions LLC, you retain ownership of the information
+            and content you submit to StackIn. You grant us a worldwide, non-exclusive,
+            royalty-free license to host, store, reproduce, process, format, transmit, and use
+            that content only as necessary to operate, provide, secure, troubleshoot, support,
+            improve, and enforce StackIn and these terms.
+          </p>
+          <p>
+            You represent that you have the rights, notices, and permissions needed to submit any
+            data or content you provide, including information about other people, and that your
+            submission and our permitted use of it will not violate any law or third-party rights.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">16. Feedback</h3>
+          <p>
+            If you send us suggestions, ideas, requests, or feedback about StackIn, you allow us
+            to use that feedback without restriction or compensation to you.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">17. Prohibited Uses</h3>
+          <p>
+            You may not use StackIn for any unlawful, fraudulent, deceptive, abusive, harmful, or
+            unauthorized purpose. This includes attempting to access another user’s data,
+            interfering with app operations, submitting false information, reverse engineering the
+            app, bypassing security or usage limits, reselling unauthorized access, scraping data,
+            uploading malicious code, infringing intellectual property rights, or using StackIn in
+            violation of tax, payroll, employment, privacy, consumer protection, sanctions, export,
+            or financial recordkeeping laws. It also includes using StackIn to fabricate, falsify,
+            or deceptively alter pay stubs, income records, receipts, tax-related information, or
+            other documents, or to mislead employers, workers, lenders, landlords, insurers,
+            regulators, courts, or government agencies.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">18. Third-Party Services and Content</h3>
+          <p>
+            StackIn may rely on or integrate with third-party services such as authentication,
+            cloud hosting, notifications, app stores, analytics, maps, OCR, or other service
+            providers. We are not responsible for the availability, accuracy, security, legality,
+            or terms of any third-party services, content, or products. Those providers may
+            change, suspend, or discontinue their services at any time.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">19. Beta or Experimental Features</h3>
+          <p>
+            We may offer beta, preview, early access, or experimental features from time to time.
+            Those features may be incomplete, unstable, changed, or removed at any time and are
+            provided on an as-is basis with no special guarantees.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">20. Service Availability and Changes</h3>
+          <p>
+            We may modify, improve, restrict, suspend, or discontinue all or part of StackIn at
+            any time, with or without notice, to the extent permitted by law. We do not guarantee
+            uninterrupted availability, continued support for any feature, or that StackIn will be
+            error-free, secure, or compatible with every device or operating system version.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">21. Suspension, Termination, and Account Deletion</h3>
+          <p>
+            We may suspend or terminate your access to StackIn, with or without notice, if we
+            believe you violated these terms, created legal, financial, or security risk, failed
+            to meet applicable requirements, or used the app in a way that may harm us, other
+            users, or third parties.
+          </p>
+          <p>
+            You may request account deletion, subject to identity verification and any applicable
+            legal, contractual, technical, fraud-prevention, tax, security, or record-retention
+            requirements. Deleting the app from your device does not necessarily delete your
+            account or stored data.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">22. Intellectual Property</h3>
+          <p>
+            StackIn, including its software, code, design, branding, interfaces, text, graphics,
+            underlying technology, and related intellectual property, is owned by Optivium AI
+            Solutions LLC or its licensors and is protected by law. Except for the limited rights
+            expressly granted in these terms, no rights are granted to you.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">23. Disclaimer of Warranties</h3>
+          <p>
+            TO THE MAXIMUM EXTENT PERMITTED BY LAW, STACKIN IS PROVIDED &quot;AS IS&quot; AND &quot;AS
+            AVAILABLE.&quot; WE DISCLAIM ALL WARRANTIES, WHETHER EXPRESS, IMPLIED, STATUTORY, OR
+            OTHERWISE, INCLUDING IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+            PURPOSE, TITLE, NON-INFRINGEMENT, ACCURACY, SECURITY, AVAILABILITY, AND QUIET
+            ENJOYMENT.
+          </p>
+          <p>
+            WITHOUT LIMITING THE FOREGOING, WE DO NOT WARRANT THAT ANY DATA, ESTIMATE,
+            CLASSIFICATION, GENERATED DOCUMENT, REMINDER, RECEIPT EXTRACTION, LOCATION-BASED
+            FEATURE, SYNC PROCESS, OR THIRD-PARTY INTEGRATION WILL BE ACCURATE, COMPLETE, CURRENT,
+            ACCEPTED BY THIRD PARTIES, ERROR-FREE, SECURE, OR UNINTERRUPTED.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">24. Limitation of Liability</h3>
+          <p>
+            TO THE MAXIMUM EXTENT PERMITTED BY LAW, OPTIVIUM AI SOLUTIONS LLC AND ITS AFFILIATES,
+            OFFICERS, MEMBERS, EMPLOYEES, CONTRACTORS, LICENSORS, AND SERVICE PROVIDERS WILL NOT BE
+            LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, EXEMPLARY, OR PUNITIVE
+            DAMAGES, OR FOR ANY LOSS OF PROFITS, REVENUE, SAVINGS, TAX BENEFITS, BUSINESS
+            OPPORTUNITY, GOODWILL, DATA, OR BUSINESS INTERRUPTION, ARISING OUT OF OR RELATING TO
+            STACKIN OR THESE TERMS, WHETHER IN CONTRACT, TORT, NEGLIGENCE, STRICT LIABILITY,
+            STATUTE, OR ANY OTHER LEGAL THEORY, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+          </p>
+          <p>
+            TO THE MAXIMUM EXTENT PERMITTED BY LAW, OUR TOTAL AGGREGATE LIABILITY FOR ALL CLAIMS
+            ARISING OUT OF OR RELATING TO STACKIN OR THESE TERMS WILL NOT EXCEED THE GREATER OF
+            THE AMOUNT YOU PAID TO US FOR STACKIN IN THE TWELVE MONTHS BEFORE THE EVENT GIVING RISE
+            TO THE CLAIM OR USD $100.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">25. Indemnification</h3>
+          <p>
+            You agree to defend, indemnify, and hold harmless Optivium AI Solutions LLC and its
+            affiliates, officers, members, employees, contractors, licensors, and service
+            providers from and against any claims, liabilities, damages, losses, judgments, fines,
+            penalties, costs, and expenses, including reasonable attorneys’ fees, arising out of
+            or related to your use of StackIn, your data, your content, your violation of these
+            terms, or your violation of any law or third-party rights.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">26. Dispute Resolution; Arbitration; Class Action Waiver</h3>
+          <p>
+            To the maximum extent permitted by law, you and Optivium AI Solutions LLC agree to try
+            to resolve disputes informally first. Except for disputes that qualify for small claims
+            court, disputes that are not resolved informally will be resolved on an individual basis
+            through binding arbitration instead of in court before a judge or jury. The Federal
+            Arbitration Act and federal arbitration law govern the interpretation and enforcement of
+            this section. Unless applicable law requires otherwise, the arbitration will be
+            administered by the American Arbitration Association under its applicable consumer
+            arbitration rules, as modified by these terms.
+          </p>
+          <p>
+            You and we each waive any right to participate in a class action, class arbitration,
+            private attorney general action, or other representative proceeding. If applicable law
+            does not allow arbitration or class action waiver for a particular claim, that claim
+            will proceed only to the extent required by law and the remainder of this section will
+            still apply as far as permitted.
+          </p>
+          <p>
+            Nothing in this section prevents either party from seeking qualifying small claims
+            relief or temporary or preliminary injunctive relief in a court of competent
+            jurisdiction to protect intellectual property, confidential information, security, or
+            data pending completion of arbitration.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">27. Governing Law</h3>
+          <p>
+            Except to the extent preempted by applicable federal law or otherwise required by
+            mandatory law, these terms are governed by the laws of the state in which Optivium AI
+            Solutions LLC is organized, without regard to conflict-of-law rules. If a dispute is
+            permitted to proceed in court rather than arbitration, you and we consent to the
+            personal jurisdiction of the state and federal courts located in that state, subject to
+            any non-waivable rights you may have under applicable law.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">28. Updates to These Terms</h3>
+          <p>
+            We may update these terms from time to time. If we make material changes, we may
+            provide notice by updating the date above, posting updated terms in the app, emailing
+            you, or using other reasonable means. Your continued use of StackIn after updated terms
+            become effective constitutes acceptance of the revised terms.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">29. Miscellaneous</h3>
+          <p>
+            These terms, together with any incorporated policies or additional terms presented to
+            you, form the entire agreement between you and us regarding StackIn. If any provision
+            is held unenforceable, the remaining provisions will remain in effect. Our failure to
+            enforce any provision is not a waiver. We may assign these terms in connection with a
+            merger, acquisition, corporate reorganization, or sale of assets. Except as expressly
+            stated in these terms, there are no third-party beneficiaries. Sections that by their
+            nature should survive termination will survive termination.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">30. Contact Information</h3>
+          <p>Optivium AI Solutions LLC</p>
+          <p>
+            For support, legal notices, or terms-related questions, please use the contact
+            information provided through StackIn or our official business contact channels,
+            including the contact information we make available at stackin-app.com.
+          </p>
+        </section>
+
+        <section className="mt-6 border-t pt-4 text-center">
+          <p className="italic">
+            By using StackIn, you acknowledge that you have read and understood these Terms and
+            Conditions, that StackIn provides organizational and informational tools only, and that
+            you are responsible for reviewing and verifying any output before relying on it.
+          </p>
+        </section>
+      </div>
+
+      {showCloseButton && onClose ? (
+        <div className="border-t px-6 py-4">
+          <Button className="w-full" onClick={onClose} type="button">
+            Done
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  )
+}

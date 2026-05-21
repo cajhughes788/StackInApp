@@ -1,0 +1,19 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "subscription",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "pendingAccountDeletion",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "scheduledDeletionAt",
+          "order": "ASCENDING"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

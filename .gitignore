@@ -1,0 +1,105 @@
+# ----------------------------------------------------------
+# 🧹 GLOBAL IGNORE RULES
+# Optimized for Next.js + Firebase + Capacitor + TS Monorepo
+# ----------------------------------------------------------
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+firebase-debug.log*
+firebase-debug.*.log*
+
+# Firebase cache and artifacts
+.firebase/
+.firebaserc
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Test coverage and reports
+coverage/
+.nyc_output/
+lib-cov/
+
+# Build / dist outputs
+dist/
+out/
+build/
+.cache/
+.next/
+
+# Dependency directories
+node_modules/
+bower_components/
+
+# Compiled addons and intermediates
+build/Release/
+.lock-wscript
+.grunt/
+.tmp/
+
+# ---------------------------------------
+# 🧠 Prevent stale compiled artifacts
+# ---------------------------------------
+# Never commit compiled JS or type files
+**/*.js
+**/*.d.ts
+**/*.js.map
+
+# But keep TypeScript sources
+!**/*.ts
+!**/*.tsx
+
+# ---------------------------------------
+# 🧱 Environment & Secrets
+# ---------------------------------------
+.env
+.env.*
+!.env.example
+
+# Capacitor generated web output (use next export instead)
+android/app/src/main/assets/public/
+ios/App/App/public/
+
+# Optional npm cache directory
+.npm/
+.eslintcache
+.yarn-integrity
+
+# REPL / history
+.node_repl_history
+
+# npm pack output
+*.tgz
+
+# ---------------------------------------
+# 💻 IDE / OS files
+# ---------------------------------------
+.vscode/
+.vs/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+*.lnk
+pbpaste
+traces/
+
+# ---------------------------------------
+# 🧩 Shared project rules
+# ---------------------------------------
+# Prevent stale JS in shared and workspace folders
+../shared/**/*.js
+../shared/**/*.d.ts
+../shared/**/*.js.map
+
+# ---------------------------------------
+# 🔍 Miscellaneous tooling
+# ---------------------------------------
+.dataconnect/
