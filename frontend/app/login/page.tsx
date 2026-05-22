@@ -19,6 +19,8 @@ import { Capacitor } from "@capacitor/core";
 const STACKIN_WEBSITE_SIGNUP_URL =
     process.env.NEXT_PUBLIC_STACKIN_WEBSITE_SIGNUP_URL?.trim() ||
     "https://stackin-app.com/signup";
+const NATIVE_SIGNUP_SOURCE_PARAM = "source";
+const NATIVE_SIGNUP_SOURCE_VALUE = "ios-app";
 const NATIVE_SIGNUP_ALLOWED_COUNTRIES = new Set((process.env.NEXT_PUBLIC_NATIVE_SIGNUP_ALLOWED_COUNTRIES ?? "US")
     .split(",")
     .map((value) => value.trim().toUpperCase())
@@ -155,6 +157,21 @@ function getSignupOpenErrorCopy(error: unknown) {
     };
 }
 
+function buildSignupUrl(isNativeApp: boolean) {
+    if (!isNativeApp) {
+        return STACKIN_WEBSITE_SIGNUP_URL;
+    }
+    try {
+        const signupUrl = new URL(STACKIN_WEBSITE_SIGNUP_URL);
+        signupUrl.searchParams.set(NATIVE_SIGNUP_SOURCE_PARAM, NATIVE_SIGNUP_SOURCE_VALUE);
+        return signupUrl.toString();
+    }
+    catch {
+        const separator = STACKIN_WEBSITE_SIGNUP_URL.includes("?") ? "&" : "?";
+        return `${STACKIN_WEBSITE_SIGNUP_URL}${separator}${NATIVE_SIGNUP_SOURCE_PARAM}=${encodeURIComponent(NATIVE_SIGNUP_SOURCE_VALUE)}`;
+    }
+}
+
 export default function LoginPage() {
     const router = useRouter();
     const { toast } = useToast();
@@ -165,6 +182,7 @@ export default function LoginPage() {
     const [openingSignup, setOpeningSignup] = useState(false);
     const [showNativeHelp, setShowNativeHelp] = useState(false);
     const isNativeApp = Capacitor.isNativePlatform();
+    const signupUrl = buildSignupUrl(isNativeApp);
     const [nativeSignupAllowed, setNativeSignupAllowed] = useState(() => !isNativeApp);
     const showCreateAccount = !isNativeApp || nativeSignupAllowed;
     const showNativeWebsiteFirstMessage = isNativeApp && !nativeSignupAllowed;
@@ -183,11 +201,11 @@ export default function LoginPage() {
             if (isNativeApp) {
                 const { Browser } = await import("@capacitor/browser");
                 await Browser.open({
-                    url: STACKIN_WEBSITE_SIGNUP_URL,
+                    url: signupUrl,
                 });
                 return;
             }
-            window.open(STACKIN_WEBSITE_SIGNUP_URL, "_blank", "noopener,noreferrer");
+            window.open(signupUrl, "_blank", "noopener,noreferrer");
         }
         catch (err: any) {
             const copy = getSignupOpenErrorCopy(err);

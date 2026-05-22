@@ -29,14 +29,19 @@ const websiteSubscribeUrl =
 const websiteBaseUrl = new URL(websiteSubscribeUrl).origin;
 const websitePricingUrl = process.env.STACKIN_WEBSITE_PRICING_URL?.trim() ||
     new URL("/#pricing", websiteBaseUrl).toString();
+const CHECKOUT_SOURCE_PARAM = "source";
+const CHECKOUT_SOURCE_VALUES = ["ios-app"] as const;
+type CheckoutSource = (typeof CHECKOUT_SOURCE_VALUES)[number];
 
 const CreateCheckoutSessionSchema = z.object({
     tier: z.enum(["w2_basic", "independent_basic", "hybrid_plus"]),
+    source: z.enum(CHECKOUT_SOURCE_VALUES).optional(),
 });
 type BillingSubscriptionDoc = SubscriptionDoc & {
     pendingCheckoutSessionId?: string;
     pendingCheckoutExpiresAt?: number;
     pendingCheckoutUrl?: string;
+    pendingCheckoutSource?: CheckoutSource;
 };
 
 function getStripeClient(): Stripe {
@@ -49,7 +54,7 @@ function getStripeClient(): Stripe {
 function hasStripeSubscriptionHistory(subscription: SubscriptionDoc | null): boolean {
     return Boolean(subscription?.stripeSubscriptionId || subscription?.stripeCustomerId);
 }
-function isReusablePendingCheckout(subscription: BillingSubscriptionDoc | null, now: number): subscription is BillingSubscriptionDoc & {
+function isReusablePendingCheckout(subscription: BillingSubscriptionDoc | null, now: number, source?: CheckoutSource): subscription is BillingSubscriptionDoc & {
     pendingCheckoutSessionId: string;
     pendingCheckoutExpiresAt: number;
     pendingCheckoutUrl: string;
@@ -58,6 +63,7 @@ function isReusablePendingCheckout(subscription: BillingSubscriptionDoc | null, 
         typeof subscription.pendingCheckoutSessionId === "string" &&
         typeof subscription.pendingCheckoutUrl === "string" &&
         typeof subscription.pendingCheckoutExpiresAt === "number" &&
+        subscription.pendingCheckoutSource === source &&
         subscription.pendingCheckoutExpiresAt > now + REUSABLE_CHECKOUT_BUFFER_MS);
 }
 function hasBlockingLocalSubscription(subscription: BillingSubscriptionDoc | null): boolean {
@@ -91,8 +97,17 @@ async function clearPendingCheckout(subscriptionRef: FirebaseFirestore.DocumentR
         pendingCheckoutSessionId: FieldValue.delete(),
         pendingCheckoutUrl: FieldValue.delete(),
         pendingCheckoutExpiresAt: FieldValue.delete(),
+        pendingCheckoutSource: FieldValue.delete(),
         updatedAt: Date.now(),
     }, { merge: true });
+}
+
+function buildCheckoutSuccessUrl(source?: CheckoutSource): string {
+    const successUrl = new URL("/checkout/success", websiteBaseUrl);
+    if (source) {
+        successUrl.searchParams.set(CHECKOUT_SOURCE_PARAM, source);
+    }
+    return successUrl.toString();
 }
 
 export async function createCheckoutSessionHandler(req: Request, res: Response): Promise<void> {
@@ -114,6 +129,7 @@ export async function createCheckoutSessionHandler(req: Request, res: Response):
             return;
         }
         const tier: SubscriptionTier = parsed.data.tier;
+        const source = parsed.data.source;
         const stripe = getStripeClient();
         const currentSubscriptionRef = db
             .collection("users")
@@ -131,7 +147,7 @@ export async function createCheckoutSessionHandler(req: Request, res: Response):
             if (hasBlockingLocalSubscription(existingSubscription)) {
                 throw createHttpError(409, "This account already has an active subscription.");
             }
-            if (isReusablePendingCheckout(existingSubscription, now)) {
+            if (isReusablePendingCheckout(existingSubscription, now, source)) {
                 return {
                     kind: "reuse" as const,
                     sessionId: existingSubscription.pendingCheckoutSessionId,
@@ -139,7 +155,8 @@ export async function createCheckoutSessionHandler(req: Request, res: Response):
                 };
             }
             if (typeof existingSubscription?.pendingCheckoutExpiresAt === "number" &&
-                existingSubscription.pendingCheckoutExpiresAt > now) {
+                existingSubscription.pendingCheckoutExpiresAt > now &&
+                existingSubscription.pendingCheckoutSource === source) {
                 throw createHttpError(409, "A checkout session is already in progress for this account.");
             }
             transaction.set(currentSubscriptionRef, {
@@ -147,6 +164,7 @@ export async function createCheckoutSessionHandler(req: Request, res: Response):
                 updatedAt: now,
                 pendingCheckoutSessionId: FieldValue.delete(),
                 pendingCheckoutUrl: FieldValue.delete(),
+                pendingCheckoutSource: FieldValue.delete(),
                 pendingCheckoutExpiresAt: now + PENDING_CHECKOUT_LOCK_MS,
             }, { merge: true });
             return {
@@ -189,7 +207,7 @@ export async function createCheckoutSessionHandler(req: Request, res: Response):
             }
         }
         const priceId = getStripePriceIdForTier(tier);
-        const successUrl = new URL("/checkout/success", websiteBaseUrl).toString();
+        const successUrl = buildCheckoutSuccessUrl(source);
         const shouldApplyIntroTrial = !hasStripeSubscriptionHistory(existingSubscription);
 
         const session = await stripe.checkout.sessions.create({
@@ -210,11 +228,13 @@ export async function createCheckoutSessionHandler(req: Request, res: Response):
             metadata: {
                 uid,
                 tier,
+                ...(source ? { source } : {}),
             },
             subscription_data: {
                 metadata: {
                     uid,
                     tier,
+                    ...(source ? { source } : {}),
                 },
                 ...(shouldApplyIntroTrial
                     ? {
@@ -237,6 +257,7 @@ export async function createCheckoutSessionHandler(req: Request, res: Response):
                 : {}),
             pendingCheckoutSessionId: session.id,
             pendingCheckoutUrl: session.url,
+            ...(source ? { pendingCheckoutSource: source } : {}),
             pendingCheckoutExpiresAt: typeof session.expires_at === "number"
                 ? session.expires_at * 1000
                 : Date.now() + PENDING_CHECKOUT_LOCK_MS,
