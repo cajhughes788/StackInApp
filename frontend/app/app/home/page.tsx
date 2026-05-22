@@ -209,9 +209,6 @@ export default function HomePage() {
             supportsExpenses,
         });
         hydrateEntries(activeWorkspaceId, entriesPeriodId);
-        void useEntriesStore
-            .getState()
-            .refreshFromBackend(activeWorkspaceId, entriesPeriodId, { force: true });
         if (supportsExpenses) {
             // Expenses use monthly periodId "YYYY-MM"
             const now = new Date();

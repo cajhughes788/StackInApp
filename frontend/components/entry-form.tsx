@@ -529,7 +529,15 @@ export default function EntryForm() {
           {/* Date */}
           <div>
             <Label htmlFor="date">Date</Label>
-            <Input id="date" type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} required/>
+            <Input
+              id="date"
+              type="date"
+              data-stackin-date-input="true"
+              className="w-full min-w-0"
+              value={form.date}
+              onChange={(e) => setForm({ ...form, date: e.target.value })}
+              required
+            />
           </div>
 
           {/* W-2 Tips */}

@@ -182,6 +182,33 @@
     color-scheme: light;
   }
 
+  [data-stackin-date-input="true"] {
+    width: 100%;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  [data-stackin-date-input="true"]::-webkit-date-and-time-value,
+  [data-stackin-date-input="true"]::-webkit-datetime-edit,
+  [data-stackin-date-input="true"]::-webkit-datetime-edit-fields-wrapper,
+  [data-stackin-date-input="true"]::-webkit-datetime-edit-text,
+  [data-stackin-date-input="true"]::-webkit-datetime-edit-month-field,
+  [data-stackin-date-input="true"]::-webkit-datetime-edit-day-field,
+  [data-stackin-date-input="true"]::-webkit-datetime-edit-year-field {
+    white-space: nowrap;
+    line-height: 1;
+  }
+
+  [data-stackin-date-input="true"]::-webkit-date-and-time-value,
+  [data-stackin-date-input="true"]::-webkit-datetime-edit-fields-wrapper {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    width: 100%;
+  }
+
   .stackin-safe-header {
     min-height: var(--stackin-header-total-height);
     background-color: var(--color-secondary);

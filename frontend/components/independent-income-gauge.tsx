@@ -33,6 +33,7 @@ export default function IndependentIncomeGauge() {
     activeWorkspaceId != null
       ? (entriesEntry?.status ?? "idle") === "loading"
       : true
+  const entriesRefreshing = entriesEntry?.isRefreshing ?? false
   const settingsLoading =
     activeWorkspaceId != null
       ? (settingsEntry?.status ?? "idle") === "loading"
@@ -136,7 +137,7 @@ export default function IndependentIncomeGauge() {
 
   return (
     <div className="bg-card rounded-lg border p-4 shadow-sm sm:p-6">
-      {entriesLoading || settingsLoading ? (
+      {entriesRefreshing || settingsLoading ? (
         <div className="mb-3 text-xs text-muted-foreground">
           Refreshing monthly income…
         </div>

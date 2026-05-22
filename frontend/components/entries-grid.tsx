@@ -106,6 +106,7 @@ export default function EntriesGrid() {
     const entriesLoading = activeWorkspaceId != null
         ? (entriesEntry?.status ?? "idle") === "loading"
         : true;
+    const entriesRefreshing = entriesEntry?.isRefreshing ?? false;
     const settings = settingsEntry?.data ?? null;
     const settingsLoading = activeWorkspaceId != null
         ? (settingsEntry?.status ?? "idle") === "loading"
@@ -816,7 +817,7 @@ export default function EntriesGrid() {
       </PopoverContent>
     </Popover>);
     return (<div ref={gridRootRef} data-entries-grid-root="true" className="overflow-hidden rounded-lg border bg-card shadow-sm">
-      {entriesLoading ? (<div className="border-b border-border px-4 py-2 text-xs text-muted-foreground">
+      {entriesRefreshing ? (<div className="border-b border-border px-4 py-2 text-xs text-muted-foreground">
           Refreshing entries…
         </div>) : null}
 

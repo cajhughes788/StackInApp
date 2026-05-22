@@ -22,6 +22,7 @@ export default function IncomeGauge() {
     const entriesLoading = activeWorkspaceId != null
         ? (entriesEntry?.status ?? "idle") === "loading"
         : true;
+    const entriesRefreshing = entriesEntry?.isRefreshing ?? false;
     const settingsEntry = useSettingsStore((s) => activeWorkspaceId ? s.byWorkspaceId[activeWorkspaceId] : undefined);
     const settings = settingsEntry?.data ?? null;
     const settingsLoading = activeWorkspaceId != null
@@ -148,8 +149,7 @@ export default function IncomeGauge() {
         !activeWorkspaceId ||
         !activeWorkspace ||
         (entriesLoading && !hasRenderableEntries) ||
-        (settingsLoading && !hasRenderableSettings) ||
-        taxLoading) {
+        (settingsLoading && !hasRenderableSettings)) {
         return (<div className="p-4 text-gray-400 text-sm">
         Loading pay summary…
       </div>);
@@ -158,7 +158,7 @@ export default function IncomeGauge() {
     // RENDER
     // ------------------------------------------------------------
     return (<div ref={previewRef} className="bg-card rounded-lg border p-4 shadow-sm sm:p-6">
-      {entriesLoading || settingsLoading ? (<div className="mb-3 text-xs text-muted-foreground">Refreshing pay summary…</div>) : null}
+      {entriesRefreshing || settingsLoading ? (<div className="mb-3 text-xs text-muted-foreground">Refreshing pay summary…</div>) : null}
 
       <h2 className="mb-4 text-lg font-semibold">Current Pay Period</h2>
 

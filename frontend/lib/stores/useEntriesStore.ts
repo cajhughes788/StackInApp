@@ -27,6 +27,7 @@ type EntriesWorkspaceEntry = {
     entries: EntryType[];
     periodId: string | null;
     status: "idle" | "loading" | "ready" | "error";
+    isRefreshing: boolean;
     lastBackendSync: number | null;
     hasHydrated: boolean;
 };
@@ -98,6 +99,7 @@ const getWorkspaceEntry = (byWorkspaceId: Record<WorkspaceId, EntriesWorkspaceEn
     entries: [],
     periodId: null,
     status: "idle",
+    isRefreshing: false,
     lastBackendSync: null,
     hasHydrated: false,
 };
@@ -151,6 +153,7 @@ export const useEntriesStore = create<EntriesStoreState>((set, get) => ({
                 [workspaceId]: {
                     ...getWorkspaceEntry(state.byWorkspaceId, workspaceId),
                     status: "loading",
+                    isRefreshing: false,
                     periodId,
                 },
             },
@@ -186,6 +189,7 @@ export const useEntriesStore = create<EntriesStoreState>((set, get) => ({
                         ...getWorkspaceEntry(state.byWorkspaceId, workspaceId),
                         entries: mergedCachedEntries,
                         status: "ready",
+                        isRefreshing: false,
                         lastBackendSync: cached.lastBackendSync,
                         periodId,
                     },
@@ -213,6 +217,7 @@ export const useEntriesStore = create<EntriesStoreState>((set, get) => ({
                         ...getWorkspaceEntry(state.byWorkspaceId, workspaceId),
                         entries: [],
                         status: "error",
+                        isRefreshing: false,
                         periodId,
                     },
                 },
@@ -235,12 +240,16 @@ export const useEntriesStore = create<EntriesStoreState>((set, get) => ({
             force: force ?? false,
             sessionVersion,
         });
+        const existing = getWorkspaceEntry(get().byWorkspaceId, workspaceId);
+        const preserveCachedView = existing.entries.length > 0 &&
+            existing.periodId === periodId;
         set((state) => ({
             byWorkspaceId: {
                 ...state.byWorkspaceId,
                 [workspaceId]: {
                     ...getWorkspaceEntry(state.byWorkspaceId, workspaceId),
-                    status: "loading",
+                    status: preserveCachedView ? "ready" : "loading",
+                    isRefreshing: preserveCachedView,
                     periodId,
                 },
             },
@@ -268,6 +277,7 @@ export const useEntriesStore = create<EntriesStoreState>((set, get) => ({
                         ...getWorkspaceEntry(state.byWorkspaceId, workspaceId),
                         entries: mergedEntries,
                         status: "ready",
+                        isRefreshing: false,
                         lastBackendSync: result.lastBackendSync,
                         periodId,
                     },
@@ -288,7 +298,8 @@ export const useEntriesStore = create<EntriesStoreState>((set, get) => ({
                     ...state.byWorkspaceId,
                     [workspaceId]: {
                         ...getWorkspaceEntry(state.byWorkspaceId, workspaceId),
-                        status: "error",
+                        status: preserveCachedView ? "ready" : "error",
+                        isRefreshing: false,
                         periodId,
                     },
                 },
@@ -314,6 +325,7 @@ export const useEntriesStore = create<EntriesStoreState>((set, get) => ({
                     entries,
                     periodId: nextPeriodId,
                     status: "ready",
+                    isRefreshing: false,
                     lastBackendSync: nextLastBackendSync,
                 },
             },
