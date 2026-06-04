@@ -26,7 +26,6 @@ import { usePayStubsStore } from "@/lib/stores/usePaystubsStore";
 import { getCalendarMonthBucketAt, getCurrentCalendarMonthPeriodAt, getCurrentEntryPeriod } from "@shared/payPeriods";
 import ExpenseForm from "@/components/expense-form";
 import ExpensesGrid from "@/components/expenses-grid";
-import ReceiptCapturePanel from "@/components/receipt-capture-panel";
 import VenmoImportPanel from "@/components/venmo-import-panel";
 import {
     useExpensesData,
@@ -294,7 +293,7 @@ export default function HomePage() {
 
         {supportsExpenses ? (<div className="space-y-3">
             {showVenmoImportPanel ? <VenmoImportPanel /> : null}
-            {mode === "expenses" ? <ReceiptCapturePanel /> : null}
+            {/* ReceiptCapturePanel removed — receipt attachment now happens inside ExpenseForm */}
           </div>) : null}
 
         {/* Mode */}

@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Info, Minus, Plus } from "lucide-react"
+import { Camera, ImagePlus, Info, Minus, Paperclip, Plus, X } from "lucide-react"
 
 import { getBusinessMileageRate } from "@shared/businessMileage"
 import { getCalendarMonthBucketFromDate } from "@shared/payPeriods"
@@ -33,6 +33,21 @@ import * as expensesService from "@/lib/domain/expenseService"
 import { useExpenseMemoryStore } from "@/lib/stores/useExpenseMemoryStore"
 import { useSettingsStore } from "@/lib/stores/useSettingsStore"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
+import { createReceiptAsset } from "@/lib/api/receiptAssetsApi"
+import { analyzeReceiptImageQuality } from "@/lib/receipts/imageQuality"
+import {
+  loadReceiptImage,
+  normalizeExifOrientation,
+} from "@/lib/receipts/imagePipeline"
+import {
+  buildClientReceiptDerivedPath,
+  buildClientReceiptStoragePath,
+  prepareReceiptUploadFile,
+  uploadReceiptAssetToStorage,
+} from "@/lib/receipts/receiptAssetStorage"
+import { createReceiptPreviewAsset } from "@/lib/receipts/receiptDraft"
+import { captureReceiptImage, isNativeCameraAvailable } from "@/lib/native/camera"
+import type { ReceiptAsset } from "@shared/schemas/receiptAsset"
 
 const ExpenseInputSchema = ExpenseInput
 const VEHICLE_MODE_STORAGE_KEY = "stackin.vehicleExpenseMode"
@@ -192,6 +207,17 @@ export default function ExpenseForm() {
   const [descriptionFocused, setDescriptionFocused] = useState(false)
   const lastWorkspaceIdRef = useRef<string | null>(null)
 
+  // Receipt attachment state
+  const [attachedReceiptAsset, setAttachedReceiptAsset] = useState<ReceiptAsset | null>(null)
+  const [receiptUploading, setReceiptUploading] = useState(false)
+  const [receiptError, setReceiptError] = useState<string | null>(null)
+  const [isNativeCamera, setIsNativeCamera] = useState(false)
+  const receiptFileInputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    setIsNativeCamera(isNativeCameraAvailable())
+  }, [])
+
   const {
     hydrateFromStorageOnce,
     getVendorSuggestions,
@@ -230,6 +256,8 @@ export default function ExpenseForm() {
       setVendorFocused(false)
       setDescriptionFocused(false)
       setExpanded(false)
+      setAttachedReceiptAsset(null)
+      setReceiptError(null)
       return
     }
 
@@ -569,6 +597,102 @@ export default function ExpenseForm() {
     }
   }, [])
 
+  async function processReceiptFile(file: File) {
+    if (!activeWorkspaceId) return
+    const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]
+    const isAllowed =
+      ALLOWED_TYPES.includes(file.type.toLowerCase()) ||
+      /\.(jpe?g|png|webp|heic)$/i.test(file.name)
+    if (!isAllowed) {
+      setReceiptError("Unsupported file type. Please use JPEG, PNG, WebP, or HEIC.")
+      return
+    }
+    if (file.size > 30 * 1024 * 1024) {
+      setReceiptError("Image is too large. Please use an image under 30 MB.")
+      return
+    }
+
+    setReceiptUploading(true)
+    setReceiptError(null)
+
+    try {
+      let decoded = await loadReceiptImage(file)
+      decoded = await normalizeExifOrientation(file, decoded)
+
+      const quality = await analyzeReceiptImageQuality(file, decoded)
+      if (quality.qualityStatus === "bad") {
+        throw new Error(quality.warnings[0] || "This image is too blurry or unclear. Please retake the photo.")
+      }
+
+      const assetId = `receipt-${crypto.randomUUID?.() ?? Date.now()}`
+      const uploadFile = await prepareReceiptUploadFile(file, decoded)
+      decoded.close()
+
+      const originalPath = buildClientReceiptStoragePath(activeWorkspaceId, assetId, file.name)
+      const previewPath = buildClientReceiptDerivedPath(activeWorkspaceId, assetId, "preview")
+      const thumbPath = buildClientReceiptDerivedPath(activeWorkspaceId, assetId, "thumb")
+
+      await Promise.all([
+        createReceiptAsset(activeWorkspaceId, {
+          id: assetId,
+          fileName: file.name,
+          mimeType: uploadFile.type || "image/jpeg",
+          sizeBytes: uploadFile.size,
+          captureSource: "upload",
+          quality: quality.quality,
+          blurScore: quality.blurScore,
+          glareScore: quality.glareScore,
+          qualityStatus: quality.qualityStatus,
+          qualityWarnings: quality.warnings,
+          width: quality.width,
+          height: quality.height,
+        }),
+        uploadReceiptAssetToStorage(uploadFile, originalPath, { resolveDownloadUrl: false }),
+      ])
+
+      // Preview/thumbnail uploads in background — don't block save
+      void uploadReceiptAssetToStorage(uploadFile, previewPath).catch(() => {})
+      void uploadReceiptAssetToStorage(uploadFile, thumbPath).catch(() => {})
+
+      const asset: ReceiptAsset = {
+        id: assetId,
+        fileName: file.name,
+        mimeType: uploadFile.type || "image/jpeg",
+        sizeBytes: uploadFile.size,
+        version: 1,
+        originalStoragePath: originalPath,
+        storagePath: originalPath,
+        previewStoragePath: previewPath,
+        thumbnailStoragePath: thumbPath,
+        captureSource: "upload",
+        qualityStatus: quality.qualityStatus,
+        qualityWarnings: quality.warnings,
+        dataUrl: URL.createObjectURL(file),
+      }
+      setAttachedReceiptAsset(asset)
+    } catch (err) {
+      setReceiptError(err instanceof Error ? err.message : "Failed to attach receipt.")
+    } finally {
+      setReceiptUploading(false)
+    }
+  }
+
+  async function handleReceiptFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file) return
+    await processReceiptFile(file)
+    event.target.value = ""
+  }
+
+  async function handleNativeReceiptCapture(source: "camera" | "photos") {
+    try {
+      const file = await captureReceiptImage(source)
+      if (file) await processReceiptFile(file)
+    } catch (err) {
+      setReceiptError(err instanceof Error ? err.message : "Unable to open camera.")
+    }
+  }
+
   const buildPayload = useCallback(() => {
     const normalizedAccount =
       resolveExpenseCategoryLabel(form.account, customExpenseCategories) ??
@@ -615,6 +739,7 @@ export default function ExpenseForm() {
         fuel: fuelAmount > 0 ? fuelAmount : undefined,
         parkingAndTolls:
           parkingAndTollsAmount > 0 ? parkingAndTollsAmount : undefined,
+        receiptAssetId: attachedReceiptAsset?.id,
       }
     }
 
@@ -648,8 +773,10 @@ export default function ExpenseForm() {
       vehicleExpenseMode: isVehicleDirectMode
         ? ("direct_expense" as const)
         : undefined,
+      receiptAssetId: attachedReceiptAsset?.id,
     }
   }, [
+    attachedReceiptAsset,
     businessMiles,
     calculatedVehicleAmount,
     customExpenseCategories,
@@ -697,6 +824,8 @@ export default function ExpenseForm() {
         setDescriptionFocused(false)
         setExpanded(false)
         dismissKeyboard()
+        setAttachedReceiptAsset(null)
+        setReceiptError(null)
         setSubmitting(false)
 
         void createExpensePromise
@@ -1220,7 +1349,88 @@ export default function ExpenseForm() {
               </>
             )}
 
-            <Button type="submit" disabled={submitting} className="w-full">
+            {/* Receipt attachment */}
+            <div className="space-y-2 rounded-xl border border-dashed border-border px-4 py-3">
+              <div className="flex items-center gap-2">
+                <Paperclip className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-medium text-foreground">
+                  Attach Receipt
+                  <span className="ml-1 text-xs font-normal text-muted-foreground">(Optional)</span>
+                </span>
+              </div>
+
+              {attachedReceiptAsset ? (
+                <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2">
+                  {attachedReceiptAsset.dataUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={attachedReceiptAsset.dataUrl}
+                      alt="Receipt preview"
+                      className="h-10 w-10 rounded object-cover"
+                    />
+                  ) : null}
+                  <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                    {attachedReceiptAsset.fileName}
+                  </span>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded-full p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    onClick={() => {
+                      if (attachedReceiptAsset.dataUrl?.startsWith("blob:")) {
+                        URL.revokeObjectURL(attachedReceiptAsset.dataUrl)
+                      }
+                      setAttachedReceiptAsset(null)
+                      setReceiptError(null)
+                    }}
+                    aria-label="Remove receipt"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : receiptUploading ? (
+                <p className="text-sm text-muted-foreground">Uploading receipt...</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    ref={receiptFileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleReceiptFileChange}
+                  />
+                  {isNativeCamera ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void handleNativeReceiptCapture("camera")}
+                    >
+                      <Camera className="h-4 w-4" />
+                      Camera
+                    </Button>
+                  ) : null}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      isNativeCamera
+                        ? void handleNativeReceiptCapture("photos")
+                        : receiptFileInputRef.current?.click()
+                    }
+                  >
+                    <ImagePlus className="h-4 w-4" />
+                    Choose Image
+                  </Button>
+                </div>
+              )}
+
+              {receiptError ? (
+                <p className="text-xs text-destructive">{receiptError}</p>
+              ) : null}
+            </div>
+
+            <Button type="submit" disabled={submitting || receiptUploading} className="w-full">
               {submitting ? "Saving..." : "Add Expense"}
             </Button>
           </form>

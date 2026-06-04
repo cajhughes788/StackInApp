@@ -36,7 +36,7 @@ export {
   updateReceiptDraft,
   commitReceiptDraft,
   checkDuplicateExpense,
-  analyzeReceipt,
+  // analyzeReceipt, // OCR_DISABLED — Textract removed from active paths. Code preserved in api.ts for future reactivation.
   createCheckoutSession,
   getSubscription,
   getAppBootstrap,
