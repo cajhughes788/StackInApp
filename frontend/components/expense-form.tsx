@@ -257,8 +257,7 @@ export default function ExpenseForm() {
       setVendorFocused(false)
       setDescriptionFocused(false)
       setExpanded(false)
-      setAttachedReceiptAsset(null)
-      setReceiptError(null)
+      clearAttachedReceipt()
       return
     }
 
@@ -589,6 +588,19 @@ export default function ExpenseForm() {
     [activeWorkspaceId]
   )
 
+  // Revoke the blob: URL before clearing the receipt state so the browser can
+  // release the backing file bytes. Must be called instead of setAttachedReceiptAsset(null)
+  // directly whenever the asset is discarded outside of the user pressing ✕.
+  const clearAttachedReceipt = useCallback(() => {
+    setAttachedReceiptAsset((current) => {
+      if (current?.dataUrl?.startsWith("blob:")) {
+        URL.revokeObjectURL(current.dataUrl)
+      }
+      return null
+    })
+    setReceiptError(null)
+  }, [])
+
   const dismissKeyboard = useCallback(() => {
     if (typeof document === "undefined") return
 
@@ -856,8 +868,7 @@ export default function ExpenseForm() {
         setDescriptionFocused(false)
         setExpanded(false)
         dismissKeyboard()
-        setAttachedReceiptAsset(null)
-        setReceiptError(null)
+        clearAttachedReceipt()
         setSubmitting(false)
 
         void createExpensePromise
@@ -884,6 +895,7 @@ export default function ExpenseForm() {
     [
       activeWorkspaceId,
       buildPayload,
+      clearAttachedReceipt,
       dismissKeyboard,
       form,
       submitting,
