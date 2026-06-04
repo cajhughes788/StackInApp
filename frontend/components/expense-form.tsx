@@ -621,9 +621,12 @@ export default function ExpenseForm() {
     // Tracks whether the Firestore record was written so the catch can delete it
     // if the subsequent GCS upload fails (partial-failure cleanup).
     let createdAssetId: string | null = null
+    // Hoisted so the finally block can always close it, regardless of which
+    // step throws. decoded.close() frees the GPU-backed ImageBitmap.
+    let decoded: Awaited<ReturnType<typeof loadReceiptImage>> | null = null
 
     try {
-      let decoded = await loadReceiptImage(file)
+      decoded = await loadReceiptImage(file)
       decoded = await normalizeExifOrientation(file, decoded)
 
       const quality = await analyzeReceiptImageQuality(file, decoded)
@@ -633,7 +636,10 @@ export default function ExpenseForm() {
 
       const assetId = `receipt-${crypto.randomUUID?.() ?? Date.now()}`
       const uploadFile = await prepareReceiptUploadFile(file, decoded)
+      // decoded is no longer needed after the upload file is prepared — close
+      // it now so the bitmap is freed before the network calls begin.
       decoded.close()
+      decoded = null
 
       const originalPath = buildClientReceiptStoragePath(workspaceId, assetId, file.name)
       const previewPath = buildClientReceiptDerivedPath(workspaceId, assetId, "preview")
@@ -696,6 +702,9 @@ export default function ExpenseForm() {
       }
       setReceiptError(err instanceof Error ? err.message : "Failed to attach receipt.")
     } finally {
+      // Always release the ImageBitmap — covers every throw path including
+      // bad-quality early exits and canvas errors in prepareReceiptUploadFile.
+      decoded?.close()
       setReceiptUploading(false)
     }
   }
