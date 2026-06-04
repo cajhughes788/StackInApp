@@ -2,11 +2,12 @@ import { onSchedule } from "firebase-functions/v2/scheduler"
 import { db, storage } from "../admin"
 
 // Assets older than 48 hours with no linked draft or expense are orphans.
+// The job runs daily so the effective deletion window is 48–72 hours.
 const ORPHAN_THRESHOLD_MS = 48 * 60 * 60 * 1000
 
 export const cleanupOrphanReceiptAssets = onSchedule(
   {
-    schedule: "0 3 * * 1", // Every Monday at 03:00 UTC
+    schedule: "0 3 * * *", // Daily at 03:00 UTC
     timeZone: "UTC",
     region: "us-central1",
   },
