@@ -42,10 +42,11 @@ import {
 import {
   buildClientReceiptDerivedPath,
   buildClientReceiptStoragePath,
+  prepareReceiptPreviewFile,
+  prepareReceiptThumbnailFile,
   prepareReceiptUploadFile,
   uploadReceiptAssetToStorage,
 } from "@/lib/receipts/receiptAssetStorage"
-import { createReceiptPreviewAsset } from "@/lib/receipts/receiptDraft"
 import { captureReceiptImage, isNativeCameraAvailable } from "@/lib/native/camera"
 import type { ReceiptAsset } from "@shared/schemas/receiptAsset"
 
@@ -656,9 +657,20 @@ export default function ExpenseForm() {
         uploadReceiptAssetToStorage(uploadFile, originalPath, { resolveDownloadUrl: false }),
       ])
 
-      // Preview/thumbnail uploads in background — don't block save
-      void uploadReceiptAssetToStorage(uploadFile, previewPath).catch(() => {})
-      void uploadReceiptAssetToStorage(uploadFile, thumbPath).catch(() => {})
+      // Render and upload preview (max 1400 px) and thumbnail (max 320 px / 120 KB)
+      // in the background — the user can already see the form by this point.
+      void Promise.all([
+        prepareReceiptPreviewFile(file),
+        prepareReceiptThumbnailFile(file),
+      ]).then(([previewFile, thumbFile]) =>
+        Promise.all([
+          uploadReceiptAssetToStorage(previewFile, previewPath, { resolveDownloadUrl: false }),
+          uploadReceiptAssetToStorage(thumbFile, thumbPath, { resolveDownloadUrl: false }),
+        ])
+      ).catch(() => {
+        // Non-fatal — previews/thumbnails are a display optimisation.
+        // The full-resolution original is already uploaded and usable.
+      })
 
       const asset: ReceiptAsset = {
         id: assetId,
