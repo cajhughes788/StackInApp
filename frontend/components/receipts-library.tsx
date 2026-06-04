@@ -1,10 +1,9 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
-import { ImagePlus, ReceiptText } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
+import { ReceiptText } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import ReceiptThumbnail from "@/components/receipt-thumbnail"
 import ReceiptViewerTrigger from "@/components/receipt-viewer-trigger"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
@@ -12,16 +11,6 @@ import { useReceiptDraftsStore } from "@/lib/stores/useReceiptDraftsStore"
 import * as expenseRepository from "@/lib/domain/expenseRepository"
 import { getCalendarMonthBucketFromDate } from "@shared/payPeriods"
 import type { ReceiptDraft } from "@shared/schemas/receiptDraft"
-import { createReceiptAsset, deleteReceiptAsset } from "@/lib/api/receiptAssetsApi"
-import { analyzeReceiptImageQuality } from "@/lib/receipts/imageQuality"
-import { loadReceiptImage, normalizeExifOrientation } from "@/lib/receipts/imagePipeline"
-import {
-  buildClientReceiptDerivedPath,
-  buildClientReceiptStoragePath,
-  prepareReceiptUploadFile,
-  uploadReceiptAssetToStorage,
-} from "@/lib/receipts/receiptAssetStorage"
-import { isNativeCameraAvailable, captureReceiptImage } from "@/lib/native/camera"
 
 function getCurrentMonthValue(): string {
   return getCalendarMonthBucketFromDate(new Date())
@@ -65,11 +54,6 @@ export default function ReceiptsLibrary() {
   const [selectedMonth, setSelectedMonth] = useState<string>(getCurrentMonthValue)
   const [monthExpenses, setMonthExpenses] = useState<any[]>([])
   const [expensesLoading, setExpensesLoading] = useState(false)
-  const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "done" | "error">("idle")
-  const [uploadMessage, setUploadMessage] = useState<string | null>(null)
-  const uploadFileInputRef = useRef<HTMLInputElement | null>(null)
-  const [nativeCamera, setNativeCamera] = useState(false)
-  useEffect(() => { setNativeCamera(isNativeCameraAvailable()) }, [])
   const workspaceState = useWorkspaceStore((state) => state.state)
   const activeWorkspace =
     workspaceState.status === "ready" ? workspaceState.activeWorkspace : null
@@ -192,78 +176,6 @@ export default function ReceiptsLibrary() {
     })
   }, [selectedMonth])
 
-  async function uploadStandaloneReceipt(file: File) {
-    const workspaceId = activeWorkspaceId
-    if (!workspaceId) return
-    const isAllowed =
-      ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"].includes(file.type.toLowerCase()) ||
-      /\.(jpe?g|png|webp|heic)$/i.test(file.name)
-    if (!isAllowed) {
-      setUploadStatus("error")
-      setUploadMessage("Unsupported file type. Please use JPEG, PNG, WebP, or HEIC.")
-      return
-    }
-    if (file.size > 30 * 1024 * 1024) {
-      setUploadStatus("error")
-      setUploadMessage("Image is too large. Please use an image under 30 MB.")
-      return
-    }
-
-    setUploadStatus("uploading")
-    setUploadMessage(null)
-
-    let createdAssetId: string | null = null
-
-    try {
-      let decoded = await loadReceiptImage(file)
-      decoded = await normalizeExifOrientation(file, decoded)
-      const quality = await analyzeReceiptImageQuality(file, decoded)
-      const uploadFile = await prepareReceiptUploadFile(file, decoded)
-      decoded.close()
-
-      const assetId = `receipt-${crypto.randomUUID?.() ?? Date.now()}`
-      const originalPath = buildClientReceiptStoragePath(workspaceId, assetId, file.name)
-      const previewPath = buildClientReceiptDerivedPath(workspaceId, assetId, "preview")
-      const thumbPath = buildClientReceiptDerivedPath(workspaceId, assetId, "thumb")
-
-      await Promise.all([
-        createReceiptAsset(workspaceId, {
-          id: assetId,
-          fileName: file.name,
-          mimeType: uploadFile.type || "image/jpeg",
-          sizeBytes: uploadFile.size,
-          captureSource: "upload",
-          quality: quality.quality,
-          blurScore: quality.blurScore,
-          glareScore: quality.glareScore,
-          qualityStatus: quality.qualityStatus,
-          qualityWarnings: quality.warnings,
-          width: quality.width,
-          height: quality.height,
-        }).then(() => { createdAssetId = assetId }),
-        uploadReceiptAssetToStorage(uploadFile, originalPath, { resolveDownloadUrl: false }),
-      ])
-      void uploadReceiptAssetToStorage(uploadFile, previewPath).catch(() => {})
-      void uploadReceiptAssetToStorage(uploadFile, thumbPath).catch(() => {})
-
-      setUploadStatus("done")
-      setUploadMessage("Receipt saved. Attach it to an expense when you create one.")
-    } catch (err) {
-      if (createdAssetId !== null) {
-        void deleteReceiptAsset(workspaceId, createdAssetId).catch(() => {})
-      }
-      setUploadStatus("error")
-      setUploadMessage(err instanceof Error ? err.message : "Failed to upload receipt.")
-    }
-  }
-
-  async function handleUploadFileChange(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
-    if (!file) return
-    await uploadStandaloneReceipt(file)
-    event.target.value = ""
-  }
-
   if (activeWorkspace?.type !== "independent" || !activeWorkspaceId) {
     return null
   }
@@ -275,7 +187,7 @@ export default function ReceiptsLibrary() {
           <div>
             <h1 className="text-xl font-semibold text-foreground">Receipts</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              This view only shows receipts tied to saved expenses for the month you select.
+              Receipts attached to expenses appear here. To add a receipt, attach one when creating an expense.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -289,36 +201,9 @@ export default function ReceiptsLibrary() {
               />
             </label>
             <Badge variant="outline">{visibleReceipts.length} receipts</Badge>
-            <input
-              ref={uploadFileInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={handleUploadFileChange}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={uploadStatus === "uploading"}
-              onClick={() =>
-                nativeCamera
-                  ? void captureReceiptImage("photos").then((f) => f && uploadStandaloneReceipt(f))
-                  : uploadFileInputRef.current?.click()
-              }
-            >
-              <ImagePlus className="h-4 w-4" />
-              {uploadStatus === "uploading" ? "Uploading..." : "Upload Receipt"}
-            </Button>
           </div>
         </div>
       </div>
-
-      {uploadMessage ? (
-        <p className={`text-sm ${uploadStatus === "error" ? "text-destructive" : "text-emerald-700"}`}>
-          {uploadMessage}
-        </p>
-      ) : null}
 
       {expensesLoading ? (
         <div className="rounded-xl border border-dashed border-border/80 px-5 py-8 text-center text-sm text-muted-foreground">
@@ -331,7 +216,7 @@ export default function ReceiptsLibrary() {
           </div>
           <p className="mt-4 text-base font-medium text-foreground">No receipts for {monthLabel}</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Receipts appear here once they are saved to an expense in this month.
+            Add a receipt by creating an expense and using the &quot;Attach Receipt&quot; option.
           </p>
         </div>
       ) : (
