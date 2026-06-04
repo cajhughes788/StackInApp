@@ -12,7 +12,7 @@ import { useReceiptDraftsStore } from "@/lib/stores/useReceiptDraftsStore"
 import * as expenseRepository from "@/lib/domain/expenseRepository"
 import { getCalendarMonthBucketFromDate } from "@shared/payPeriods"
 import type { ReceiptDraft } from "@shared/schemas/receiptDraft"
-import { createReceiptAsset } from "@/lib/api/receiptAssetsApi"
+import { createReceiptAsset, deleteReceiptAsset } from "@/lib/api/receiptAssetsApi"
 import { analyzeReceiptImageQuality } from "@/lib/receipts/imageQuality"
 import { loadReceiptImage, normalizeExifOrientation } from "@/lib/receipts/imagePipeline"
 import {
@@ -193,7 +193,8 @@ export default function ReceiptsLibrary() {
   }, [selectedMonth])
 
   async function uploadStandaloneReceipt(file: File) {
-    if (!activeWorkspaceId) return
+    const workspaceId = activeWorkspaceId
+    if (!workspaceId) return
     const isAllowed =
       ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"].includes(file.type.toLowerCase()) ||
       /\.(jpe?g|png|webp|heic)$/i.test(file.name)
@@ -210,6 +211,9 @@ export default function ReceiptsLibrary() {
 
     setUploadStatus("uploading")
     setUploadMessage(null)
+
+    let createdAssetId: string | null = null
+
     try {
       let decoded = await loadReceiptImage(file)
       decoded = await normalizeExifOrientation(file, decoded)
@@ -218,12 +222,12 @@ export default function ReceiptsLibrary() {
       decoded.close()
 
       const assetId = `receipt-${crypto.randomUUID?.() ?? Date.now()}`
-      const originalPath = buildClientReceiptStoragePath(activeWorkspaceId, assetId, file.name)
-      const previewPath = buildClientReceiptDerivedPath(activeWorkspaceId, assetId, "preview")
-      const thumbPath = buildClientReceiptDerivedPath(activeWorkspaceId, assetId, "thumb")
+      const originalPath = buildClientReceiptStoragePath(workspaceId, assetId, file.name)
+      const previewPath = buildClientReceiptDerivedPath(workspaceId, assetId, "preview")
+      const thumbPath = buildClientReceiptDerivedPath(workspaceId, assetId, "thumb")
 
       await Promise.all([
-        createReceiptAsset(activeWorkspaceId, {
+        createReceiptAsset(workspaceId, {
           id: assetId,
           fileName: file.name,
           mimeType: uploadFile.type || "image/jpeg",
@@ -236,7 +240,7 @@ export default function ReceiptsLibrary() {
           qualityWarnings: quality.warnings,
           width: quality.width,
           height: quality.height,
-        }),
+        }).then(() => { createdAssetId = assetId }),
         uploadReceiptAssetToStorage(uploadFile, originalPath, { resolveDownloadUrl: false }),
       ])
       void uploadReceiptAssetToStorage(uploadFile, previewPath).catch(() => {})
@@ -245,6 +249,9 @@ export default function ReceiptsLibrary() {
       setUploadStatus("done")
       setUploadMessage("Receipt saved. Attach it to an expense when you create one.")
     } catch (err) {
+      if (createdAssetId !== null) {
+        void deleteReceiptAsset(workspaceId, createdAssetId).catch(() => {})
+      }
       setUploadStatus("error")
       setUploadMessage(err instanceof Error ? err.message : "Failed to upload receipt.")
     }

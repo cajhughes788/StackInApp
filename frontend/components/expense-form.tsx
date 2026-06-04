@@ -33,7 +33,7 @@ import * as expensesService from "@/lib/domain/expenseService"
 import { useExpenseMemoryStore } from "@/lib/stores/useExpenseMemoryStore"
 import { useSettingsStore } from "@/lib/stores/useSettingsStore"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
-import { createReceiptAsset } from "@/lib/api/receiptAssetsApi"
+import { createReceiptAsset, deleteReceiptAsset } from "@/lib/api/receiptAssetsApi"
 import { analyzeReceiptImageQuality } from "@/lib/receipts/imageQuality"
 import {
   loadReceiptImage,
@@ -598,7 +598,9 @@ export default function ExpenseForm() {
   }, [])
 
   async function processReceiptFile(file: File) {
-    if (!activeWorkspaceId) return
+    // Capture workspaceId once so the catch cleanup uses the same value as the writes.
+    const workspaceId = activeWorkspaceId
+    if (!workspaceId) return
     const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]
     const isAllowed =
       ALLOWED_TYPES.includes(file.type.toLowerCase()) ||
@@ -615,6 +617,10 @@ export default function ExpenseForm() {
     setReceiptUploading(true)
     setReceiptError(null)
 
+    // Tracks whether the Firestore record was written so the catch can delete it
+    // if the subsequent GCS upload fails (partial-failure cleanup).
+    let createdAssetId: string | null = null
+
     try {
       let decoded = await loadReceiptImage(file)
       decoded = await normalizeExifOrientation(file, decoded)
@@ -628,12 +634,12 @@ export default function ExpenseForm() {
       const uploadFile = await prepareReceiptUploadFile(file, decoded)
       decoded.close()
 
-      const originalPath = buildClientReceiptStoragePath(activeWorkspaceId, assetId, file.name)
-      const previewPath = buildClientReceiptDerivedPath(activeWorkspaceId, assetId, "preview")
-      const thumbPath = buildClientReceiptDerivedPath(activeWorkspaceId, assetId, "thumb")
+      const originalPath = buildClientReceiptStoragePath(workspaceId, assetId, file.name)
+      const previewPath = buildClientReceiptDerivedPath(workspaceId, assetId, "preview")
+      const thumbPath = buildClientReceiptDerivedPath(workspaceId, assetId, "thumb")
 
       await Promise.all([
-        createReceiptAsset(activeWorkspaceId, {
+        createReceiptAsset(workspaceId, {
           id: assetId,
           fileName: file.name,
           mimeType: uploadFile.type || "image/jpeg",
@@ -646,7 +652,7 @@ export default function ExpenseForm() {
           qualityWarnings: quality.warnings,
           width: quality.width,
           height: quality.height,
-        }),
+        }).then(() => { createdAssetId = assetId }),
         uploadReceiptAssetToStorage(uploadFile, originalPath, { resolveDownloadUrl: false }),
       ])
 
@@ -671,6 +677,11 @@ export default function ExpenseForm() {
       }
       setAttachedReceiptAsset(asset)
     } catch (err) {
+      // If the Firestore record was written but the GCS upload (or anything after)
+      // failed, delete the record so it doesn't become a permanent orphan.
+      if (createdAssetId !== null) {
+        void deleteReceiptAsset(workspaceId, createdAssetId).catch(() => {})
+      }
       setReceiptError(err instanceof Error ? err.message : "Failed to attach receipt.")
     } finally {
       setReceiptUploading(false)
