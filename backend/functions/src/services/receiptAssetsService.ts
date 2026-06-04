@@ -4,58 +4,29 @@ import { db } from "../admin"
 import { storage } from "../admin"
 import {
   BadRequestError,
-  ForbiddenError,
   NotFoundError,
 } from "../lib/httpErrors"
+import { assertWorkspaceMembership } from "../lib/workspaceMembership"
 import { ReceiptAssetSchema, type ReceiptAsset } from "@shared/schemas/receiptAsset"
 
 const CreateReceiptAssetInputSchema = ReceiptAssetSchema.omit({
-  id: true,
   workspaceId: true,
   uploadedByUid: true,
   version: true,
   originalStoragePath: true,
   previewStoragePath: true,
   thumbnailStoragePath: true,
-  originalDownloadUrl: true,
-  previewDownloadUrl: true,
-  thumbnailDownloadUrl: true,
   storagePath: true,
-  downloadUrl: true,
   createdAt: true,
   updatedAt: true,
   dataUrl: true,
 }).extend({
+  id: z.string().trim().min(1).optional(),
   width: z.number().int().positive().optional(),
   height: z.number().int().positive().optional(),
 })
 
-const UpdateReceiptAssetInputSchema = z
-  .object({
-    version: z.number().int().positive().optional(),
-    originalStoragePath: z.string().trim().min(1).optional(),
-    previewStoragePath: z.string().trim().min(1).optional(),
-    thumbnailStoragePath: z.string().trim().min(1).optional(),
-    originalDownloadUrl: z.string().trim().min(1).optional(),
-    previewDownloadUrl: z.string().trim().min(1).optional(),
-    thumbnailDownloadUrl: z.string().trim().min(1).optional(),
-    storagePath: z.string().trim().min(1).optional(),
-    downloadUrl: z.string().trim().min(1).optional(),
-    width: z.number().int().positive().optional(),
-    height: z.number().int().positive().optional(),
-    sizeBytes: z.number().int().nonnegative().optional(),
-  })
-  .strict()
 
-async function assertWorkspaceMembership(
-  workspaceId: string,
-  uid: string
-): Promise<void> {
-  const memberSnap = await db.doc(`users/${uid}/memberships/${workspaceId}`).get()
-  if (!memberSnap.exists) {
-    throw new ForbiddenError("Forbidden")
-  }
-}
 
 function stripUndefinedDeep<T>(value: T): T {
   if (Array.isArray(value)) {
@@ -94,15 +65,12 @@ function buildDerivedStoragePath(
 
 function normalizeReceiptAsset(asset: ReceiptAsset): ReceiptAsset {
   const originalStoragePath = asset.originalStoragePath ?? asset.storagePath
-  const originalDownloadUrl = asset.originalDownloadUrl ?? asset.downloadUrl
 
   return ReceiptAssetSchema.parse({
     ...asset,
     version: asset.version || 1,
     originalStoragePath,
-    originalDownloadUrl,
     storagePath: asset.storagePath ?? originalStoragePath,
-    downloadUrl: asset.downloadUrl ?? originalDownloadUrl,
   })
 }
 
@@ -119,7 +87,9 @@ export async function createReceiptAsset(
   }
 
   const nowIso = new Date().toISOString()
-  const assetRef = db.collection(`workspaces/${workspaceId}/receiptAssets`).doc()
+  const assetRef = parsed.data.id
+    ? db.doc(`workspaces/${workspaceId}/receiptAssets/${parsed.data.id}`)
+    : db.collection(`workspaces/${workspaceId}/receiptAssets`).doc()
   const asset = ReceiptAssetSchema.parse({
     id: assetRef.id,
     workspaceId,
@@ -150,39 +120,6 @@ export async function createReceiptAsset(
   return normalized
 }
 
-export async function updateReceiptAsset(
-  workspaceId: string,
-  uid: string,
-  receiptAssetId: string,
-  input: unknown
-): Promise<ReceiptAsset> {
-  await assertWorkspaceMembership(workspaceId, uid)
-
-  const parsed = UpdateReceiptAssetInputSchema.safeParse(input)
-  if (!parsed.success) {
-    throw new BadRequestError("Invalid receipt asset update payload", parsed.error.format())
-  }
-
-  const assetRef = db.doc(`workspaces/${workspaceId}/receiptAssets/${receiptAssetId}`)
-  const snap = await assetRef.get()
-  if (!snap.exists) {
-    throw new NotFoundError("Receipt asset not found")
-  }
-
-  const existing = ReceiptAssetSchema.parse({
-    id: snap.id,
-    ...snap.data(),
-  })
-
-  const next = normalizeReceiptAsset(ReceiptAssetSchema.parse({
-    ...existing,
-    ...parsed.data,
-    updatedAt: new Date().toISOString(),
-  }))
-
-  await assetRef.set(stripUndefinedDeep(next))
-  return next
-}
 
 export async function getReceiptAsset(
   workspaceId: string,

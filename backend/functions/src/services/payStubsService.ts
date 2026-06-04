@@ -25,6 +25,9 @@ function sumEntryUnreportedCash(entry: EntryType) {
 function sumEntryCustomDeductions(entry: EntryType) {
     return round2(Number(entry.totals?.customDeductionsAmount ?? 0));
 }
+function sumEntryBreakDeductions(entry: EntryType) {
+    return round2(Number(entry.totals?.breakDeductionAmount ?? 0));
+}
 function getEntryUpdatedAt(entry: EntryType): string | null {
     return entry.updatedAtLocal ?? entry.createdAtLocal ?? null;
 }
@@ -93,6 +96,16 @@ async function getWorkspaceTaxProfile(workspaceId: string): Promise<TaxProfile.T
     const parsed = TaxProfile.Schema.safeParse(snap.data());
     return parsed.success ? parsed.data : null;
 }
+async function getPreviousPayStub(workspaceId: string, currentPeriodStart: string): Promise<any | null> {
+    const snap = await db
+        .collection(`workspaces/${workspaceId}/payStubs`)
+        .where("periodEnd", "<", currentPeriodStart)
+        .orderBy("periodEnd", "desc")
+        .limit(1)
+        .get();
+    if (snap.empty) return null;
+    return snap.docs[0].data();
+}
 async function getWorkspaceEntries(workspaceId: string): Promise<EntryType[]> {
     const snap = await db.collection(`workspaces/${workspaceId}/entries`).get();
     return snap.docs
@@ -134,39 +147,41 @@ function buildTaxBreakdownFromNetPay(result: ReturnType<typeof calculateNetPay>)
         traditional401k: pretax401k,
     };
 }
-function computeYtdTotals(entries: EntryType[], settings: SettingsType, taxProfile: TaxProfile.Type | null, endDate: string) {
+function computeYtdTotals(params: {
+    currentGrossIncome: number;
+    currentNetIncome: number;
+    currentEntries: EntryType[];
+    previousStub: any | null;
+    periodStart: string;
+    settings: SettingsType;
+}) {
+    const { currentGrossIncome, currentNetIncome, currentEntries, previousStub, periodStart, settings } = params;
     const tz = settings.common?.timeZone || DEFAULT_TIME_ZONE;
-    const startOfYear = DateTime.fromISO(endDate, { zone: tz }).startOf("year").toISODate()!;
-    const ytdEntries = entries.filter((entry) => entry.date >= startOfYear && entry.date <= endDate);
-    const grossIncome = round2(ytdEntries.reduce((sum, entry) => sum + sumEntryGross(entry), 0));
-    const customDeductions = round2(ytdEntries.reduce((sum, entry) => sum + sumEntryCustomDeductions(entry), 0));
-    const tips = round2(ytdEntries.reduce((sum, entry) => sum + sumEntryTips(entry), 0));
-    const reportedCash = round2(ytdEntries.reduce((sum, entry) => sum + sumEntryReportedCash(entry), 0));
-    const unreportedCash = round2(ytdEntries.reduce((sum, entry) => sum + sumEntryUnreportedCash(entry), 0));
-    if (settings.w2?.autoTaxCalculation && taxProfile) {
-        const result = calculateNetPay(buildTaxProfileInput(taxProfile, {
-            grossIncome,
-            payFrequency: "annual",
-            customDeductions,
-        }));
-        const totalDeductions = round2(result.grossIncome - result.netIncome);
-        return {
-            grossIncome,
-            netIncome: round2(result.netIncome),
-            totalDeductions,
-            tips,
-            reportedCash,
-            unreportedCash,
-        };
-    }
-    return {
-        grossIncome,
-        netIncome: grossIncome,
-        totalDeductions: 0,
-        tips,
-        reportedCash,
-        unreportedCash,
-    };
+    const startOfYear = DateTime.fromISO(periodStart, { zone: tz }).startOf("year").toISODate()!;
+
+    // If the previous stub is from a prior year, YTD resets — only the current period counts.
+    const prevYtd = (previousStub && previousStub.periodEnd >= startOfYear)
+        ? previousStub.ytdTotals ?? null
+        : null;
+
+    const grossIncome = round2((prevYtd?.grossIncome ?? 0) + currentGrossIncome);
+    const netIncome = round2((prevYtd?.netIncome ?? 0) + currentNetIncome);
+    const totalDeductions = round2(grossIncome - netIncome);
+
+    const tips = round2(
+        (prevYtd?.tips ?? 0) +
+        currentEntries.reduce((sum, e) => sum + sumEntryTips(e), 0)
+    );
+    const reportedCash = round2(
+        (prevYtd?.reportedCash ?? 0) +
+        currentEntries.reduce((sum, e) => sum + sumEntryReportedCash(e), 0)
+    );
+    const unreportedCash = round2(
+        (prevYtd?.unreportedCash ?? 0) +
+        currentEntries.reduce((sum, e) => sum + sumEntryUnreportedCash(e), 0)
+    );
+
+    return { grossIncome, netIncome, totalDeductions, tips, reportedCash, unreportedCash };
 }
 function buildPayStubDocument(params: {
     uid: string;
@@ -174,13 +189,13 @@ function buildPayStubDocument(params: {
     settings: SettingsType;
     taxProfile: TaxProfile.Type | null;
     entries: EntryType[];
-    allEntries: EntryType[];
+    previousStub: any | null;
     start: string;
     end: string;
     periodId: string;
     previousVersion?: number;
 }) {
-    const { uid, workspaceId, settings, taxProfile, entries, start, end, periodId } = params;
+    const { uid, workspaceId, settings, taxProfile, entries, previousStub, start, end, periodId } = params;
     console.log("[payStubsService.buildPayStubDocument] inputs", JSON.stringify({
         workspaceId,
         uid,
@@ -226,6 +241,7 @@ function buildPayStubDocument(params: {
     }));
     const grossIncome = round2(entries.reduce((sum, entry) => sum + sumEntryGross(entry), 0));
     const customDeductions = round2(entries.reduce((sum, entry) => sum + sumEntryCustomDeductions(entry), 0));
+    const breakDeductions = round2(entries.reduce((sum, entry) => sum + sumEntryBreakDeductions(entry), 0));
     const totalUnreported = round2(entries.reduce((sum, entry) => sum + sumEntryUnreportedCash(entry), 0));
     let netIncome = grossIncome;
     let breakdown: Record<string, number> = {};
@@ -233,7 +249,7 @@ function buildPayStubDocument(params: {
         const result = calculateNetPay(buildTaxProfileInput(taxProfile, {
             grossIncome,
             payFrequency: settings.w2?.payFrequency ?? "biweekly",
-            customDeductions,
+            customDeductions: customDeductions + breakDeductions,
         }));
         console.log("[payStubsService.buildPayStubDocument] tax_result", JSON.stringify({
             workspaceId,
@@ -255,7 +271,14 @@ function buildPayStubDocument(params: {
         netIncome = round2(result.netIncome);
         breakdown = buildTaxBreakdownFromNetPay(result);
     }
-    const ytdTotals = computeYtdTotals(params.allEntries, settings, taxProfile, end);
+    const ytdTotals = computeYtdTotals({
+        currentGrossIncome: grossIncome,
+        currentNetIncome: netIncome,
+        currentEntries: entries,
+        previousStub,
+        periodStart: start,
+        settings,
+    });
     const latestSourceUpdatedAt = entries.reduce<string | null>((latest, entry) => maxIso(latest, getEntryUpdatedAt(entry)), null);
     const stub = PayStub.Schema.parse({
         uid,
@@ -346,11 +369,12 @@ export async function generatePayStub(workspaceId: string, uid: string, opts: {
         uid,
         opts,
     }));
-    const [settings, taxProfile, allEntries, workspaceCreatedAt] = await Promise.all([
+    const [settings, taxProfile, allEntries, workspaceCreatedAt, previousStub] = await Promise.all([
         getWorkspaceSettings(workspaceId),
         getWorkspaceTaxProfile(workspaceId),
         getWorkspaceEntries(workspaceId),
         getWorkspaceCreatedAt(workspaceId),
+        getPreviousPayStub(workspaceId, opts.start),
     ]);
     const earliestEligiblePeriodEnd = getEarliestEligiblePayStubPeriodEnd(settings, workspaceCreatedAt);
     if (!isEligiblePayStubPeriod(opts.end, earliestEligiblePeriodEnd)) {
@@ -385,7 +409,7 @@ export async function generatePayStub(workspaceId: string, uid: string, opts: {
         settings,
         taxProfile,
         entries: entriesForPeriod,
-        allEntries,
+        previousStub,
         start: opts.start,
         end: opts.end,
         periodId: opts.periodId,

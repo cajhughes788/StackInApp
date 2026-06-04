@@ -12,9 +12,15 @@ import {
   type ProfitLossPeriodType,
   type ProfitLossStatement,
 } from "@shared/schemas/profitLoss"
+import {
+  type PersistedCachePayload,
+  isPersistedCachePayload,
+} from "./cachePayload"
 
 export type ProfitLossCacheRecord = {
   data: ProfitLossStatement[]
+  lastSuccessfulSyncAt: number | null
+  localUpdatedAt: number | null
   cachedAt: number
 }
 
@@ -26,6 +32,10 @@ function getProfitLossKey(
 }
 
 const TTL_MS = undefined
+type PersistedProfitLossPayload = PersistedCachePayload<
+  ProfitLossStatement[],
+  "statements"
+>
 
 export async function loadProfitLossCache(
   workspaceId: WorkspaceId,
@@ -39,17 +49,34 @@ export async function readProfitLossCacheRecord(
   workspaceId: WorkspaceId,
   periodType: ProfitLossPeriodType
 ): Promise<ProfitLossCacheRecord | null> {
-  const rec = await getWithMeta<ProfitLossStatement[]>(
+  const rec = await getWithMeta<ProfitLossStatement[] | PersistedProfitLossPayload>(
     getProfitLossKey(workspaceId, periodType),
     { expectedVersion: CACHE_VERSIONS.profitLoss }
   )
   if (!rec?.data) return null
 
-  const parsed = safeSchemaParse(ProfitLossStatementListSchema, rec.data)
+  const payload = isPersistedCachePayload<ProfitLossStatement[], "statements">(
+    rec.data,
+    "statements"
+  )
+    ? rec.data
+    : {
+        statements: rec.data,
+        lastSuccessfulSyncAt: null,
+        localUpdatedAt: rec.ts,
+      }
+
+  const parsed = safeSchemaParse(ProfitLossStatementListSchema, payload.statements)
   if (!parsed.success) return null
 
   return {
     data: parsed.data,
+    lastSuccessfulSyncAt:
+      typeof payload.lastSuccessfulSyncAt === "number"
+        ? payload.lastSuccessfulSyncAt
+        : null,
+    localUpdatedAt:
+      typeof payload.localUpdatedAt === "number" ? payload.localUpdatedAt : rec.ts,
     cachedAt: rec.ts,
   }
 }
@@ -57,12 +84,24 @@ export async function readProfitLossCacheRecord(
 export async function saveProfitLossCache(
   workspaceId: WorkspaceId,
   periodType: ProfitLossPeriodType,
-  list: ProfitLossStatement[]
+  list: ProfitLossStatement[],
+  options: {
+    lastSuccessfulSyncAt?: number | null
+    localUpdatedAt?: number | null
+  } = {}
 ): Promise<void> {
-  await setWithMeta(getProfitLossKey(workspaceId, periodType), list, {
-    ttlMs: TTL_MS,
-    version: CACHE_VERSIONS.profitLoss,
-  })
+  await setWithMeta<PersistedProfitLossPayload>(
+    getProfitLossKey(workspaceId, periodType),
+    {
+      statements: list,
+      lastSuccessfulSyncAt: options.lastSuccessfulSyncAt ?? null,
+      localUpdatedAt: options.localUpdatedAt ?? Date.now(),
+    },
+    {
+      ttlMs: TTL_MS,
+      version: CACHE_VERSIONS.profitLoss,
+    }
+  )
 }
 
 export async function clearProfitLossCache(workspaceId?: WorkspaceId): Promise<void> {

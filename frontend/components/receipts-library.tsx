@@ -9,11 +9,11 @@ import ReceiptViewerTrigger from "@/components/receipt-viewer-trigger"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import { useReceiptDraftsStore } from "@/lib/stores/useReceiptDraftsStore"
 import * as expenseRepository from "@/lib/domain/expenseRepository"
+import { getCalendarMonthBucketFromDate } from "@shared/payPeriods"
 import type { ReceiptDraft } from "@shared/schemas/receiptDraft"
 
 function getCurrentMonthValue(): string {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
+  return getCalendarMonthBucketFromDate(new Date())
 }
 
 function formatDate(value: string | null | undefined): string | null {
@@ -43,11 +43,7 @@ function formatDate(value: string | null | undefined): string | null {
 function getReceiptLifecycleLabel(item: ReceiptDraft): string {
   if (item.status === "committed") return "Saved to expense"
   if (item.status === "dismissed") return "Dismissed"
-  if (
-    item.analysisStatus === "analyzing" ||
-    item.analysisStatus === "queued" ||
-    item.analysisStatus === "analysis_complete_draft_pending"
-  ) {
+  if (item.analysisStatus === "analyzing") {
     return "Analyzing"
   }
   if (item.completion.readyToCommit) return "Ready to review"
@@ -96,7 +92,7 @@ export default function ReceiptsLibrary() {
         if (canceled) return
 
         const hasCachedSnapshot =
-          cached.data.length > 0 || cached.lastBackendSync !== null
+          cached.data.length > 0 || cached.lastSuccessfulSyncAt !== null
 
         if (hasCachedSnapshot) {
           setMonthExpenses(cached.data)
@@ -106,7 +102,7 @@ export default function ReceiptsLibrary() {
         const resolved = await expenseRepository.ensureLoaded(
           activeWorkspaceId,
           selectedMonth,
-          { forceBackend: false }
+          { forceBackend: true }
         )
         if (canceled) return
 

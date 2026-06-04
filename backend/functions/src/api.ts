@@ -1,170 +1,343 @@
-﻿// /functions/src/api.ts
-// Unified API entrypoint using modular Firebase v2 functions
-// compatible with new handler/function split and withCorsAuth middleware
+/**
+ * Unified API entry point — Firebase Functions v2.
+ *
+ * ARCHITECTURE NOTE — dynamic handler imports
+ * -------------------------------------------
+ * Every handler is loaded via a dynamic import() inside its request wrapper,
+ * NOT at the top of this file.  This is the critical pattern that keeps cold
+ * starts fast.
+ *
+ * When any function cold-starts, Firebase evaluates this module.  With static
+ * top-level imports, that evaluation used to load Stripe, SendGrid, AWS crypto,
+ * and all 43 route trees — adding 4–8 s to every cold start regardless of
+ * which function was invoked.
+ *
+ * With dynamic imports, module evaluation only touches:
+ *   • withCorsAuth  (cors + firebase-admin/auth — unavoidable for auth)
+ *   • secrets.ts    (defineSecret descriptors only — zero heavy deps)
+ *   • onRequest     (firebase-functions/v2/https — small)
+ *
+ * The actual route module (and its heavy transitive deps like Stripe) is loaded
+ * the first time a real request arrives at that specific function.  Node caches
+ * it after that, so only the very first request per instance pays the ~100 ms
+ * dynamic-import cost.  Every cold start is now ~1–2 s instead of 4–8 s.
+ *
+ * Rules for adding new routes:
+ *   1. Add secrets to src/secrets.ts, not to the route file's exports.
+ *   2. Use the dynamic-import pattern below — never add a top-level import.
+ *   3. If the route needs secrets at runtime, pass them in the options object.
+ */
 
-import type { Request, Response } from "express"
 import { onRequest } from "firebase-functions/v2/https"
 import { withCorsAuth } from "./middleware/withCorsAuth"
+import * as SECRETS from "./secrets"
 
 // ---------------------------------------------------------------------------
-// 🔹 Route Handlers — Plain handler imports
+// Public routes (no auth)
 // ---------------------------------------------------------------------------
 
-import { signupHandler } from "./routes/signup"
-import { createEntryHandler } from "./routes/createEntry"
-import { createWorkspaceHandler } from "./routes/createWorkspace"
-import { getEntriesHandler } from "./routes/getEntries"
-import { editEntryHandler } from "./routes/editEntry"
-import { deleteEntryHandler } from "./routes/deleteEntry"
-import { generatePayStubHandler } from "./routes/generatePayStub"
-import { generateCurrentPayStubHandler } from "./routes/generateCurrentPayStub"
-import { getPayStubsHandler } from "./routes/getPayStubs"
-import { getProfitLossStatementsHandler } from "./routes/getProfitLossStatements"
-import { generateProfitLossStatementHandler } from "./routes/generateProfitLossStatement"
-import { getSettingsHandler } from "./routes/getSettings"
-import { saveSettingsHandler } from "./routes/saveSettings"
-import { getTaxProfileHandler } from "./routes/getTaxProfile"
-import { saveTaxProfileHandler } from "./routes/saveTaxProfile"
-import { deleteUserDataHandler } from "./routes/deleteUserData"
-import { createExpenseHandler } from "./routes/createExpense"
-import { editExpenseHandler } from "./routes/editExpense"
-import { deleteExpenseHandler } from "./routes/deleteExpense"
-import { getExpensesHandler } from "./routes/getExpenses"
-import { createImportBatchHandler } from "./routes/createImportBatch"
-import { getImportBatchesHandler } from "./routes/getImportBatches"
-import { getImportItemsHandler } from "./routes/getImportItems"
-import { updateImportItemHandler } from "./routes/updateImportItem"
-import { createReceiptAssetHandler } from "./routes/createReceiptAsset"
-import { updateReceiptAssetHandler } from "./routes/updateReceiptAsset"
-import { getReceiptAssetHandler } from "./routes/getReceiptAsset"
-import { analyzeReceiptHandler } from "./routes/analyzeReceipt"
-import { finalizeReceiptAnalysisHandler } from "./routes/finalizeReceiptAnalysis"
-import { getReceiptAnalysisHandler } from "./routes/getReceiptAnalysis"
-import { createReceiptDraftHandler } from "./routes/createReceiptDraft"
-import { getReceiptDraftsHandler } from "./routes/getReceiptDrafts"
-import { updateReceiptDraftHandler } from "./routes/updateReceiptDraft"
-import {
-  AWS_TEXTRACT_ACCESS_KEY_ID,
-  AWS_TEXTRACT_REGION,
-  AWS_TEXTRACT_SECRET_ACCESS_KEY,
-} from "./services/textractService"
-import {
-  createCheckoutSessionHandler,
-  STRIPE_SECRET_KEY as CHECKOUT_STRIPE_SECRET_KEY,
-} from "./routes/createCheckoutSession"
-import {
-  stripeWebhookHandler,
-  STRIPE_SECRET_KEY as WEBHOOK_STRIPE_SECRET_KEY,
-  STRIPE_WEBHOOK_SECRET,
-} from "./routes/stripeWebhook"
-import { getSubscriptionHandler } from "./routes/getSubscription"
-import { getAppBootstrapHandler } from "./routes/getAppBootstrap"
-import { submitSupportReportHandler } from "./routes/submitSupportReport"
-import {
-  requestAccountDeletionHandler,
-  STRIPE_SECRET_KEY as REQUEST_DELETION_STRIPE_SECRET_KEY,
-} from "./routes/requestAccountDeletion"
-import {
-  cancelAccountDeletionRequestHandler,
-  STRIPE_SECRET_KEY as CANCEL_DELETION_STRIPE_SECRET_KEY,
-} from "./routes/cancelAccountDeletionRequest"
-import { updateWorkspaceHandler } from "./routes/updateWorkspace"
-import { deleteWorkspaceHandler } from "./routes/deleteWorkspace"
-
-// ---------------------------------------------------------------------------
-// 🔸 Public Routes (no auth required)
-// ---------------------------------------------------------------------------
-
-export const signup = withCorsAuth(async (req: Request, res: Response) => {
-  if (req.method !== "POST") {
-    res.status(405).json({ ok: false, error: "Method not allowed" })
-    return
-  }
-  await signupHandler(req, res)
-}, false)
+export const signup = withCorsAuth(
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ ok: false, error: "Method not allowed" })
+      return
+    }
+    const { signupHandler } = await import("./routes/signup.js")
+    await signupHandler(req, res)
+  },
+  false
+)
 
 export const stripeWebhook = onRequest(
-  {
-    secrets: [WEBHOOK_STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET],
-  },
+  { secrets: [SECRETS.STRIPE_SECRET_KEY, SECRETS.STRIPE_WEBHOOK_SECRET] },
   async (req, res) => {
+    const { stripeWebhookHandler } = await import("./routes/stripeWebhook.js")
     await stripeWebhookHandler(req as any, res as any)
   }
 )
 
 // ---------------------------------------------------------------------------
-// 🔸 Protected Routes (auth required)
+// Workspace
 // ---------------------------------------------------------------------------
 
-// Entries
-export const createEntry   = withCorsAuth(createEntryHandler)
-export const createWorkspace  = withCorsAuth(createWorkspaceHandler)
-export const updateWorkspace  = withCorsAuth(updateWorkspaceHandler)
-export const deleteWorkspace  = withCorsAuth(deleteWorkspaceHandler)
-export const editEntry     = withCorsAuth(editEntryHandler)
-export const deleteEntry   = withCorsAuth(deleteEntryHandler)
-export const getEntries    = withCorsAuth(getEntriesHandler)
-
-//Expenses
-export const createExpense = withCorsAuth(createExpenseHandler)
-export const editExpense   = withCorsAuth(editExpenseHandler)
-export const deleteExpense = withCorsAuth(deleteExpenseHandler)
-export const getExpenses   = withCorsAuth(getExpensesHandler)
-export const createImportBatch = withCorsAuth(createImportBatchHandler)
-export const getImportBatches = withCorsAuth(getImportBatchesHandler)
-export const getImportItems = withCorsAuth(getImportItemsHandler)
-export const updateImportItem = withCorsAuth(updateImportItemHandler)
-export const createReceiptAsset = withCorsAuth(createReceiptAssetHandler)
-export const updateReceiptAsset = withCorsAuth(updateReceiptAssetHandler)
-export const getReceiptAsset = withCorsAuth(getReceiptAssetHandler)
-export const createReceiptDraft = withCorsAuth(createReceiptDraftHandler)
-export const getReceiptDrafts = withCorsAuth(getReceiptDraftsHandler)
-export const updateReceiptDraft = withCorsAuth(updateReceiptDraftHandler)
-export const analyzeReceipt = withCorsAuth(analyzeReceiptHandler, true, {
-  secrets: [
-    AWS_TEXTRACT_ACCESS_KEY_ID,
-    AWS_TEXTRACT_SECRET_ACCESS_KEY,
-    AWS_TEXTRACT_REGION,
-  ],
+export const createWorkspace = withCorsAuth(async (req, res) => {
+  const { createWorkspaceHandler } = await import("./routes/createWorkspace.js")
+  await createWorkspaceHandler(req, res)
 })
-export const finalizeReceiptAnalysis = withCorsAuth(finalizeReceiptAnalysisHandler)
-export const getReceiptAnalysis = withCorsAuth(getReceiptAnalysisHandler)
+
+export const updateWorkspace = withCorsAuth(async (req, res) => {
+  const { updateWorkspaceHandler } = await import("./routes/updateWorkspace.js")
+  await updateWorkspaceHandler(req, res)
+})
+
+export const deleteWorkspace = withCorsAuth(async (req, res) => {
+  const { deleteWorkspaceHandler } = await import("./routes/deleteWorkspace.js")
+  await deleteWorkspaceHandler(req, res)
+})
+
+// ---------------------------------------------------------------------------
+// Entries
+// ---------------------------------------------------------------------------
+
+export const createEntry = withCorsAuth(async (req, res) => {
+  const { createEntryHandler } = await import("./routes/createEntry.js")
+  await createEntryHandler(req, res)
+})
+
+export const editEntry = withCorsAuth(async (req, res) => {
+  const { editEntryHandler } = await import("./routes/editEntry.js")
+  await editEntryHandler(req, res)
+})
+
+export const deleteEntry = withCorsAuth(async (req, res) => {
+  const { deleteEntryHandler } = await import("./routes/deleteEntry.js")
+  await deleteEntryHandler(req, res)
+})
+
+export const getEntries = withCorsAuth(async (req, res) => {
+  const { getEntriesHandler } = await import("./routes/getEntries.js")
+  await getEntriesHandler(req, res)
+})
+
+// ---------------------------------------------------------------------------
+// Expenses
+// ---------------------------------------------------------------------------
+
+export const createExpense = withCorsAuth(async (req, res) => {
+  const { createExpenseHandler } = await import("./routes/createExpense.js")
+  await createExpenseHandler(req, res)
+})
+
+export const editExpense = withCorsAuth(async (req, res) => {
+  const { editExpenseHandler } = await import("./routes/editExpense.js")
+  await editExpenseHandler(req, res)
+})
+
+export const deleteExpense = withCorsAuth(async (req, res) => {
+  const { deleteExpenseHandler } = await import("./routes/deleteExpense.js")
+  await deleteExpenseHandler(req, res)
+})
+
+export const getExpenses = withCorsAuth(async (req, res) => {
+  const { getExpensesHandler } = await import("./routes/getExpenses.js")
+  await getExpensesHandler(req, res)
+})
+
+// ---------------------------------------------------------------------------
+// Import batches
+// ---------------------------------------------------------------------------
+
+export const createImportBatch = withCorsAuth(async (req, res) => {
+  const { createImportBatchHandler } = await import("./routes/createImportBatch.js")
+  await createImportBatchHandler(req, res)
+})
+
+export const getImportBatches = withCorsAuth(async (req, res) => {
+  const { getImportBatchesHandler } = await import("./routes/getImportBatches.js")
+  await getImportBatchesHandler(req, res)
+})
+
+export const getImportItems = withCorsAuth(async (req, res) => {
+  const { getImportItemsHandler } = await import("./routes/getImportItems.js")
+  await getImportItemsHandler(req, res)
+})
+
+export const updateImportItem = withCorsAuth(async (req, res) => {
+  const { updateImportItemHandler } = await import("./routes/updateImportItem.js")
+  await updateImportItemHandler(req, res)
+})
+
+// ---------------------------------------------------------------------------
+// Receipt assets
+// ---------------------------------------------------------------------------
+
+export const createReceiptAsset = withCorsAuth(async (req, res) => {
+  const { createReceiptAssetHandler } = await import("./routes/createReceiptAsset.js")
+  await createReceiptAssetHandler(req, res)
+})
+
+
+export const getReceiptAsset = withCorsAuth(async (req, res) => {
+  const { getReceiptAssetHandler } = await import("./routes/getReceiptAsset.js")
+  await getReceiptAssetHandler(req, res)
+})
+
+export const deleteReceiptAsset = withCorsAuth(async (req, res) => {
+  const { deleteReceiptAssetHandler } = await import("./routes/deleteReceiptAsset.js")
+  await deleteReceiptAssetHandler(req, res)
+})
+
+// ---------------------------------------------------------------------------
+// Receipt analysis
+// The client sends the compressed image (~4.5 MB) as base64 in the request
+// body so the backend receives bytes directly and passes them straight to
+// Textract without a GCS round-trip.
+// timeoutSeconds: 60 gives the full 30 s client timeout plus 30 s of headroom
+// for slow uploads or Textract variance before the function is force-killed.
+// ---------------------------------------------------------------------------
+
+export const analyzeReceipt = withCorsAuth(
+  async (req, res) => {
+    const { analyzeReceiptHandler } = await import("./routes/analyzeReceipt.js")
+    await analyzeReceiptHandler(req, res)
+  },
+  true,
+  {
+    timeoutSeconds: 60,
+    secrets: [
+      SECRETS.AWS_TEXTRACT_ACCESS_KEY_ID,
+      SECRETS.AWS_TEXTRACT_SECRET_ACCESS_KEY,
+      SECRETS.AWS_TEXTRACT_REGION,
+    ],
+  }
+)
+
+
+// ---------------------------------------------------------------------------
+// Receipt drafts
+// ---------------------------------------------------------------------------
+
+export const createReceiptDraft = withCorsAuth(async (req, res) => {
+  const { createReceiptDraftHandler } = await import("./routes/createReceiptDraft.js")
+  await createReceiptDraftHandler(req, res)
+})
+
+export const getReceiptDrafts = withCorsAuth(async (req, res) => {
+  const { getReceiptDraftsHandler } = await import("./routes/getReceiptDrafts.js")
+  await getReceiptDraftsHandler(req, res)
+})
+
+export const updateReceiptDraft = withCorsAuth(async (req, res) => {
+  const { updateReceiptDraftHandler } = await import("./routes/updateReceiptDraft.js")
+  await updateReceiptDraftHandler(req, res)
+})
+
+export const commitReceiptDraft = withCorsAuth(async (req, res) => {
+  const { commitReceiptDraftHandler } = await import("./routes/commitReceiptDraft.js")
+  await commitReceiptDraftHandler(req, res)
+})
+
+// ---------------------------------------------------------------------------
+// Expense duplicate detection
+// ---------------------------------------------------------------------------
+
+export const checkDuplicateExpense = withCorsAuth(async (req, res) => {
+  const { checkDuplicateExpenseHandler } = await import("./routes/checkDuplicateExpense.js")
+  await checkDuplicateExpenseHandler(req, res)
+})
+
+// ---------------------------------------------------------------------------
+// Payments (Stripe)
+// ---------------------------------------------------------------------------
+
 export const createCheckoutSession = withCorsAuth(
-  createCheckoutSessionHandler,
+  async (req, res) => {
+    const { createCheckoutSessionHandler } = await import("./routes/createCheckoutSession.js")
+    await createCheckoutSessionHandler(req, res)
+  },
   true,
-  {
-    secrets: [CHECKOUT_STRIPE_SECRET_KEY],
-  }
+  { secrets: [SECRETS.STRIPE_SECRET_KEY] }
 )
-export const getSubscription = withCorsAuth(getSubscriptionHandler)
-export const getAppBootstrap = withCorsAuth(getAppBootstrapHandler)
-export const submitSupportReport = withCorsAuth(submitSupportReportHandler)
+
+export const getSubscription = withCorsAuth(async (req, res) => {
+  const { getSubscriptionHandler } = await import("./routes/getSubscription.js")
+  await getSubscriptionHandler(req, res)
+})
+
 export const requestAccountDeletion = withCorsAuth(
-  requestAccountDeletionHandler,
+  async (req, res) => {
+    const { requestAccountDeletionHandler } = await import("./routes/requestAccountDeletion.js")
+    await requestAccountDeletionHandler(req, res)
+  },
   true,
-  {
-    secrets: [REQUEST_DELETION_STRIPE_SECRET_KEY],
-  }
+  { secrets: [SECRETS.STRIPE_SECRET_KEY] }
 )
+
 export const cancelAccountDeletionRequest = withCorsAuth(
-  cancelAccountDeletionRequestHandler,
+  async (req, res) => {
+    const { cancelAccountDeletionRequestHandler } = await import(
+      "./routes/cancelAccountDeletionRequest.js"
+    )
+    await cancelAccountDeletionRequestHandler(req, res)
+  },
   true,
-  {
-    secrets: [CANCEL_DELETION_STRIPE_SECRET_KEY],
-  }
+  { secrets: [SECRETS.STRIPE_SECRET_KEY] }
 )
-// Pay Stubs
-export const getPayStubs   = withCorsAuth(getPayStubsHandler)
-export const generatePayStub = withCorsAuth(generatePayStubHandler)
-export const generateCurrentPayStub = withCorsAuth(generateCurrentPayStubHandler)
-export const getProfitLossStatements = withCorsAuth(getProfitLossStatementsHandler)
-export const generateProfitLossStatement = withCorsAuth(generateProfitLossStatementHandler)
 
-// Settings
-export const getSettings   = withCorsAuth(getSettingsHandler)
-export const saveSettings  = withCorsAuth(saveSettingsHandler)
+// ---------------------------------------------------------------------------
+// Pay stubs
+// ---------------------------------------------------------------------------
 
-// Tax Profile
-export const getTaxProfile = withCorsAuth(getTaxProfileHandler)
-export const saveTaxProfile = withCorsAuth(saveTaxProfileHandler)
-export const deleteUserData = withCorsAuth(deleteUserDataHandler)
+export const getPayStubs = withCorsAuth(async (req, res) => {
+  const { getPayStubsHandler } = await import("./routes/getPayStubs.js")
+  await getPayStubsHandler(req, res)
+})
+
+export const generatePayStub = withCorsAuth(async (req, res) => {
+  const { generatePayStubHandler } = await import("./routes/generatePayStub.js")
+  await generatePayStubHandler(req, res)
+})
+
+export const generateCurrentPayStub = withCorsAuth(async (req, res) => {
+  const { generateCurrentPayStubHandler } = await import("./routes/generateCurrentPayStub.js")
+  await generateCurrentPayStubHandler(req, res)
+})
+
+// ---------------------------------------------------------------------------
+// Profit & loss
+// ---------------------------------------------------------------------------
+
+export const getProfitLossStatements = withCorsAuth(async (req, res) => {
+  const { getProfitLossStatementsHandler } = await import("./routes/getProfitLossStatements.js")
+  await getProfitLossStatementsHandler(req, res)
+})
+
+export const generateProfitLossStatement = withCorsAuth(async (req, res) => {
+  const { generateProfitLossStatementHandler } = await import(
+    "./routes/generateProfitLossStatement.js"
+  )
+  await generateProfitLossStatementHandler(req, res)
+})
+
+// ---------------------------------------------------------------------------
+// Settings & tax profile
+// ---------------------------------------------------------------------------
+
+export const getSettings = withCorsAuth(async (req, res) => {
+  const { getSettingsHandler } = await import("./routes/getSettings.js")
+  await getSettingsHandler(req, res)
+})
+
+export const saveSettings = withCorsAuth(async (req, res) => {
+  const { saveSettingsHandler } = await import("./routes/saveSettings.js")
+  await saveSettingsHandler(req, res)
+})
+
+export const getTaxProfile = withCorsAuth(async (req, res) => {
+  const { getTaxProfileHandler } = await import("./routes/getTaxProfile.js")
+  await getTaxProfileHandler(req, res)
+})
+
+export const saveTaxProfile = withCorsAuth(async (req, res) => {
+  const { saveTaxProfileHandler } = await import("./routes/saveTaxProfile.js")
+  await saveTaxProfileHandler(req, res)
+})
+
+// ---------------------------------------------------------------------------
+// Account & bootstrap
+// ---------------------------------------------------------------------------
+
+export const deleteUserData = withCorsAuth(async (req, res) => {
+  const { deleteUserDataHandler } = await import("./routes/deleteUserData.js")
+  await deleteUserDataHandler(req, res)
+})
+
+export const getAppBootstrap = withCorsAuth(async (req, res) => {
+  const { getAppBootstrapHandler } = await import("./routes/getAppBootstrap.js")
+  await getAppBootstrapHandler(req, res)
+})
+
+export const submitSupportReport = withCorsAuth(async (req, res) => {
+  const { submitSupportReportHandler } = await import("./routes/submitSupportReport.js")
+  await submitSupportReportHandler(req, res)
+})

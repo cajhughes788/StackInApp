@@ -60,3 +60,37 @@ export async function getExpensesForPeriod(
   const res = await apiFetch<{ expenses: any[] }>(url, { method: "GET" })
   return res.expenses ?? []
 }
+
+type ExpenseSummary = {
+  id: string
+  date: string
+  amount: number
+  vendor: string
+  account: string
+}
+
+export type DuplicateCheckResult = {
+  // Exact date + amount + merchant match — strong signal, soft-warn with "Save Anyway".
+  possibleDuplicate: boolean
+  matchingExpenses: ExpenseSummary[]
+  // ±3 day date + amount + merchant match — weaker signal, informational only.
+  possibleNearDuplicate: boolean
+  nearDateExpenses: ExpenseSummary[]
+}
+
+export async function checkDuplicateExpense(
+  workspaceId: string,
+  payload: { date: string; amount: number; merchant: string }
+): Promise<DuplicateCheckResult> {
+  const res = await tryWrite<DuplicateCheckResult & { ok: boolean }>(
+    `${API_ENDPOINTS.expenseDuplicateCheck.post}?workspaceId=${encodeURIComponent(workspaceId)}`,
+    "POST",
+    payload
+  )
+  return {
+    possibleDuplicate: res.possibleDuplicate ?? false,
+    matchingExpenses: res.matchingExpenses ?? [],
+    possibleNearDuplicate: res.possibleNearDuplicate ?? false,
+    nearDateExpenses: res.nearDateExpenses ?? [],
+  }
+}

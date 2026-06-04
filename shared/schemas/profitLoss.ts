@@ -7,6 +7,7 @@ export const ProfitLossDetailItemSchema = z.object({
   date: z.string(),
   label: z.string(),
   description: z.string().nullable().default(null),
+  appCategory: z.string().nullable().optional(),
   amount: z.number(),
 })
 

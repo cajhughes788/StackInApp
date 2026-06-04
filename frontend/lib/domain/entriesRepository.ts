@@ -11,23 +11,29 @@ import { debugLog } from "@/lib/debugLoop"
 
 export type EntriesLoadResult = {
   data: EntryType[]
-  lastBackendSync: number | null
+  lastSuccessfulSyncAt: number | null
+  localUpdatedAt: number | null
+  source: "cache" | "backend"
+  didFetch: boolean
 }
 
 const ENTRIES_BACKEND_TTL_MS = 5 * 60 * 1000
 const inFlightLoads = new Map<string, Promise<EntriesLoadResult>>()
-const lastBackendSyncByScopedPeriod = new Map<string, number | null>()
+const lastSuccessfulSyncAtByScopedPeriod = new Map<string, number | null>()
 
 function makeScopedPeriodKey(workspaceId: WorkspaceId, periodId: string): string {
   return `${workspaceId}::${periodId}`
 }
 
-function getLastBackendSync(scopedPeriodKey: string): number | null {
-  return lastBackendSyncByScopedPeriod.get(scopedPeriodKey) ?? null
+function getLastSuccessfulSyncAt(scopedPeriodKey: string): number | null {
+  return lastSuccessfulSyncAtByScopedPeriod.get(scopedPeriodKey) ?? null
 }
 
-function setLastBackendSync(scopedPeriodKey: string, timestamp: number | null): void {
-  lastBackendSyncByScopedPeriod.set(scopedPeriodKey, timestamp)
+function setLastSuccessfulSyncAt(
+  scopedPeriodKey: string,
+  timestamp: number | null
+): void {
+  lastSuccessfulSyncAtByScopedPeriod.set(scopedPeriodKey, timestamp)
 }
 
 export async function readCachedSnapshot(
@@ -43,13 +49,20 @@ export async function readCachedSnapshot(
       if (cached === null) {
         return {
           data: [],
-          lastBackendSync: null,
+          lastSuccessfulSyncAt: null,
+          localUpdatedAt: null,
+          source: "cache",
+          didFetch: false,
         }
       }
 
       return {
         data: cached.data,
-        lastBackendSync: getLastBackendSync(scopedKey) ?? cached.cachedAt,
+        lastSuccessfulSyncAt:
+          getLastSuccessfulSyncAt(scopedKey) ?? cached.lastSuccessfulSyncAt,
+        localUpdatedAt: cached.localUpdatedAt,
+        source: "cache",
+        didFetch: false,
       }
     },
     { workspaceId, periodId }
@@ -77,17 +90,25 @@ export async function fetchBackend(
         })
         return {
           data,
-          lastBackendSync: getLastBackendSync(scopedKey),
+          lastSuccessfulSyncAt: getLastSuccessfulSyncAt(scopedKey),
+          localUpdatedAt: null,
+          source: "backend",
+          didFetch: true,
         }
       }
 
-      await domainEntries.saveEntries(scopedKey, data)
       const syncedAt = Date.now()
-      setLastBackendSync(scopedKey, syncedAt)
+      await domainEntries.saveEntries(scopedKey, data, {
+        lastSuccessfulSyncAt: syncedAt,
+      })
+      setLastSuccessfulSyncAt(scopedKey, syncedAt)
 
       return {
         data,
-        lastBackendSync: syncedAt,
+        lastSuccessfulSyncAt: syncedAt,
+        localUpdatedAt: syncedAt,
+        source: "backend",
+        didFetch: true,
       }
     },
     { workspaceId, periodId }
@@ -112,10 +133,11 @@ export async function ensureLoaded(
     })
     const cached = await readCachedSnapshot(workspaceId, periodId)
     const forceBackend = options.forceBackend === true
-    const hasCache = cached.data.length > 0 || cached.lastBackendSync !== null
+    const hasCache =
+      cached.data.length > 0 || cached.lastSuccessfulSyncAt !== null
     const isFresh =
-      cached.lastBackendSync !== null &&
-      Date.now() - cached.lastBackendSync <= ENTRIES_BACKEND_TTL_MS
+      cached.lastSuccessfulSyncAt !== null &&
+      Date.now() - cached.lastSuccessfulSyncAt <= ENTRIES_BACKEND_TTL_MS
 
     if (!forceBackend && hasCache && isFresh) {
       timer.success({ source: "cache-fresh", hasCache })
@@ -145,16 +167,24 @@ export function prime(
   workspaceId: WorkspaceId,
   periodId: string,
   entries: EntryType[],
-  options: { lastBackendSync?: number | null } = {}
+  options: { lastSuccessfulSyncAt?: number | null } = {}
 ): EntriesLoadResult {
   const scopedKey = makeScopedPeriodKey(workspaceId, periodId)
-  const lastBackendSync = options.lastBackendSync ?? Date.now()
-  setLastBackendSync(scopedKey, lastBackendSync)
-  void domainEntries.saveEntries(scopedKey, entries)
+  const lastSuccessfulSyncAt =
+    options.lastSuccessfulSyncAt === undefined
+      ? getLastSuccessfulSyncAt(scopedKey)
+      : options.lastSuccessfulSyncAt
+  setLastSuccessfulSyncAt(scopedKey, lastSuccessfulSyncAt)
+  void domainEntries.saveEntries(scopedKey, entries, {
+    lastSuccessfulSyncAt,
+  })
 
   return {
     data: entries,
-    lastBackendSync,
+    lastSuccessfulSyncAt,
+    localUpdatedAt: null,
+    source: "cache",
+    didFetch: false,
   }
 }
 
@@ -163,22 +193,22 @@ export function clearSyncMetadata(
   periodId?: string
 ): void {
   if (!workspaceId) {
-    lastBackendSyncByScopedPeriod.clear()
+    lastSuccessfulSyncAtByScopedPeriod.clear()
     inFlightLoads.clear()
     return
   }
 
   if (periodId) {
     const scopedKey = makeScopedPeriodKey(workspaceId, periodId)
-    lastBackendSyncByScopedPeriod.delete(scopedKey)
+    lastSuccessfulSyncAtByScopedPeriod.delete(scopedKey)
     inFlightLoads.delete(scopedKey)
     return
   }
 
   const prefix = `${workspaceId}::`
-  for (const key of Array.from(lastBackendSyncByScopedPeriod.keys())) {
+  for (const key of Array.from(lastSuccessfulSyncAtByScopedPeriod.keys())) {
     if (key.startsWith(prefix)) {
-      lastBackendSyncByScopedPeriod.delete(key)
+      lastSuccessfulSyncAtByScopedPeriod.delete(key)
     }
   }
   for (const key of Array.from(inFlightLoads.keys())) {

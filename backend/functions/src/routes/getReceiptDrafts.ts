@@ -7,6 +7,7 @@ import {
   UnauthorizedError,
   sendHttpError,
 } from "../lib/httpErrors"
+import { createBackendProfileTrace, withBackendProfileStep } from "../lib/profileTrace"
 
 const QuerySchema = z.object({
   workspaceId: z.string().min(1),
@@ -20,6 +21,8 @@ export async function getReceiptDraftsHandler(
     res.status(405).json({ ok: false, error: "Method not allowed" })
     return
   }
+
+  const trace = createBackendProfileTrace(req, "receipt_drafts_read")
 
   try {
     const uid = (req as any).user?.uid
@@ -40,12 +43,21 @@ export async function getReceiptDraftsHandler(
       return
     }
 
-    const drafts = await receiptDraftsSvc.listReceiptDrafts(
-      parsedQuery.data.workspaceId,
-      uid
+    const drafts = await withBackendProfileStep(
+      trace,
+      "receipt.drafts.list",
+      () => receiptDraftsSvc.listReceiptDrafts(parsedQuery.data.workspaceId, uid),
+      {
+        workspaceId: parsedQuery.data.workspaceId,
+      }
     )
+    trace.mark("receipt.drafts.response_sent", {
+      workspaceId: parsedQuery.data.workspaceId,
+      draftCount: drafts.length,
+    })
     res.status(200).json({ ok: true, drafts })
   } catch (err: any) {
+    trace.error("receipt.drafts.failed", err)
     sendHttpError(res, err, "getReceiptDrafts")
   }
 }

@@ -5,7 +5,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { db } from "../admin";
 import type { WorkspaceDoc, WorkspaceMembership, WorkspaceType, } from "@shared/contracts/workspace";
-import { getSubscriptionCapabilities, type SubscriptionDoc, } from "@shared/contracts/subscription";
+import { loadAccountAuthorityForUser } from "../services/accountAuthority";
 // ---------------------------------------------------------------------------
 // Validation schema
 // ---------------------------------------------------------------------------
@@ -35,20 +35,14 @@ export async function createWorkspaceHandler(req: Request, res: Response): Promi
             res.status(401).json({ ok: false, error: "Unauthorized" });
             return;
         }
-        const subRef = db
-            .collection("users")
-            .doc(uid)
-            .collection("subscription")
-            .doc("current");
-        const subSnap = await subRef.get();
-        if (!subSnap.exists) {
+        const accountAuthority = await loadAccountAuthorityForUser(uid);
+        if (!accountAuthority.isSubscriptionActive || !accountAuthority.subscriptionCapabilities) {
             res
                 .status(403)
                 .json({ ok: false, error: "No active subscription" });
             return;
         }
-        const subscription = subSnap.data() as SubscriptionDoc;
-        const capabilities = getSubscriptionCapabilities(subscription);
+        const capabilities = accountAuthority.subscriptionCapabilities;
         // -----------------------------------------------------------------------
         // Enforce entitlement
         // -----------------------------------------------------------------------

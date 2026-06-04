@@ -22,6 +22,15 @@ import { writeRaw, readRaw, removeRaw } from "./base"
 // Storage key used for the queue
 const QUEUE_KEY = "offline.queue"
 
+// Serializes all read-modify-write operations so concurrent calls cannot
+// interleave their reads and writes (CR-E).
+let _queueLock: Promise<unknown> = Promise.resolve();
+function withQueueLock<T>(fn: () => Promise<T>): Promise<T> {
+  const next = _queueLock.then(fn, fn);
+  _queueLock = next.catch(() => {});
+  return next;
+}
+
 // Shape of a single queued mutation
 export type OfflineMutation = {
   id: string                // clientMutationId (idempotency key)
@@ -55,10 +64,12 @@ async function readQueue(): Promise<OfflineMutation[]> {
  * - device is offline
  * - API request fails
  */
-export async function enqueue(mutation: OfflineMutation): Promise<void> {
-  const queue = await readQueue()
-  queue.push(mutation)
-  await writeRaw(QUEUE_KEY, JSON.stringify(queue))
+export function enqueue(mutation: OfflineMutation): Promise<void> {
+  return withQueueLock(async () => {
+    const queue = await readQueue()
+    queue.push(mutation)
+    await writeRaw(QUEUE_KEY, JSON.stringify(queue))
+  })
 }
 
 /**
@@ -74,10 +85,12 @@ export async function enqueue(mutation: OfflineMutation): Promise<void> {
  *
  * Clearing ensures no duplicates.
  */
-export async function drain(): Promise<OfflineMutation[]> {
-  const queue = await readQueue()
-  await removeRaw(QUEUE_KEY)
-  return queue
+export function drain(): Promise<OfflineMutation[]> {
+  return withQueueLock(async () => {
+    const queue = await readQueue()
+    await removeRaw(QUEUE_KEY)
+    return queue
+  })
 }
 
 /**
@@ -92,6 +105,25 @@ export async function replaceAll(queue: OfflineMutation[]): Promise<void> {
     return
   }
   await writeRaw(QUEUE_KEY, JSON.stringify(queue))
+}
+
+export async function peek(): Promise<OfflineMutation[]> {
+  return readQueue()
+}
+
+export function removeMatching(
+  matcher: (mutation: OfflineMutation) => boolean
+): Promise<number> {
+  return withQueueLock(async () => {
+    const queue = await readQueue()
+    const remaining = queue.filter((mutation) => !matcher(mutation))
+    const removedCount = queue.length - remaining.length
+    if (removedCount === 0) {
+      return 0
+    }
+    await replaceAll(remaining)
+    return removedCount
+  })
 }
 
 function mutationMatchesWorkspace(

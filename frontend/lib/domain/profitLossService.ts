@@ -1,17 +1,20 @@
 "use client";
 import { readProfitLossCacheRecord, saveProfitLossCache, clearProfitLossCache, } from "@/lib/storage/profitLossCache";
-import { getProfitLossStatements as apiGetProfitLossStatements, generateProfitLossStatement as apiGenerateProfitLossStatement, } from "@/lib/api";
+import { getProfitLossStatements as apiGetProfitLossStatements, } from "@/lib/api";
 import { measureAsync, startPerfTimer } from "@/lib/observability/perf";
 import { safeSchemaParse } from "@/lib/utils/safeSchemaParse";
 import type { WorkspaceId } from "@shared/contracts/workspace";
 import { ProfitLossStatementListSchema, type ProfitLossPeriodType, type ProfitLossStatement, } from "@shared/schemas/profitLoss";
 export type ProfitLossLoadResult = {
     data: ProfitLossStatement[];
-    lastBackendSync: number | null;
+    lastSuccessfulSyncAt: number | null;
+    localUpdatedAt: number | null;
+    source: "cache" | "backend";
+    didFetch: boolean;
 };
 const PROFIT_LOSS_BACKEND_TTL_MS = 5 * 60 * 1000;
 const inFlightLoads = new Map<string, Promise<ProfitLossLoadResult>>();
-const lastBackendSyncByScope = new Map<string, number | null>();
+const lastSuccessfulSyncAtByScope = new Map<string, number | null>();
 function normalizeResponse(res: any): ProfitLossStatement[] {
     if (!res)
         return [];
@@ -26,11 +29,11 @@ function normalizeResponse(res: any): ProfitLossStatement[] {
 function makeScopeKey(workspaceId: WorkspaceId, periodType: ProfitLossPeriodType): string {
     return `${workspaceId}::${periodType}`;
 }
-function getLastBackendSync(scopeKey: string): number | null {
-    return lastBackendSyncByScope.get(scopeKey) ?? null;
+function getLastSuccessfulSyncAt(scopeKey: string): number | null {
+    return lastSuccessfulSyncAtByScope.get(scopeKey) ?? null;
 }
-function setLastBackendSync(scopeKey: string, timestamp: number | null): void {
-    lastBackendSyncByScope.set(scopeKey, timestamp);
+function setLastSuccessfulSyncAt(scopeKey: string, timestamp: number | null): void {
+    lastSuccessfulSyncAtByScope.set(scopeKey, timestamp);
 }
 export async function readCachedSnapshot(workspaceId: WorkspaceId, periodType: ProfitLossPeriodType): Promise<ProfitLossLoadResult> {
     return measureAsync("profit_loss.read_cached_snapshot", async () => {
@@ -39,57 +42,77 @@ export async function readCachedSnapshot(workspaceId: WorkspaceId, periodType: P
         if (cached === null) {
             return {
                 data: [],
-                lastBackendSync: null,
+                lastSuccessfulSyncAt: null,
+                localUpdatedAt: null,
+                source: "cache",
+                didFetch: false,
             };
         }
         return {
             data: cached.data,
-            lastBackendSync: getLastBackendSync(scopeKey) ?? cached.cachedAt,
+            lastSuccessfulSyncAt: getLastSuccessfulSyncAt(scopeKey) ?? cached.lastSuccessfulSyncAt,
+            localUpdatedAt: cached.localUpdatedAt,
+            source: "cache",
+            didFetch: false,
         };
     }, { workspaceId, periodType });
 }
 export function prime(workspaceId: WorkspaceId, periodType: ProfitLossPeriodType, list: ProfitLossStatement[], options: {
-    lastBackendSync?: number | null;
+    lastSuccessfulSyncAt?: number | null;
+    localUpdatedAt?: number | null;
 } = {}): ProfitLossLoadResult {
     const scopeKey = makeScopeKey(workspaceId, periodType);
-    const lastBackendSync = options.lastBackendSync ?? Date.now();
-    setLastBackendSync(scopeKey, lastBackendSync);
-    void saveProfitLossCache(workspaceId, periodType, list);
+    const lastSuccessfulSyncAt = options.lastSuccessfulSyncAt ?? null;
+    const localUpdatedAt = options.localUpdatedAt ?? Date.now();
+    setLastSuccessfulSyncAt(scopeKey, lastSuccessfulSyncAt);
+    void saveProfitLossCache(workspaceId, periodType, list, {
+        lastSuccessfulSyncAt,
+        localUpdatedAt,
+    });
     return {
         data: list,
-        lastBackendSync,
+        lastSuccessfulSyncAt,
+        localUpdatedAt,
+        source: "cache",
+        didFetch: false,
     };
 }
 export function clearSyncMetadata(workspaceId?: WorkspaceId, periodType?: ProfitLossPeriodType): void {
     if (!workspaceId) {
-        lastBackendSyncByScope.clear();
+        lastSuccessfulSyncAtByScope.clear();
         return;
     }
     if (periodType) {
-        lastBackendSyncByScope.delete(makeScopeKey(workspaceId, periodType));
+        lastSuccessfulSyncAtByScope.delete(makeScopeKey(workspaceId, periodType));
         return;
     }
     const prefix = `${workspaceId}::`;
-    for (const key of Array.from(lastBackendSyncByScope.keys())) {
+    for (const key of Array.from(lastSuccessfulSyncAtByScope.keys())) {
         if (key.startsWith(prefix)) {
-            lastBackendSyncByScope.delete(key);
+            lastSuccessfulSyncAtByScope.delete(key);
         }
     }
 }
 async function fetchBackend(workspaceId: WorkspaceId, periodType: ProfitLossPeriodType): Promise<ProfitLossLoadResult> {
     return measureAsync("profit_loss.fetch_backend", async () => {
-        const res = await apiGetProfitLossStatements(workspaceId, periodType, false);
+        const res = await apiGetProfitLossStatements(workspaceId, periodType, true);
         const list = normalizeResponse(res);
         const parsed = safeSchemaParse(ProfitLossStatementListSchema, list);
         if (!parsed.success) {
             throw parsed.error;
         }
-        await saveProfitLossCache(workspaceId, periodType, parsed.data);
         const syncedAt = Date.now();
-        setLastBackendSync(makeScopeKey(workspaceId, periodType), syncedAt);
+        await saveProfitLossCache(workspaceId, periodType, parsed.data, {
+            lastSuccessfulSyncAt: syncedAt,
+            localUpdatedAt: syncedAt,
+        });
+        setLastSuccessfulSyncAt(makeScopeKey(workspaceId, periodType), syncedAt);
         return {
             data: parsed.data,
-            lastBackendSync: syncedAt,
+            lastSuccessfulSyncAt: syncedAt,
+            localUpdatedAt: syncedAt,
+            source: "backend",
+            didFetch: true,
         };
     }, { workspaceId, periodType });
 }
@@ -108,9 +131,9 @@ export async function ensureLoaded(workspaceId: WorkspaceId, periodType: ProfitL
         });
         const cached = await readCachedSnapshot(workspaceId, periodType);
         const forceBackend = options.forceBackend === true;
-        const isFresh = cached.lastBackendSync !== null &&
-            Date.now() - cached.lastBackendSync <= PROFIT_LOSS_BACKEND_TTL_MS;
-        const hasCache = cached.data.length > 0 || cached.lastBackendSync !== null;
+        const isFresh = cached.lastSuccessfulSyncAt !== null &&
+            Date.now() - cached.lastSuccessfulSyncAt <= PROFIT_LOSS_BACKEND_TTL_MS;
+        const hasCache = cached.data.length > 0 || cached.lastSuccessfulSyncAt !== null;
         if (!forceBackend && hasCache && isFresh) {
             timer.success({ source: "cache-fresh", hasCache });
             return cached;
@@ -141,14 +164,26 @@ export async function revalidate(workspaceId: WorkspaceId, periodType: ProfitLos
     const result = await fetchBackend(workspaceId, periodType);
     return result.data;
 }
-export async function regenerate(workspaceId: WorkspaceId, periodType: ProfitLossPeriodType, periodKey: string): Promise<ProfitLossStatement> {
-    const statement = await apiGenerateProfitLossStatement(workspaceId, periodType, periodKey, true);
-    const current = await getCached(workspaceId, periodType);
-    const next = [statement, ...current.filter((item) => item.id !== statement.id)].sort((a, b) => b.periodStart.localeCompare(a.periodStart));
-    await saveProfitLossCache(workspaceId, periodType, next);
-    setLastBackendSync(makeScopeKey(workspaceId, periodType), Date.now());
-    return statement;
+// Zeroes the TTL timestamp in both layers (in-memory + IndexedDB) without
+// discarding cached statement data. The next ensureLoaded call will skip the
+// freshness check and fetch from the backend, but the cached statements remain
+// visible in the UI while that fetch completes.
+const PERIOD_TYPES: ProfitLossPeriodType[] = ["month", "quarter", "year"];
+
+export async function invalidate(workspaceId: WorkspaceId): Promise<void> {
+    clearSyncMetadata(workspaceId);
+    await Promise.all(
+        PERIOD_TYPES.map(async (periodType) => {
+            const record = await readProfitLossCacheRecord(workspaceId, periodType);
+            if (!record) return;
+            await saveProfitLossCache(workspaceId, periodType, record.data, {
+                lastSuccessfulSyncAt: null,
+                localUpdatedAt: record.localUpdatedAt,
+            });
+        })
+    );
 }
+
 export async function clear(workspaceId?: WorkspaceId): Promise<void> {
     clearSyncMetadata(workspaceId);
     await clearProfitLossCache(workspaceId);

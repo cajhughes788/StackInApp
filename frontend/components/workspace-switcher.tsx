@@ -1,5 +1,6 @@
 "use client"
 
+import { startTransition } from "react"
 import { useRouter } from "next/navigation"
 import { Check, ChevronDown, Plus } from "lucide-react"
 
@@ -12,18 +13,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
-import { useEffect, useState } from "react"
-import { API_ENDPOINTS, apiFetch } from "@/lib/api"
-import { debugError, debugRender, debugLog } from "@/lib/debugLoop"
-import type { SubscriptionDoc } from "@shared/contracts/subscription"
+import { debugRender } from "@/lib/debugLoop"
 import { useNavigationGuardStore } from "@/lib/stores/useNavigationGuardStore"
 import { useToast } from "@/hooks/use-toast"
-
-type WorkspaceSubscriptionResponse = {
-  isActive?: boolean
-  subscription?: SubscriptionDoc | null
-  maxWorkspaces?: number | "unlimited"
-}
+import { useAppBootstrapState } from "@/contexts/app-bootstrap-context"
 
 export default function WorkspaceSwitcher() {
   const router = useRouter()
@@ -31,73 +24,26 @@ export default function WorkspaceSwitcher() {
   const workspaceState = useWorkspaceStore((s) => s.state)
   const setActiveWorkspace = useWorkspaceStore((s) => s.setActiveWorkspace)
   const navigationGuard = useNavigationGuardStore((s) => s.guard)
-  const [canAddWorkspace, setCanAddWorkspace] = useState(false)
+  const { authority, authorityStatus } = useAppBootstrapState()
   const workspaceCount =
     workspaceState.status === "ready" ? workspaceState.workspaces.length : 0
   const readyActiveWorkspaceId =
     workspaceState.status === "ready" ? workspaceState.activeWorkspaceId : null
+  const canAddWorkspace =
+    workspaceState.status === "ready" &&
+    authorityStatus === "ready" &&
+    authority !== null &&
+    authority.isSubscriptionActive &&
+    (authority.maxWorkspaces === "unlimited" ||
+      (typeof authority.maxWorkspaces === "number" &&
+        workspaceCount < authority.maxWorkspaces))
   debugRender("workspace-switcher", {
     workspaceStatus: workspaceState.status,
     activeWorkspaceId: readyActiveWorkspaceId,
     workspaceCount,
     canAddWorkspace,
+    authorityStatus,
   })
-
-  useEffect(() => {
-    let cancelled = false
-
-    if (workspaceState.status !== "ready") {
-      debugLog("workspace-switcher", "not_ready", {
-        workspaceStatus: workspaceState.status,
-      })
-      setCanAddWorkspace((current) => (current ? false : current))
-      return
-    }
-
-    async function loadSubscription() {
-      try {
-        debugLog("workspace-switcher", "subscription_check_start", {
-          activeWorkspaceId: readyActiveWorkspaceId,
-          workspaceCount,
-        })
-        const res = await apiFetch<WorkspaceSubscriptionResponse>(
-          API_ENDPOINTS.subscription.get
-        )
-        const maxWorkspaces = res?.maxWorkspaces ?? 0
-        const hasCapacity =
-          maxWorkspaces === "unlimited" ||
-          (typeof maxWorkspaces === "number" &&
-            workspaceCount < maxWorkspaces)
-
-        if (!cancelled) {
-          const nextValue = Boolean(res?.isActive) && hasCapacity
-          debugLog("workspace-switcher", "subscription_check_complete", {
-            activeWorkspaceId: readyActiveWorkspaceId,
-            nextValue,
-            isActive: Boolean(res?.isActive),
-            maxWorkspaces,
-            workspaceCount,
-          })
-          setCanAddWorkspace((current) =>
-            current === nextValue ? current : nextValue
-          )
-        }
-      } catch {
-        if (!cancelled) {
-          debugError("workspace-switcher", "subscription_check_failed", {
-            activeWorkspaceId: readyActiveWorkspaceId,
-          })
-          setCanAddWorkspace((current) => (current ? false : current))
-        }
-      }
-    }
-
-    loadSubscription()
-
-    return () => {
-      cancelled = true
-    }
-  }, [workspaceState.status, readyActiveWorkspaceId, workspaceCount])
 
   if (workspaceState.status !== "ready") {
     return null
@@ -107,19 +53,34 @@ export default function WorkspaceSwitcher() {
 
   async function handleWorkspaceSelect(workspaceId: string) {
     if (workspaceId === activeWorkspaceId) return
-    if (navigationGuard?.shouldBlock) {
+    if (navigationGuard?.mode === "block") {
       const flushed = await navigationGuard.flush()
       if (!flushed) {
         toast({
           title: "Unable to switch workspace",
-          description: "Finish resolving your settings changes before switching workspaces.",
+          description:
+            navigationGuard.reason ??
+            "Finish resolving your settings changes before switching workspaces.",
           variant: "destructive",
         })
         return
       }
     }
+
+    if (navigationGuard?.mode === "background") {
+      void navigationGuard.flush()
+      toast({
+        title: "Saving settings in background",
+        description:
+          navigationGuard.reason ??
+          "Your latest settings changes will keep saving after you switch workspaces.",
+      })
+    }
+
     setActiveWorkspace(workspaceId)
-    router.push("/app/home")
+    startTransition(() => {
+      router.push("/app/home")
+    })
   }
 
   return (

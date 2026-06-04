@@ -12,6 +12,8 @@
     "dev": "npm run --workspace frontend dev",
     "deploy": "npm run --workspace backend/functions deploy",
     "typecheck": "tsc --noEmit",
+    "test:settings-sync": "node ./scripts/test-settings-sync.cjs",
+    "test:sync": "node ./scripts/test-sync.cjs",
     "install:all": "npm install --workspaces",
     "verify": "npm ls zod",
     "profile:report": "node ./scripts/profile-report.mjs"

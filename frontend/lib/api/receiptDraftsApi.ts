@@ -3,6 +3,7 @@ import type {
   ReceiptDraftInput,
   ReceiptDraftPatch,
 } from "@shared/schemas/receiptDraft"
+import type { ExpenseType } from "@shared/schemas/expense"
 
 import type { ApiProfileContext } from "@/lib/api/core/client"
 import { apiFetch, tryWrite } from "@/lib/api/core/client"
@@ -48,4 +49,17 @@ export async function updateReceiptDraft(
   )
 
   return res.draft
+}
+
+export async function commitReceiptDraftApi(
+  workspaceId: string,
+  receiptDraftId: string,
+  expenseInput: Record<string, unknown>
+): Promise<{ expense: ExpenseType; draft: ReceiptDraft }> {
+  const res = await tryWrite<{ ok: boolean; expense: ExpenseType; draft: ReceiptDraft }>(
+    `${API_ENDPOINTS.receiptDrafts.commit}?workspaceId=${encodeURIComponent(workspaceId)}&receiptDraftId=${encodeURIComponent(receiptDraftId)}`,
+    "POST",
+    expenseInput
+  )
+  return { expense: res.expense, draft: res.draft }
 }

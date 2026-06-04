@@ -19,10 +19,10 @@ export type StackInLoaderWebProps = {
 }
 
 const DEFAULT_ASSETS = {
-  base: "/images/aligned-hole-logo-mobile.png",
-  dollar: "/images/aligned-dollar-mobile.png",
-  coinStack: "/images/aligned-coin-stack-mobile.png",
-  coin: "/images/aligned-coin-mobile.png",
+  base: "/images/aligned-hole-logo-mobile.webp",
+  dollar: "/images/aligned-dollar-mobile.webp",
+  coinStack: "/images/aligned-coin-stack-mobile.webp",
+  coin: "/images/aligned-coin-mobile.webp",
 }
 
 const WRAPPER_STYLE = `

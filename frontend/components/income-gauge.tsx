@@ -4,11 +4,21 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { formatCurrency } from "@/lib/helpers";
 import { calculateNetPay } from "@shared/tax/engine";
 import { buildTaxProfileInput } from "@shared/tax/buildTaxProfileInput";
-import { useEntriesStore } from "@/lib/stores/useEntriesStore";
-import { useSettingsStore } from "@/lib/stores/useSettingsStore";
-import { useTaxProfileStore } from "@/lib/stores/useTaxProfileStore";
+import {
+    useEntriesData,
+    useEntriesRenderState,
+} from "@/lib/stores/useEntriesStore";
+import {
+    useSettingsData,
+    useSettingsRenderState,
+} from "@/lib/stores/useSettingsStore";
+import {
+    useTaxProfileData,
+    useTaxProfileRenderState,
+} from "@/lib/stores/useTaxProfileStore";
 import { computeIncomeGaugeForEntries } from "@shared/computeIncomeGauge";
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore";
+import SyncStatusIndicator from "@/components/sync-status-indicator";
 export default function IncomeGauge() {
     const workspaceState = useWorkspaceStore((s) => s.state);
     const activeWorkspace = workspaceState.status === "ready"
@@ -17,24 +27,15 @@ export default function IncomeGauge() {
     const activeWorkspaceId = workspaceState.status === "ready"
         ? workspaceState.activeWorkspaceId
         : null;
-    const entriesEntry = useEntriesStore((s) => activeWorkspaceId ? s.byWorkspaceId[activeWorkspaceId] : undefined);
-    const entries = entriesEntry?.entries ?? [];
-    const entriesLoading = activeWorkspaceId != null
-        ? (entriesEntry?.status ?? "idle") === "loading"
-        : true;
-    const entriesRefreshing = entriesEntry?.isRefreshing ?? false;
-    const settingsEntry = useSettingsStore((s) => activeWorkspaceId ? s.byWorkspaceId[activeWorkspaceId] : undefined);
-    const settings = settingsEntry?.data ?? null;
-    const settingsLoading = activeWorkspaceId != null
-        ? (settingsEntry?.status ?? "idle") === "loading"
-        : true;
-    const taxEntry = useTaxProfileStore((s) => activeWorkspaceId ? s.byWorkspaceId[activeWorkspaceId] : undefined);
-    const taxProfile = taxEntry?.taxProfile ?? null;
-    const taxLoading = activeWorkspaceId != null
-        ? (taxEntry?.status ?? "idle") === "loading"
-        : true;
-    const hasRenderableEntries = entries.length > 0 || (entriesEntry?.lastBackendSync ?? null) !== null;
+    const entries = useEntriesData(activeWorkspaceId);
+    const { isHydrating: entriesHydrating, isRevalidating: entriesRevalidating, lastSuccessfulSyncAt: entriesLastSuccessfulSyncAt } = useEntriesRenderState(activeWorkspaceId);
+    const settings = useSettingsData(activeWorkspaceId);
+    const { isHydrating: settingsHydrating, isRevalidating: settingsRevalidating } = useSettingsRenderState(activeWorkspaceId);
+    const taxProfile = useTaxProfileData(activeWorkspaceId);
+    const { isRevalidating: taxRevalidating } = useTaxProfileRenderState(activeWorkspaceId);
+    const hasRenderableEntries = entries.length > 0 || entriesLastSuccessfulSyncAt !== null;
     const hasRenderableSettings = settings !== null;
+    const showSyncIndicator = entriesRevalidating || settingsRevalidating || taxRevalidating;
     const [netPreview, setNetPreview] = useState<number | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [previewMessage, setPreviewMessage] = useState<string | null>(null);
@@ -148,8 +149,8 @@ export default function IncomeGauge() {
     if (workspaceState.status !== "ready" ||
         !activeWorkspaceId ||
         !activeWorkspace ||
-        (entriesLoading && !hasRenderableEntries) ||
-        (settingsLoading && !hasRenderableSettings)) {
+        (entriesHydrating && !hasRenderableEntries) ||
+        (settingsHydrating && !hasRenderableSettings)) {
         return (<div className="p-4 text-gray-400 text-sm">
         Loading pay summary…
       </div>);
@@ -157,8 +158,8 @@ export default function IncomeGauge() {
     // ------------------------------------------------------------
     // RENDER
     // ------------------------------------------------------------
-    return (<div ref={previewRef} className="bg-card rounded-lg border p-4 shadow-sm sm:p-6">
-      {entriesRefreshing || settingsLoading ? (<div className="mb-3 text-xs text-muted-foreground">Refreshing pay summary…</div>) : null}
+    return (<div ref={previewRef} className="relative bg-card rounded-lg border p-4 shadow-sm sm:p-6">
+      <SyncStatusIndicator visible={showSyncIndicator} label="Syncing pay summary"/>
 
       <h2 className="mb-4 text-lg font-semibold">Current Pay Period</h2>
 

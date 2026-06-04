@@ -15,12 +15,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  getVisibleExpenseCategoryOptions,
+  isExpenseCategorySelectable,
+} from "@/lib/expenseCategories"
 import { formatCurrency } from "@/lib/helpers"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import { useImportsStore } from "@/lib/stores/useImportsStore"
 import { useEntriesStore } from "@/lib/stores/useEntriesStore"
 import { useExpensesStore } from "@/lib/stores/useExpensesStore"
 import { useExpenseMemoryStore } from "@/lib/stores/useExpenseMemoryStore"
+import { useSettingsStore } from "@/lib/stores/useSettingsStore"
 import {
   parseImportCsvBySource,
   SUPPORTED_IMPORT_SOURCES,
@@ -37,7 +42,8 @@ import {
 } from "@/lib/incomeBreakdown"
 import * as entriesService from "@/lib/domain/entriesService"
 import * as expensesService from "@/lib/domain/expenseService"
-import { EXPENSE_CATEGORY_OPTIONS } from "@/lib/expenseCategories"
+import { getCalendarMonthBucketFromDate } from "@shared/payPeriods"
+import { isVehicleTransportationCategory } from "@shared/vehicleExpenses"
 import {
   findDuplicateExpense,
   findDuplicateIncomeEntry,
@@ -129,6 +135,20 @@ export default function VenmoImportPanel() {
     workspaceState.status === "ready" ? workspaceState.activeWorkspace : null
   const activeWorkspaceId =
     workspaceState.status === "ready" ? workspaceState.activeWorkspaceId : null
+  const settingsEntry = useSettingsStore((state) =>
+    activeWorkspaceId ? state.byWorkspaceId[activeWorkspaceId] : undefined
+  )
+  const expenseCategoryOptions = useMemo(
+    () =>
+      getVisibleExpenseCategoryOptions(
+        settingsEntry?.data?.independent?.customExpenseCategories ?? [],
+        {
+          workspaceType: activeWorkspace?.type ?? null,
+          independentSettings: settingsEntry?.data?.independent ?? null,
+        }
+      ),
+    [activeWorkspace?.type, settingsEntry?.data?.independent]
+  )
 
   const importsEntry = useImportsStore((state) =>
     activeWorkspaceId ? state.byWorkspaceId[activeWorkspaceId] : undefined
@@ -597,9 +617,19 @@ export default function VenmoImportPanel() {
   }
 
   function getSelectedExpenseCategory(item: ImportItem): string {
-    return (
+    const category =
       expenseCategoriesByItemId[item.id] || item.suggestedExpenseAccount || ""
+
+    return isExpenseCategorySelectable(
+      category,
+      settingsEntry?.data?.independent?.customExpenseCategories ?? [],
+      {
+        workspaceType: activeWorkspace?.type ?? null,
+        independentSettings: settingsEntry?.data?.independent ?? null,
+      }
     )
+      ? category
+      : ""
   }
 
   async function commitExpenseItem(item: ImportItem) {
@@ -631,8 +661,11 @@ export default function VenmoImportPanel() {
           item.counterparty ||
           `Imported from ${formatSourceLabel(item.source as SupportedImportSource)}`,
         account: expenseCategory,
-        periodId: occurredAt.slice(0, 7),
+        periodId: getCalendarMonthBucketFromDate(occurredAt),
         calculationMethod: "manual",
+        vehicleExpenseMode: isVehicleTransportationCategory(expenseCategory)
+          ? "direct_expense"
+          : undefined,
       })
 
       await updateItem(activeWorkspaceId, selectedBatchId, item.id, {
@@ -695,8 +728,11 @@ export default function VenmoImportPanel() {
             item.counterparty ||
             `Imported from ${formatSourceLabel(item.source as SupportedImportSource)}`,
           account: expenseCategory,
-          periodId: occurredAt.slice(0, 7),
+          periodId: getCalendarMonthBucketFromDate(occurredAt),
           calculationMethod: "manual",
+          vehicleExpenseMode: isVehicleTransportationCategory(expenseCategory)
+            ? "direct_expense"
+            : undefined,
         })
         await updateItem(activeWorkspaceId!, selectedBatchId!, item.id, {
           status: "committed",
@@ -808,7 +844,7 @@ export default function VenmoImportPanel() {
                       <SelectValue placeholder="Expense category" />
                     </SelectTrigger>
                     <SelectContent>
-                      {EXPENSE_CATEGORY_OPTIONS.map((option) => (
+                      {expenseCategoryOptions.map((option) => (
                         <SelectItem key={option} value={option}>
                           {option}
                         </SelectItem>
@@ -954,7 +990,7 @@ export default function VenmoImportPanel() {
                               <SelectValue placeholder="Choose expense category" />
                             </SelectTrigger>
                             <SelectContent>
-                              {EXPENSE_CATEGORY_OPTIONS.map((option) => (
+                              {expenseCategoryOptions.map((option) => (
                                 <SelectItem key={option} value={option}>
                                   {option}
                                 </SelectItem>

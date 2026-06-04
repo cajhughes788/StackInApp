@@ -11,6 +11,21 @@ import { getAuthSessionVersion, isAuthSessionCurrent } from "@/lib/authSession"
 import { debugLog } from "@/lib/debugLoop"
 import { createProfileTrace, withProfileStep } from "@/lib/observability/profileTrace"
 
+const WORKSPACE_HYDRATE_TIMEOUT_MS = 15_000
+
+function withHydrateTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const id = window.setTimeout(
+      () => reject(new Error(`${label} timed out after ${WORKSPACE_HYDRATE_TIMEOUT_MS}ms`)),
+      WORKSPACE_HYDRATE_TIMEOUT_MS
+    )
+    promise.then(
+      (v) => { window.clearTimeout(id); resolve(v) },
+      (e) => { window.clearTimeout(id); reject(e) }
+    )
+  })
+}
+
 import type {
   WorkspaceId,
   WorkspaceMembership,
@@ -32,6 +47,7 @@ type WorkspaceState =
 
 const ACTIVE_WORKSPACE_STORAGE_KEY = "stackin-active-workspace-id"
 const WORKSPACE_SNAPSHOT_STORAGE_KEY = "stackin-workspace-snapshot"
+const WORKSPACE_SNAPSHOT_TTL_MS = 5 * 60 * 1000
 
 function isWorkspaceType(value: unknown): value is WorkspaceSummary["type"] {
   return value === "w2" || value === "independent"
@@ -72,33 +88,37 @@ function clearPersistedActiveWorkspaceId() {
 function loadPersistedWorkspaceSnapshot(uid: string): {
   state: Extract<WorkspaceState, { status: "ready" }> | null
   reason: string | null
+  isFresh: boolean
 } {
-  if (typeof window === "undefined") return { state: null, reason: null }
+  if (typeof window === "undefined") return { state: null, reason: null, isFresh: false }
   try {
     const raw = window.localStorage.getItem(WORKSPACE_SNAPSHOT_STORAGE_KEY)
-    if (!raw) return { state: null, reason: null }
+    if (!raw) return { state: null, reason: null, isFresh: false }
     const parsed = JSON.parse(raw) as {
       uid?: string
       workspaces?: unknown
       activeWorkspaceId?: unknown
+      writtenAt?: unknown
     }
     if (parsed.uid !== uid) {
-      return { state: null, reason: "uid-mismatch" }
+      return { state: null, reason: "uid-mismatch", isFresh: false }
     }
     if (!Array.isArray(parsed.workspaces) || parsed.workspaces.length === 0) {
-      return { state: null, reason: "missing-workspaces" }
+      return { state: null, reason: "missing-workspaces", isFresh: false }
     }
     const workspaces = parsed.workspaces.filter(isWorkspaceSummary)
     if (workspaces.length !== parsed.workspaces.length) {
-      return { state: null, reason: "invalid-workspace-shape" }
+      return { state: null, reason: "invalid-workspace-shape", isFresh: false }
     }
     if (typeof parsed.activeWorkspaceId !== "string" || parsed.activeWorkspaceId.length === 0) {
-      return { state: null, reason: "invalid-active-workspace-id" }
+      return { state: null, reason: "invalid-active-workspace-id", isFresh: false }
     }
     const activeWorkspace =
       workspaces.find((workspace) => workspace.id === parsed.activeWorkspaceId) ??
       workspaces[0]
-    if (!activeWorkspace) return { state: null, reason: "missing-active-workspace" }
+    if (!activeWorkspace) return { state: null, reason: "missing-active-workspace", isFresh: false }
+    const writtenAt = typeof parsed.writtenAt === "number" ? parsed.writtenAt : 0
+    const isFresh = Date.now() - writtenAt < WORKSPACE_SNAPSHOT_TTL_MS
     return {
       state: {
         status: "ready",
@@ -107,9 +127,10 @@ function loadPersistedWorkspaceSnapshot(uid: string): {
         activeWorkspace,
       },
       reason: null,
+      isFresh,
     }
   } catch {
-    return { state: null, reason: "snapshot-parse-failed" }
+    return { state: null, reason: "snapshot-parse-failed", isFresh: false }
   }
 }
 
@@ -126,6 +147,7 @@ function persistWorkspaceSnapshot(
         uid,
         workspaces,
         activeWorkspaceId,
+        writtenAt: Date.now(),
       })
     )
   } catch {
@@ -234,6 +256,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
       hasCachedState: cachedState !== null,
       cachedWorkspaceCount: cachedState?.workspaces.length ?? 0,
       cachedSnapshotReason: cachedSnapshot.reason,
+      cachedSnapshotFresh: cachedSnapshot.isFresh,
     })
     if (cachedSnapshot.state === null && cachedSnapshot.reason) {
       clearPersistedWorkspaceSnapshot()
@@ -246,57 +269,89 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
     if (isAuthSessionCurrent(sessionVersion)) {
       set({ state: cachedState ?? { status: "loading" } })
     }
+
+    if (cachedSnapshot.isFresh && cachedState !== null) {
+      debugLog("workspace-store", "hydrate_skipped_fresh_cache", {
+        uid,
+        activeWorkspaceId: cachedState.activeWorkspaceId,
+        workspaceCount: cachedState.workspaces.length,
+      })
+      return
+    }
+
     const db = getDbSafe()
     const trace =
       options?.traceId && options?.flow
         ? createProfileTrace(options.flow, { uid }, options.traceId)
         : null
 
-    //Load workspace memberships for user
-    const membershipsSnap = await withProfileStep(
-      trace,
-      "startup.workspace_memberships_fetch",
-      () =>
-        getDocs(
-          collection(db, "users", uid, "memberships")
-        ),
-      { uid }
-    )
+    let membershipsSnap: Awaited<ReturnType<typeof getDocs>>
+    let workspaceSnaps: Awaited<ReturnType<typeof getDoc>>[]
 
-    if (!isAuthSessionCurrent(sessionVersion)) {
-      debugLog("workspace-store", "hydrate_abort_after_memberships", {
+    try {
+      //Load workspace memberships for user
+      membershipsSnap = await withHydrateTimeout(
+        withProfileStep(
+          trace,
+          "startup.workspace_memberships_fetch",
+          () => getDocs(collection(db, "users", uid, "memberships")),
+          { uid }
+        ),
+        "workspace memberships fetch"
+      )
+
+      if (!isAuthSessionCurrent(sessionVersion)) {
+        debugLog("workspace-store", "hydrate_abort_after_memberships", {
+          uid,
+          sessionVersion,
+        })
+        return
+      }
+
+      if (membershipsSnap.empty) {
+        debugLog("workspace-store", "no_workspace", { uid })
+        set({ state: { status: "no-workspace" } })
+        clearPersistedWorkspaceSnapshot()
+        return
+      }
+
+      const workspaceIds = membershipsSnap.docs.map(
+        (membershipDoc) =>
+          (membershipDoc.data() as WorkspaceMembership).workspaceId as WorkspaceId
+      )
+
+      workspaceSnaps = await withHydrateTimeout(
+        withProfileStep(
+          trace,
+          "startup.workspace_docs_fetch",
+          () =>
+            Promise.all(
+              workspaceIds.map((workspaceId) => getDoc(doc(db, "workspaces", workspaceId)))
+            ),
+          { workspaceCount: workspaceIds.length }
+        ),
+        "workspace docs fetch"
+      )
+    } catch (error) {
+      debugLog("workspace-store", "hydrate_firestore_error", {
         uid,
-        sessionVersion,
+        message: error instanceof Error ? error.message : String(error),
+        hasCachedState: cachedState !== null,
       })
+      if (cachedState !== null && isAuthSessionCurrent(sessionVersion)) {
+        // Firestore timed out or failed — cached state is already set above, leave it
+        return
+      }
+      if (isAuthSessionCurrent(sessionVersion)) {
+        set({ state: { status: "no-workspace" } })
+      }
       return
     }
+
     debugLog("workspace-store", "memberships_loaded", {
       uid,
       membershipCount: membershipsSnap.docs.length,
-      empty: membershipsSnap.empty,
     })
-
-    if (membershipsSnap.empty) {
-      debugLog("workspace-store", "no_workspace", { uid })
-      set({ state: { status: "no-workspace" } })
-      clearPersistedWorkspaceSnapshot()
-      return
-    }
-
-    const workspaceIds = membershipsSnap.docs.map(
-      (membershipDoc) =>
-        (membershipDoc.data() as WorkspaceMembership).workspaceId as WorkspaceId
-    )
-
-    const workspaceSnaps = await withProfileStep(
-      trace,
-      "startup.workspace_docs_fetch",
-      () =>
-        Promise.all(
-          workspaceIds.map((workspaceId) => getDoc(doc(db, "workspaces", workspaceId)))
-        ),
-      { workspaceCount: workspaceIds.length }
-    )
 
     if (!isAuthSessionCurrent(sessionVersion)) {
       debugLog("workspace-store", "hydrate_abort_after_workspace_docs", {
@@ -309,19 +364,19 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
     const workspaces: WorkspaceSummary[] = workspaceSnaps
       .filter((workspaceSnap) => workspaceSnap.exists())
       .map((workspaceSnap) => {
-        const ws = workspaceSnap.data()
+        const ws = workspaceSnap.data() as Record<string, unknown>
         return {
           id: workspaceSnap.id as WorkspaceId,
-          name: ws.name,
-          type: ws.type,
-          status: ws.status,
+          name: ws.name as string,
+          type: ws.type as WorkspaceSummary["type"],
+          status: ws.status as WorkspaceSummary["status"],
         }
       })
       .filter((workspace) => workspace.status === "active")
 
     debugLog("workspace-store", "workspace_docs_loaded", {
       uid,
-      workspaceIds,
+      workspaceCount: workspaceSnaps.length,
       activeWorkspaceCount: workspaces.length,
       workspaceTypes: workspaces.map((workspace) => workspace.type),
     })

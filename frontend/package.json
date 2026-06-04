@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "next lint",
     "clean": "rimraf .next out",
-    "sync": "npm run build && npx cap sync"
+    "sync": "npm run build && npx cap sync",
+    "test:sync": "node ../scripts/test-sync.cjs"
   },
   "dependencies": {
     "@capacitor-community/sqlite": "^7.0.2",

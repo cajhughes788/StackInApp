@@ -9,7 +9,6 @@ import {
   Loader2,
   MoreVertical,
   Printer,
-  RefreshCcw,
   Share2,
 } from "lucide-react"
 import AppLoader from "@/components/app-loader"
@@ -42,6 +41,95 @@ import type {
   ProfitLossPeriodType,
   ProfitLossStatement,
 } from "@shared/schemas/profitLoss"
+
+const OTHER_EXPENSE_SUBCATEGORY_PRIORITY = [
+  "Education & Training",
+  "Software & Subscriptions",
+  "Work Clothing",
+] as const
+
+type ExpenseDisplaySubcategory = {
+  label: string
+  amount: number
+  count: number
+  items: ProfitLossDetailItem[]
+}
+
+type ExpenseDisplayRow = {
+  rowKey: string
+  label: string
+  amount: number
+  items: ProfitLossDetailItem[]
+  countLabel: string
+  subcategories?: ExpenseDisplaySubcategory[]
+}
+
+function buildExpenseDisplayRows(
+  categories: ProfitLossExpenseCategory[]
+): ExpenseDisplayRow[] {
+  return categories
+    .filter((item) => item.amount > 0)
+    .map((item) => {
+      if (item.category !== "Other expenses") {
+        return {
+          rowKey: `expense-${item.category}`,
+          label: item.category,
+          amount: item.amount,
+          items: item.items,
+          countLabel: `${item.count} ${item.count === 1 ? "expense" : "expenses"}`,
+        }
+      }
+
+      const grouped = new Map<string, ExpenseDisplaySubcategory>()
+      for (const detail of item.items) {
+        const subcategoryLabel = detail.appCategory?.trim() || "Other Expenses"
+        const current = grouped.get(subcategoryLabel) ?? {
+          label: subcategoryLabel,
+          amount: 0,
+          count: 0,
+          items: [],
+        }
+        current.amount += detail.amount
+        current.count += 1
+        current.items.push(detail)
+        grouped.set(subcategoryLabel, current)
+      }
+
+      const subcategories = [...grouped.values()]
+        .map((subcategory) => ({
+          ...subcategory,
+          amount: Math.round(subcategory.amount * 100) / 100,
+          items: [...subcategory.items].sort(
+            (left, right) => left.date.localeCompare(right.date) || left.label.localeCompare(right.label)
+          ),
+        }))
+        .sort((left, right) => {
+          const leftPriority = OTHER_EXPENSE_SUBCATEGORY_PRIORITY.indexOf(
+            left.label as (typeof OTHER_EXPENSE_SUBCATEGORY_PRIORITY)[number]
+          )
+          const rightPriority = OTHER_EXPENSE_SUBCATEGORY_PRIORITY.indexOf(
+            right.label as (typeof OTHER_EXPENSE_SUBCATEGORY_PRIORITY)[number]
+          )
+
+          if (leftPriority !== -1 || rightPriority !== -1) {
+            if (leftPriority === -1) return 1
+            if (rightPriority === -1) return -1
+            return leftPriority - rightPriority
+          }
+
+          return left.label.localeCompare(right.label)
+        })
+
+      return {
+        rowKey: `expense-${item.category}`,
+        label: "Other Expenses",
+        amount: item.amount,
+        items: item.items,
+        countLabel: `${item.count} ${item.count === 1 ? "expense" : "expenses"}`,
+        subcategories,
+      }
+    })
+}
 
 const periodOptions: Array<{
   value: ProfitLossPeriodType
@@ -102,18 +190,62 @@ function StatementDetailList({ items, emptyLabel }: {
   )
 }
 
+function StatementSubcategoryList({
+  subcategories,
+  emptyLabel,
+}: {
+  subcategories: ExpenseDisplaySubcategory[]
+  emptyLabel: string
+}) {
+  if (subcategories.length === 0) {
+    return (
+      <div className="border-t border-[rgba(16,24,40,0.08)] px-4 py-3 text-sm text-slate-500">
+        {emptyLabel}
+      </div>
+    )
+  }
+
+  return (
+    <div className="border-t border-[rgba(16,24,40,0.08)] bg-[rgba(248,250,252,0.9)]">
+      {subcategories.map((subcategory) => (
+        <div key={subcategory.label} className="border-b border-[rgba(16,24,40,0.08)] last:border-b-0">
+          <div className="grid grid-cols-1 gap-1 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_120px] sm:gap-3">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                {subcategory.label}
+              </div>
+              <div className="mt-1 text-xs text-slate-500">
+                {subcategory.count} {subcategory.count === 1 ? "expense" : "expenses"}
+              </div>
+            </div>
+            <div className="font-medium tabular-nums text-slate-900 sm:text-right">
+              {formatCurrency(subcategory.amount)}
+            </div>
+          </div>
+          <StatementDetailList
+            items={subcategory.items}
+            emptyLabel={`No ${subcategory.label.toLowerCase()} expenses in this period.`}
+          />
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function StatementCategoryRow({
   rowKey,
   label,
   amount,
   items,
   countLabel,
+  subcategories,
 }: {
   rowKey: string
   label: string
   amount: number
   items: ProfitLossDetailItem[]
   countLabel: string
+  subcategories?: ExpenseDisplaySubcategory[]
 }) {
   const expandable = items.length > 0
 
@@ -137,7 +269,14 @@ function StatementCategoryRow({
         <div className="col-span-2 -mt-1 font-medium tabular-nums text-slate-900 sm:hidden">{formatCurrency(amount)}</div>
       </AccordionTrigger>
       <AccordionContent className="pb-0">
-        <StatementDetailList items={items} emptyLabel={`No ${label.toLowerCase()} transactions in this period.`} />
+        {subcategories && subcategories.length > 0 ? (
+          <StatementSubcategoryList
+            subcategories={subcategories}
+            emptyLabel={`No ${label.toLowerCase()} transactions in this period.`}
+          />
+        ) : (
+          <StatementDetailList items={items} emptyLabel={`No ${label.toLowerCase()} transactions in this period.`} />
+        )}
       </AccordionContent>
     </AccordionItem>
   )
@@ -183,15 +322,11 @@ function StatementActionMenu({
   onPrint,
   onShare,
   onExportCsv,
-  onRegenerate,
-  regenerating,
 }: {
   className?: string
   onPrint: () => void
   onShare: () => void
   onExportCsv: () => void
-  onRegenerate: () => void
-  regenerating: boolean
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -224,23 +359,6 @@ function StatementActionMenu({
 
       {open ? (
         <div className="absolute right-0 top-full z-[9999] mt-2 w-40 rounded-md border border-slate-200 bg-white text-slate-900 shadow-lg">
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation()
-              setOpen(false)
-              onRegenerate()
-            }}
-            disabled={regenerating}
-            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {regenerating ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCcw className="h-4 w-4" />
-            )}
-            Regenerate
-          </button>
           <button
             type="button"
             onClick={(event) => {
@@ -288,7 +406,6 @@ export default function ProfitLossPage() {
   const { user, authLoading } = useAuth()
   const [periodType, setPeriodType] = useState<ProfitLossPeriodType>("month")
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
   const [detailsCollapsed, setDetailsCollapsed] = useState(false)
 
   const workspaceState = useWorkspaceStore((s) => s.state)
@@ -302,7 +419,6 @@ export default function ProfitLossPage() {
   )
   const hydrateFromCacheOnce = useProfitLossStore((s) => s.hydrateFromCacheOnce)
   const refreshFromBackend = useProfitLossStore((s) => s.refreshFromBackend)
-  const regenerate = useProfitLossStore((s) => s.regenerate)
 
   const statements = entry?.statements ?? []
   const hasHydrated = entry?.hasHydrated ?? false
@@ -313,7 +429,7 @@ export default function ProfitLossPage() {
       (hasHydrated &&
         status === "ready" &&
         statements.length === 0 &&
-        entry?.lastBackendSync == null)
+        entry?.lastSuccessfulSyncAt == null)
     : true
 
   useEffect(() => {
@@ -325,7 +441,7 @@ export default function ProfitLossPage() {
     }
 
     if (activeWorkspace?.type === "w2") {
-      router.replace("/app/paystubs")
+      router.replace("/app/earnings")
     }
   }, [authLoading, workspaceState.status, user, activeWorkspace?.type, router])
 
@@ -375,6 +491,10 @@ export default function ProfitLossPage() {
     [selected]
   )
 
+  const expenseDisplayRows = useMemo<ExpenseDisplayRow[]>(() => {
+    return buildExpenseDisplayRows(expenseCategoryDetails)
+  }, [expenseCategoryDetails])
+
   function buildShareText(statement: ProfitLossStatement) {
     return [
       `${statement.label} Profit & Loss Statement`,
@@ -386,6 +506,7 @@ export default function ProfitLossPage() {
   }
 
   function buildCsv(statement: ProfitLossStatement) {
+    const expenseRows = buildExpenseDisplayRows(statement.expenses.byCategory)
     const rows = [
       ["Section", "Label", "Amount", "Count", "Transaction Date", "Transaction Label", "Transaction Description"],
       ["Summary", "Gross Income", statement.income.total, "", "", "", ""],
@@ -403,24 +524,30 @@ export default function ProfitLossPage() {
           detail.description ?? "",
         ]),
       ]),
-      ...statement.expenses.byCategory.filter((item) => item.amount > 0).flatMap((item) => [
-        ["Operating Expenses",
-        item.category,
-        item.amount,
-        item.count,
-        "",
-        "",
-        "",
-      ],
-        ...item.items.map((detail) => [
-          "Operating Expense Detail",
-          item.category,
-          detail.amount,
-          "",
-          detail.date,
-          detail.label,
-          detail.description ?? "",
-        ]),
+      ...expenseRows.flatMap((item) => [
+        ["Operating Expenses", item.label, item.amount, item.items.length, "", "", ""],
+        ...(item.subcategories && item.subcategories.length > 0
+          ? item.subcategories.flatMap((subcategory) => [
+              ["Operating Expense Subcategory", subcategory.label, subcategory.amount, subcategory.count, "", "", ""],
+              ...subcategory.items.map((detail) => [
+                "Operating Expense Detail",
+                `${item.label} / ${subcategory.label}`,
+                detail.amount,
+                "",
+                detail.date,
+                detail.label,
+                detail.description ?? "",
+              ]),
+            ])
+          : item.items.map((detail) => [
+              "Operating Expense Detail",
+              item.label,
+              detail.amount,
+              "",
+              detail.date,
+              detail.label,
+              detail.description ?? "",
+            ])),
       ]),
     ]
 
@@ -468,6 +595,7 @@ export default function ProfitLossPage() {
   }
 
   function buildPrintMarkup(statement: ProfitLossStatement) {
+    const expenseRowsForPrint = buildExpenseDisplayRows(statement.expenses.byCategory)
     const renderDetailRows = (
       items: ProfitLossDetailItem[],
       emptyLabel: string
@@ -507,16 +635,35 @@ export default function ProfitLossPage() {
       .join("")
 
     const expenseRows =
-      statement.expenses.byCategory.filter((item) => item.amount > 0).length > 0
-        ? statement.expenses.byCategory
-            .filter((item) => item.amount > 0)
+      expenseRowsForPrint.length > 0
+        ? expenseRowsForPrint
             .map(
               (item) => `
                 <tr class="summary-row">
-                  <td colspan="2">${item.category}</td>
+                  <td colspan="2">${item.label}</td>
                   <td class="amount">${formatCurrency(item.amount)}</td>
                 </tr>
-                ${renderDetailRows(item.items, `No ${item.category.toLowerCase()} transactions in this period.`)}
+                ${item.subcategories && item.subcategories.length > 0
+                  ? item.subcategories
+                      .map(
+                        (subcategory) => `
+                          <tr class="detail-row">
+                            <td></td>
+                            <td>
+                              <div class="detail-label" style="font-weight:700;text-transform:uppercase;letter-spacing:0.12em;font-size:11px;color:#64748b;">
+                                ${subcategory.label}
+                              </div>
+                            </td>
+                            <td class="amount">${formatCurrency(subcategory.amount)}</td>
+                          </tr>
+                          ${renderDetailRows(
+                            subcategory.items,
+                            `No ${subcategory.label.toLowerCase()} expenses in this period.`
+                          )}
+                        `
+                      )
+                      .join("")
+                  : renderDetailRows(item.items, `No ${item.label.toLowerCase()} transactions in this period.`)}
               `
             )
             .join("")
@@ -665,16 +812,6 @@ export default function ProfitLossPage() {
     })
   }
 
-  async function handleRegenerate(statement: ProfitLossStatement) {
-    if (!activeWorkspaceId) return
-    setRegeneratingId(statement.id)
-    try {
-      await regenerate(activeWorkspaceId, statement.periodType, statement.periodKey)
-    } finally {
-      setRegeneratingId(null)
-    }
-  }
-
   if (authLoading || workspaceState.status !== "ready") {
     return <AppLoader label="Loading profit and loss..." />
   }
@@ -691,8 +828,8 @@ export default function ProfitLossPage() {
           <div className="flex flex-col gap-3">
             <h1 className="text-2xl font-semibold">Profit &amp; Loss</h1>
             <p className="text-sm text-muted-foreground">
-              Completed period statements are generated automatically and refreshed when older income
-              entries or expenses change.
+              Statements refresh automatically when income entries or expenses change, including
+              in-progress quarter and year rollups.
             </p>
             <div className="flex flex-wrap items-center justify-center gap-3 lg:justify-start">
               {periodOptions.map((option) => (
@@ -773,7 +910,7 @@ export default function ProfitLossPage() {
 
             {!loading && statements.length === 0 ? (
               <div className="rounded-xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">
-                No completed {periodType} statements yet.
+                No {periodType} statements available yet.
               </div>
             ) : null}
 
@@ -804,8 +941,6 @@ export default function ProfitLossPage() {
                 <CardHeader className="relative flex flex-col items-center gap-4 border-b border-slate-200 bg-[linear-gradient(180deg,#fefefe_0%,#f8fafc_100%)] pr-16 text-center sm:items-start sm:pr-20 sm:text-left">
                   <StatementActionMenu
                     className="absolute right-6 top-6"
-                    onRegenerate={() => void handleRegenerate(selected)}
-                    regenerating={regeneratingId === selected.id}
                     onPrint={() => handlePrint(selected)}
                     onShare={() => void handleShare(selected)}
                     onExportCsv={() => handleExportCsv(selected)}
@@ -859,13 +994,7 @@ export default function ProfitLossPage() {
 
                   <StatementSection
                     title="Operating Expenses"
-                    rows={expenseCategoryDetails.map((item) => ({
-                      rowKey: `expense-${item.category}`,
-                      label: item.category,
-                      amount: item.amount,
-                      items: item.items,
-                      countLabel: `${item.count} ${item.count === 1 ? "expense" : "expenses"}`,
-                    }))}
+                    rows={expenseDisplayRows}
                     emptyLabel="No operating expenses recorded in this period."
                   />
 

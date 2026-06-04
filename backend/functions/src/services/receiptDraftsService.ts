@@ -3,6 +3,7 @@ import { z } from "zod"
 import { db } from "../admin"
 import {
   BadRequestError,
+  ConflictError,
   ForbiddenError,
   NotFoundError,
 } from "../lib/httpErrors"
@@ -12,6 +13,14 @@ import {
   type ReceiptDraft,
   type ReceiptDraftInput,
 } from "@shared/schemas/receiptDraft"
+import { ExpenseSchema, ExpenseInput, type ExpenseType } from "@shared/schemas/expense"
+import {
+  normalizeExpenseAccount,
+  resolvePeriodId,
+  findExpenseByClientMutationId,
+  findExpenseByReceiptAssetId,
+  syncExpenseProfitLossDates,
+} from "./expensesService"
 
 const ReceiptDraftArraySchema = z.array(ReceiptDraftSchema)
 
@@ -113,7 +122,9 @@ export async function createReceiptDraft(
   }
 
   const nowIso = new Date().toISOString()
-  const draftRef = db.collection(`workspaces/${workspaceId}/receiptDrafts`).doc()
+  const draftRef = db
+    .collection(`workspaces/${workspaceId}/receiptDrafts`)
+    .doc(parsed.data.receiptAssetId)
   const draft = normalizeReceiptDraft(workspaceId, draftRef.id, parsed.data, nowIso)
   await draftRef.set(stripUndefinedDeep(draft))
   return draft
@@ -125,17 +136,19 @@ export async function listReceiptDrafts(
 ): Promise<ReceiptDraft[]> {
   await assertWorkspaceMembership(workspaceId, uid)
 
+  // Only return actionable drafts. Committed/dismissed drafts belong to history
+  // and are not needed in the capture panel. Filtering by status eliminates
+  // the old 200-document hard cap that could silently hide older pending drafts.
+  // Requires a Firestore composite index: status ASC + updatedAt DESC.
   const snap = await db
     .collection(`workspaces/${workspaceId}/receiptDrafts`)
+    .where("status", "in", ["draft", "ready_to_review"])
     .orderBy("updatedAt", "desc")
-    .limit(200)
+    .limit(50)
     .get()
 
   return ReceiptDraftArraySchema.parse(
-    snap.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }))
+    snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
   )
 }
 
@@ -254,4 +267,125 @@ export async function upsertReceiptDraftForAsset(
   const patch = { ...input }
   delete (patch as Partial<ReceiptDraftInput>).receiptAssetId
   return updateReceiptDraft(workspaceId, uid, existing.id, patch)
+}
+
+const VALID_DATE_RE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/
+
+export async function commitReceiptDraftWithExpense(
+  workspaceId: string,
+  uid: string,
+  draftId: string,
+  expenseInput: unknown
+): Promise<{ expense: ExpenseType; draft: ReceiptDraft }> {
+  await assertWorkspaceMembership(workspaceId, uid)
+
+  const parsed = ExpenseInput.safeParse(expenseInput)
+  if (!parsed.success) {
+    throw new BadRequestError("Invalid expense data", parsed.error.format())
+  }
+  if (!VALID_DATE_RE.test(parsed.data.date)) {
+    throw new BadRequestError("Date must be a valid calendar date (YYYY-MM-DD).")
+  }
+
+  const draftRef = db.doc(`workspaces/${workspaceId}/receiptDrafts/${draftId}`)
+  const draftSnap = await draftRef.get()
+  if (!draftSnap.exists) {
+    throw new NotFoundError("Receipt draft not found")
+  }
+  const existingDraft = ReceiptDraftSchema.parse({ id: draftSnap.id, ...draftSnap.data() })
+
+  // Idempotency: if draft is already committed with an expense, return existing records.
+  if (existingDraft.status === "committed" && existingDraft.committedExpenseId) {
+    const expenseRef = db.doc(`workspaces/${workspaceId}/expenses/${existingDraft.committedExpenseId}`)
+    const expenseSnap = await expenseRef.get()
+    if (expenseSnap.exists) {
+      return {
+        expense: ExpenseSchema.parse({ id: expenseSnap.id, ...expenseSnap.data() }),
+        draft: existingDraft,
+      }
+    }
+  }
+
+  // Run the two idempotency/uniqueness checks concurrently — neither depends on
+  // the other, and in the common case (no duplicates) both return null.
+  const clientMutationId = typeof parsed.data.clientMutationId === "string"
+    ? parsed.data.clientMutationId : null
+
+  const [existingByMutationId, existingForAsset] = await Promise.all([
+    clientMutationId
+      ? findExpenseByClientMutationId(workspaceId, clientMutationId)
+      : Promise.resolve(null),
+    existingDraft.receiptAssetId
+      ? findExpenseByReceiptAssetId(workspaceId, existingDraft.receiptAssetId)
+      : Promise.resolve(null),
+  ])
+
+  if (existingByMutationId) {
+    const nowIso = new Date().toISOString()
+    const recoveredDraft = ReceiptDraftSchema.parse({
+      ...existingDraft,
+      status: "committed",
+      committedExpenseId: existingByMutationId.id,
+      updatedAt: nowIso,
+      version: existingDraft.version + 1,
+    })
+    await draftRef.set(stripUndefinedDeep(recoveredDraft))
+    return { expense: existingByMutationId.expense, draft: recoveredDraft }
+  }
+
+  if (existingForAsset) {
+    throw new ConflictError("This receipt is already linked to an existing expense.")
+  }
+
+  // Resolve and validate expense category.
+  const normalizedAccount = await normalizeExpenseAccount(workspaceId, parsed.data.account)
+  const nowIso = new Date().toISOString()
+  const periodId = resolvePeriodId(parsed.data)
+
+  // Resolve OCR provider from draft analysis status.
+  // "succeeded" → Textract ran successfully. "failed" → fell back to local Tesseract.
+  const ocrProvider: "aws_textract" | "tesseract_local" | undefined =
+    existingDraft.analysisStatus === "succeeded"
+      ? "aws_textract"
+      : existingDraft.analysisStatus === "failed"
+        ? "tesseract_local"
+        : undefined
+
+  // Build both documents before writing.
+  const expenseRef = db.collection(`workspaces/${workspaceId}/expenses`).doc()
+  const expense = ExpenseSchema.parse({
+    ...parsed.data,
+    account: normalizedAccount,
+    id: expenseRef.id,
+    periodId,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    version: 1,
+    // Audit trail — permanently answers "how was this expense created?"
+    createdFromReceipt: true,
+    receiptDraftId: draftId,
+    ocrProvider,
+    ocrConfidence: existingDraft.confidence ?? undefined,
+  })
+
+  const committedDraft = ReceiptDraftSchema.parse({
+    ...existingDraft,
+    status: "committed",
+    committedExpenseId: expense.id,
+    updatedAt: nowIso,
+    version: existingDraft.version + 1,
+  })
+
+  // Single atomic batch: expense creation + draft commit together.
+  // Either both succeed or neither does — no partial commits.
+  const batch = db.batch()
+  batch.set(expenseRef, stripUndefinedDeep(expense))
+  batch.set(draftRef, stripUndefinedDeep(committedDraft))
+  await batch.commit()
+
+  // P&L sync is best-effort — do not await it so the commit response is not
+  // blocked. Failures are observable via the stale flag on the statement document.
+  void syncExpenseProfitLossDates(workspaceId, [expense.date])
+
+  return { expense, draft: committedDraft }
 }

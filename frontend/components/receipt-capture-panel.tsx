@@ -7,48 +7,60 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
   Dialog,
   DialogContent,
 } from "@/components/ui/dialog"
+import ExpenseCategoryPicker from "@/components/expense-category-picker"
+import ReceiptViewerTrigger from "@/components/receipt-viewer-trigger"
 import { formatCurrency } from "@/lib/helpers"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import { useExpensesStore } from "@/lib/stores/useExpensesStore"
 import { useExpenseMemoryStore } from "@/lib/stores/useExpenseMemoryStore"
+import { getCalendarMonthBucketFromDate } from "@shared/payPeriods"
 import { recognizeReceiptText } from "@/lib/imports/ocr"
 import { createProfileTrace, withProfileStep } from "@/lib/observability/profileTrace"
-import { createReceiptAsset, updateReceiptAsset } from "@/lib/api/receiptAssetsApi"
+import { isAbortError } from "@/lib/api/core/errors"
 import {
-  analyzeReceipt as analyzeReceiptApi,
-  finalizeReceiptAnalysis as finalizeReceiptAnalysisApi,
-} from "@/lib/api/receiptAnalysisApi"
+  createReceiptAsset,
+  deleteReceiptAsset,
+} from "@/lib/api/receiptAssetsApi"
+import { analyzeReceipt as analyzeReceiptApi } from "@/lib/api/receiptAnalysisApi"
+import { commitReceiptDraftApi } from "@/lib/api/receiptDraftsApi"
+import { checkDuplicateExpense } from "@/lib/api/expensesApi"
 import { analyzeReceiptImageQuality } from "@/lib/receipts/imageQuality"
-import { extractReceiptDraft } from "@/lib/receipts/receiptDraft"
+import {
+  createReceiptPreviewAsset,
+  extractReceiptDraft,
+} from "@/lib/receipts/receiptDraft"
 import {
   loadReceiptImage,
+  normalizeExifOrientation,
   type DecodedReceiptImage,
 } from "@/lib/receipts/imagePipeline"
 import {
-  getReceiptStorageDownloadUrl,
+  computeImageHash,
+  saveImageHash,
+  findNearMatchByHash,
+} from "@/lib/receipts/imageHash"
+import {
+  buildClientReceiptDerivedPath,
+  buildClientReceiptStoragePath,
   prepareReceiptPreviewFile,
   prepareReceiptThumbnailFile,
   prepareReceiptUploadFile,
   uploadReceiptAssetToStorage,
 } from "@/lib/receipts/receiptAssetStorage"
-import { saveReceiptMediaFromFile } from "@/lib/storage/receiptAssetsCache"
+import {
+  clearReceiptMediaForAsset,
+  saveReceiptMediaFromFile,
+} from "@/lib/storage/receiptAssetsCache"
 import {
   captureReceiptImage,
   isNativeCameraAvailable,
 } from "@/lib/native/camera"
 import StackInLoaderWeb from "@/components/stackin-loader-web"
 import * as expensesService from "@/lib/domain/expenseService"
-import { EXPENSE_CATEGORY_OPTIONS } from "@/lib/expenseCategories"
+import * as expenseRepository from "@/lib/domain/expenseRepository"
 import {
   findDuplicateExpense,
   getSuggestedExpenseCategoryForImport,
@@ -61,6 +73,10 @@ import type {
 } from "@shared/schemas/receiptDraft"
 import type { ReceiptAsset } from "@shared/schemas/receiptAsset"
 import { useReceiptDraftsStore } from "@/lib/stores/useReceiptDraftsStore"
+import {
+  isVehicleTransportationCategory,
+  type VehicleExpenseMode,
+} from "@shared/vehicleExpenses"
 
 function formatOccurredAt(value: string | null | undefined): string {
   if (!value) return "Missing date"
@@ -86,36 +102,24 @@ function isStorageUploadError(err: unknown): boolean {
   )
 }
 
-function isProvisionalAnalysisDraft(item: ReceiptDraft): boolean {
-  return item.analysisStatus === "analysis_complete_draft_pending"
+function createReceiptCaptureAbortError(message = "Receipt capture canceled."): Error {
+  const error = new Error(message)
+  error.name = "AbortError"
+  return error
 }
 
-function buildPatchFromLocalDraft(
-  localDraft: ReceiptDraft,
-  finalizedDraft: ReceiptDraft
-): ReceiptDraftPatch {
-  return {
-    status: localDraft.status,
-    occurredAt: localDraft.occurredAt,
-    amount: localDraft.amount,
-    subtotal: localDraft.subtotal,
-    tax: localDraft.tax,
-    tip: localDraft.tip,
-    currency: localDraft.currency,
-    description: localDraft.description,
-    counterparty: localDraft.counterparty,
-    parseWarnings: localDraft.parseWarnings,
-    confidence: localDraft.confidence,
-    suggestedExpenseAccount:
-      localDraft.suggestedExpenseAccount ?? finalizedDraft.suggestedExpenseAccount,
-    allocationMode: localDraft.allocationMode,
-    completion: localDraft.completion,
-    notes: localDraft.notes,
-    lineItems: localDraft.lineItems,
-    allocations: localDraft.allocations,
-    fieldConfidence: localDraft.fieldConfidence,
-    committedExpenseId: localDraft.committedExpenseId,
-  }
+function createClientReceiptAssetId(): string {
+  const suffix =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.round(Math.random() * 1_000_000)}`
+  return `receipt-${suffix}`
+}
+
+function getVehicleExpenseModeForCategory(
+  category: string
+): VehicleExpenseMode | undefined {
+  return isVehicleTransportationCategory(category) ? "direct_expense" : undefined
 }
 
 function buildOptimisticReceiptDraft(
@@ -128,7 +132,7 @@ function buildOptimisticReceiptDraft(
 
   return applyDraftMode(
     {
-      id: `pending:${receiptAsset.id}`,
+      id: receiptAsset.id,
       workspaceId,
       createdAt: nowIso,
       updatedAt: nowIso,
@@ -145,6 +149,7 @@ function buildOptimisticReceiptDraft(
       parseWarnings: ["Analyzing receipt..."],
       confidence: null,
       suggestedExpenseAccount: category.trim() || null,
+      vehicleExpenseMode: getVehicleExpenseModeForCategory(category.trim()),
       allocationMode: mode,
       completion: {
         missingFields: ["merchant", "date", "amount"],
@@ -152,7 +157,7 @@ function buildOptimisticReceiptDraft(
       },
       notes: "",
       receiptAssetId: receiptAsset.id,
-      analysisStatus: "queued",
+      analysisStatus: "analyzing",
       receiptAsset,
       lineItems: [],
       allocations: [],
@@ -178,133 +183,7 @@ function roundCurrency(value: number): number {
   return Number(value.toFixed(2))
 }
 
-function reconcileLineItemsToTarget(
-  lineItems: NonNullable<ReceiptDraft["lineItems"]>,
-  targetAmount: number | null | undefined,
-  defaultCategory: string
-): NonNullable<ReceiptDraft["lineItems"]> {
-  if (
-    typeof targetAmount !== "number" ||
-    !Number.isFinite(targetAmount) ||
-    targetAmount <= 0 ||
-    lineItems.length === 0
-  ) {
-    return lineItems
-  }
 
-  const currentTotal = sumLineItems(lineItems)
-  if (currentTotal == null) return lineItems
-
-  const delta = roundCurrency(targetAmount - currentTotal)
-  if (Math.abs(delta) <= 0.009) {
-    return lineItems
-  }
-
-  if (Math.abs(delta) <= 0.05) {
-    const next = [...lineItems]
-    const lastIndex = next.length - 1
-    const lastAmount = typeof next[lastIndex]?.amount === "number" ? next[lastIndex].amount ?? 0 : 0
-    next[lastIndex] = {
-      ...next[lastIndex],
-      amount: roundCurrency(lastAmount + delta),
-      category: next[lastIndex]?.category ?? (defaultCategory.trim() || undefined),
-    }
-    return next
-  }
-
-  if (delta < 0) {
-    const next = [...lineItems]
-    const candidateIndex = next
-      .map((lineItem, index) => ({ index, amount: lineItem.amount ?? 0 }))
-      .sort((left, right) => right.amount - left.amount)[0]?.index
-
-    if (typeof candidateIndex === "number") {
-      const candidate = next[candidateIndex]
-      const candidateAmount = candidate.amount ?? 0
-      const adjustedAmount = roundCurrency(candidateAmount + delta)
-      if (adjustedAmount > 0) {
-        next[candidateIndex] = {
-          ...candidate,
-          amount: adjustedAmount,
-          category: candidate.category ?? (defaultCategory.trim() || undefined),
-        }
-        return next
-      }
-    }
-
-    return lineItems
-  }
-
-  return [
-    ...lineItems,
-    {
-      description: "Unparsed receipt line",
-      amount: delta,
-      category: defaultCategory.trim() || undefined,
-    },
-  ]
-}
-
-function normalizeLineItemKey(value: string): string {
-  return value.trim().replace(/\s+/g, " ").toLowerCase()
-}
-
-type ReceiptCaptureStep = "mode" | "category" | "source"
-
-function prepareMultiCategoryLineItems(
-  lineItems: ReceiptDraft["lineItems"] | null | undefined,
-  defaultCategory: string,
-  targetAmount?: number | null
-): NonNullable<ReceiptDraft["lineItems"]> {
-  if (!lineItems?.length) return []
-
-  const grouped = new Map<
-    string,
-    NonNullable<ReceiptDraft["lineItems"]>[number] & { repeatCount: number }
-  >()
-
-  for (const rawLineItem of lineItems) {
-    const description = rawLineItem.description?.trim()
-    const amount = rawLineItem.amount
-    if (!description || typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) {
-      continue
-    }
-
-    const key = normalizeLineItemKey(description)
-    const existing = grouped.get(key)
-    if (existing) {
-      existing.amount = Number(((existing.amount ?? 0) + amount).toFixed(2))
-      existing.repeatCount += 1
-      existing.quantity =
-        existing.repeatCount > 1
-          ? existing.repeatCount
-          : rawLineItem.quantity && rawLineItem.quantity > 1
-            ? rawLineItem.quantity
-            : undefined
-      continue
-    }
-
-    grouped.set(key, {
-      ...rawLineItem,
-      description,
-      amount: Number(amount.toFixed(2)),
-      category: rawLineItem.category ?? (defaultCategory.trim() || undefined),
-      quantity:
-        rawLineItem.quantity && rawLineItem.quantity > 1 ? rawLineItem.quantity : undefined,
-      repeatCount: 1,
-    })
-  }
-
-  const normalizedLineItems = Array.from(grouped.values()).map(({ repeatCount, ...lineItem }) => ({
-    ...lineItem,
-    quantity:
-      repeatCount > 1 ? repeatCount : lineItem.quantity && lineItem.quantity > 1
-        ? lineItem.quantity
-        : undefined,
-  }))
-
-  return reconcileLineItemsToTarget(normalizedLineItems, targetAmount, defaultCategory)
-}
 
 function buildAllocationsFromLineItems(
   lineItems: ReceiptDraft["lineItems"] | null | undefined,
@@ -347,24 +226,21 @@ function applyDraftMode<T extends ReceiptDraftInput | ReceiptDraft>(
   selectedCategory: string
 ): T {
   const category = selectedCategory.trim()
-  const nextLineItems =
+  // lineItems are OCR source data — never overwritten by a mode change.
+  // Mode only controls allocationMode and the derived allocations array.
+  const allocations =
     mode === "multiple"
-      ? prepareMultiCategoryLineItems(
-          draft.lineItems,
-          category,
-          draft.subtotal ?? draft.amount ?? null
-        )
+      ? buildAllocationsFromLineItems(draft.lineItems, category)
       : []
 
   return {
     ...draft,
     allocationMode: mode,
     suggestedExpenseAccount: category || draft.suggestedExpenseAccount || null,
-    lineItems: nextLineItems,
-    allocations:
-      mode === "multiple"
-        ? buildAllocationsFromLineItems(nextLineItems, category)
-        : [],
+    vehicleExpenseMode: getVehicleExpenseModeForCategory(
+      category || draft.suggestedExpenseAccount || ""
+    ),
+    allocations,
   } as T
 }
 
@@ -393,25 +269,41 @@ function buildModePatch(
   category: string
 ): ReceiptDraftPatch {
   const normalizedCategory = category.trim() || null
-  const nextLineItems =
-    mode === "multiple"
-      ? prepareMultiCategoryLineItems(
-          draft.lineItems,
-          normalizedCategory ?? "",
-          draft.subtotal ?? draft.amount ?? null
-        )
-      : []
 
-  return {
+  const patch: ReceiptDraftPatch = {
     allocationMode: mode,
     suggestedExpenseAccount: normalizedCategory,
-    lineItems: nextLineItems,
+    vehicleExpenseMode: getVehicleExpenseModeForCategory(normalizedCategory ?? ""),
+    // lineItems are OCR source data — never overwritten by a mode change.
+    // Allocations are derived from the existing lineItems at commit time.
     allocations:
       mode === "multiple"
-        ? buildAllocationsFromLineItems(nextLineItems, normalizedCategory ?? "")
+        ? buildAllocationsFromLineItems(draft.lineItems, normalizedCategory ?? "")
         : [],
   }
+
+  // When collapsing to single mode from multiple detected items, populate the
+  // description field with a summary of the line item names so the user can
+  // see what was on the receipt in the single description box.
+  // When expanding back to multiple, clear the description — the structured
+  // line items are the source of truth and no single string describes them.
+  if (mode === "single" && (draft.lineItems?.length ?? 0) >= 2) {
+    const parts = (draft.lineItems ?? [])
+      .map((li) => li.description?.trim())
+      .filter((d): d is string => Boolean(d))
+    patch.description = parts.length > 0 ? parts.join(", ") : null
+  } else if (mode === "multiple") {
+    patch.description = null
+  }
+
+  return patch
 }
+
+const EMPTY_EXPENSES: any[] = []
+
+// A draft stuck at analysisStatus "analyzing" for longer than this is considered
+// unrecoverable — the OCR request was abandoned mid-flight (e.g. app closed).
+const STUCK_DRAFT_THRESHOLD_MS = 5 * 60 * 1000
 
 export default function ReceiptCapturePanel() {
   const workspaceState = useWorkspaceStore((state) => state.state)
@@ -424,7 +316,7 @@ export default function ReceiptCapturePanel() {
     activeWorkspaceId ? state.byWorkspaceId[activeWorkspaceId] : undefined
   )
   const expenses = useExpensesStore((state) =>
-    activeWorkspaceId ? state.byWorkspaceId[activeWorkspaceId]?.expenses ?? [] : []
+    activeWorkspaceId ? state.byWorkspaceId[activeWorkspaceId]?.expenses ?? EMPTY_EXPENSES : EMPTY_EXPENSES
   )
   const createDraft = useReceiptDraftsStore((state) => state.createDraft)
   const refreshDrafts = useReceiptDraftsStore((state) => state.refreshDrafts)
@@ -449,19 +341,47 @@ export default function ReceiptCapturePanel() {
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [isNativeCamera, setIsNativeCamera] = useState(false)
-  const [captureMode, setCaptureMode] =
-    useState<ReceiptDraftAllocationMode | "">("")
-  const [captureCategory, setCaptureCategory] = useState<string>("")
-  const [captureStep, setCaptureStep] = useState<ReceiptCaptureStep>("mode")
   const [expenseCategoriesByItemId, setExpenseCategoriesByItemId] = useState<
     Record<string, string>
   >({})
   const [expanded, setExpanded] = useState(false)
   const [analysisOpen, setAnalysisOpen] = useState(false)
+  // Tracks which draft IDs the user has explicitly overridden the duplicate warning for.
+  const [confirmedDuplicateDraftIds, setConfirmedDuplicateDraftIds] = useState<Set<string>>(
+    new Set()
+  )
+  // Server-side duplicate check results keyed by draft ID.
+  // exactDuplicate → same date, blocks save until "Save Anyway" is clicked.
+  // nearDuplicate  → ±3 days, informational only, never blocks save.
+  const [serverDuplicateByDraftId, setServerDuplicateByDraftId] = useState<
+    Record<string, { exact: boolean; near: boolean }>
+  >({})
+  // Draft awaiting historical-period confirmation before commit.
+  const [pendingHistoricalCommit, setPendingHistoricalCommit] = useState<ReceiptDraft | null>(
+    null
+  )
   const cameraInputRef = useRef<HTMLInputElement | null>(null)
   const libraryInputRef = useRef<HTMLInputElement | null>(null)
   const draftSyncTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const draftSyncQueueRef = useRef<Record<string, ReceiptDraftPatch>>({})
+  const activeProcessAbortControllerRef = useRef<AbortController | null>(null)
+  const canceledCapturesRef = useRef<Set<string>>(new Set())
+  const activeCaptureTraceRef = useRef<ReturnType<typeof createProfileTrace> | null>(null)
+  const activeCaptureReceiptAssetIdRef = useRef<string | null>(null)
+  const activeCaptureMilestonesRef = useRef({
+    draftShellVisible: false,
+    editableFieldsVisible: false,
+    previewReady: false,
+  })
+  const lastAnalysisStatusByReceiptAssetRef = useRef<Record<string, string | undefined>>({})
+  const lastDraftIdByReceiptAssetRef = useRef<Record<string, string | undefined>>({})
+  // Tracks the in-flight createReceiptAsset promise for the active capture.
+  // discardReceiptCaptureArtifacts awaits this before deleting, preventing
+  // the race where a fast cancel deletes a record that hasn't been written yet.
+  const pendingCreateAssetRef = useRef<{
+    receiptAssetId: string
+    promise: Promise<unknown>
+  } | null>(null)
 
   useEffect(() => {
     if (!activeWorkspaceId || activeWorkspace?.type !== "independent") return
@@ -478,19 +398,47 @@ export default function ReceiptCapturePanel() {
 
   useEffect(() => {
     return () => {
+      activeProcessAbortControllerRef.current?.abort()
+      activeProcessAbortControllerRef.current = null
       for (const timer of Object.values(draftSyncTimersRef.current)) {
         clearTimeout(timer)
       }
       draftSyncTimersRef.current = {}
       draftSyncQueueRef.current = {}
     }
-  }, [])
+  }, [activeWorkspaceId])
 
   const receiptDrafts = receiptDraftsEntry?.drafts ?? []
 
-  const pendingReceiptItems = receiptDrafts.filter(
-    (item) => item.status === "draft" || item.status === "ready_to_review"
+  const pendingReceiptItems = useMemo(
+    () =>
+      receiptDrafts.filter(
+        (item) => item.status === "draft" || item.status === "ready_to_review"
+      ),
+    [receiptDrafts]
   )
+
+  // A draft is "stuck" when it is still in the analyzing state but is not the
+  // currently active capture and was created more than 5 minutes ago. This
+  // happens when the user closes the app mid-OCR — the request is abandoned but
+  // the optimistic draft persists in Firestore with analysisStatus: "analyzing".
+  // activeCaptureReceiptAssetIdRef is intentionally not in the deps array — refs
+  // don't trigger re-renders, and we read the current value at compute time which
+  // is always triggered by a draft change.
+  const stuckDraftIds = useMemo(() => {
+    const now = Date.now()
+    const activeReceiptAssetId = activeCaptureReceiptAssetIdRef.current
+    return new Set(
+      pendingReceiptItems
+        .filter(
+          (item) =>
+            item.analysisStatus === "analyzing" &&
+            item.receiptAssetId !== activeReceiptAssetId &&
+            now - new Date(item.createdAt).getTime() > STUCK_DRAFT_THRESHOLD_MS
+        )
+        .map((item) => item.id)
+    )
+  }, [pendingReceiptItems])
 
   useEffect(() => {
     if (pendingReceiptItems.length === 0) {
@@ -498,36 +446,244 @@ export default function ReceiptCapturePanel() {
     }
   }, [pendingReceiptItems.length])
 
+  // Fire server-side duplicate check when a draft becomes ready to review.
   useEffect(() => {
-    if (!expanded || uploading) return
-    if (!captureMode) {
-      setCaptureStep("mode")
+    if (!activeWorkspaceId) return
+    for (const item of pendingReceiptItems) {
+      const isReady =
+        item.analysisStatus === "succeeded" || item.analysisStatus === "failed"
+      const alreadyChecked = item.id in serverDuplicateByDraftId
+      if (!isReady || alreadyChecked) continue
+      if (!item.occurredAt || !item.amount) continue
+
+      const workspaceId = activeWorkspaceId
+      const draftId = item.id
+      void checkDuplicateExpense(workspaceId, {
+        date: item.occurredAt,
+        amount: Number(item.amount),
+        merchant: item.counterparty || item.description || "",
+      })
+        .then((result) => {
+          setServerDuplicateByDraftId((prev) => ({
+            ...prev,
+            [draftId]: {
+              exact: result.possibleDuplicate,
+              near: result.possibleNearDuplicate,
+            },
+          }))
+        })
+        .catch(() => {
+          // Non-fatal — client-side check is the fallback
+        })
+    }
+  }, [activeWorkspaceId, pendingReceiptItems, serverDuplicateByDraftId])
+
+  useEffect(() => {
+    const trace = activeCaptureTraceRef.current
+    const receiptAssetId = activeCaptureReceiptAssetIdRef.current
+    if (!trace || !receiptAssetId) {
       return
     }
-    if (!captureCategory.trim()) {
-      setCaptureStep("category")
+
+    const matchedDraft = receiptDrafts.find((candidate) => candidate.receiptAssetId === receiptAssetId)
+    if (!matchedDraft) {
       return
     }
-    setCaptureStep("source")
-  }, [expanded, uploading, captureMode, captureCategory])
+
+    const previousDraftId = lastDraftIdByReceiptAssetRef.current[receiptAssetId]
+    if (previousDraftId && previousDraftId !== matchedDraft.id) {
+      trace.mark("receipt.draft_identity_replaced", {
+        receiptAssetId,
+        previousDraftId,
+        nextDraftId: matchedDraft.id,
+      })
+    }
+    lastDraftIdByReceiptAssetRef.current[receiptAssetId] = matchedDraft.id
+
+    if (!activeCaptureMilestonesRef.current.draftShellVisible) {
+      activeCaptureMilestonesRef.current.draftShellVisible = true
+      trace.mark("receipt.draft_shell_visible", {
+        receiptAssetId,
+        receiptDraftId: matchedDraft.id,
+        analysisStatus: matchedDraft.analysisStatus ?? null,
+        status: matchedDraft.status,
+      })
+    }
+
+    const previousAnalysisStatus = lastAnalysisStatusByReceiptAssetRef.current[receiptAssetId]
+    if (matchedDraft.analysisStatus && previousAnalysisStatus !== matchedDraft.analysisStatus) {
+      trace.mark("receipt.analysis_status_transition", {
+        receiptAssetId,
+        receiptDraftId: matchedDraft.id,
+        previousStatus: previousAnalysisStatus ?? null,
+        nextStatus: matchedDraft.analysisStatus,
+      })
+      lastAnalysisStatusByReceiptAssetRef.current[receiptAssetId] = matchedDraft.analysisStatus
+    }
+
+    const editableFieldsReady =
+      analysisOpen &&
+      pendingReceiptItems.some((candidate) => candidate.receiptAssetId === receiptAssetId) &&
+      (Boolean(matchedDraft.receiptAnalysisId) || matchedDraft.analysisStatus === "failed")
+
+    if (editableFieldsReady && !activeCaptureMilestonesRef.current.editableFieldsVisible) {
+      activeCaptureMilestonesRef.current.editableFieldsVisible = true
+      trace.mark("receipt.editable_fields_visible", {
+        receiptAssetId,
+        receiptDraftId: matchedDraft.id,
+        analysisStatus: matchedDraft.analysisStatus ?? null,
+        status: matchedDraft.status,
+        lineItemCount: matchedDraft.lineItems?.length ?? 0,
+      })
+    }
+
+    const previewReady = Boolean(
+      matchedDraft.receiptAsset?.previewStoragePath ||
+        matchedDraft.receiptAsset?.originalStoragePath ||
+        matchedDraft.receiptAsset?.storagePath ||
+        matchedDraft.receiptAsset?.dataUrl
+    )
+    if (previewReady && !activeCaptureMilestonesRef.current.previewReady) {
+      activeCaptureMilestonesRef.current.previewReady = true
+      trace.mark("receipt.preview_ready", {
+        receiptAssetId,
+        receiptDraftId: matchedDraft.id,
+        hasPreviewPath: Boolean(matchedDraft.receiptAsset?.previewStoragePath),
+        hasOriginalPath: Boolean(
+          matchedDraft.receiptAsset?.originalStoragePath || matchedDraft.receiptAsset?.storagePath
+        ),
+      })
+    }
+  }, [analysisOpen, pendingReceiptItems, receiptDrafts])
+
+  function clearDraftSyncStateForDraftIds(workspaceId: string, draftIds: string[]): void {
+    const queueKeys = draftIds.map((draftId) => `${workspaceId}:${draftId}`)
+    for (const queueKey of queueKeys) {
+      const existingTimer = draftSyncTimersRef.current[queueKey]
+      if (existingTimer) {
+        clearTimeout(existingTimer)
+      }
+      delete draftSyncTimersRef.current[queueKey]
+      delete draftSyncQueueRef.current[queueKey]
+    }
+  }
+
+  function clearCaptureTraceForReceiptAsset(receiptAssetId: string): void {
+    if (activeCaptureReceiptAssetIdRef.current !== receiptAssetId) {
+      return
+    }
+
+    activeCaptureReceiptAssetIdRef.current = null
+    activeCaptureTraceRef.current = null
+    delete lastAnalysisStatusByReceiptAssetRef.current[receiptAssetId]
+    delete lastDraftIdByReceiptAssetRef.current[receiptAssetId]
+  }
+
+  function throwIfCaptureProcessAborted(controller: AbortController): void {
+    if (controller.signal.aborted) {
+      throw createReceiptCaptureAbortError()
+    }
+  }
+
+  function throwIfReceiptSessionInactive(receiptAssetId: string): void {
+    if (!activeWorkspaceId) {
+      throw createReceiptCaptureAbortError()
+    }
+    if (canceledCapturesRef.current.has(receiptAssetId)) {
+      throw createReceiptCaptureAbortError()
+    }
+    if (activeProcessAbortControllerRef.current?.signal.aborted) {
+      throw createReceiptCaptureAbortError()
+    }
+  }
+
+  function resetReceiptCapture(
+    receiptAssetId: string,
+    draftId: string,
+    options: {
+      terminalState?: "committed" | "dismissed" | "canceled"
+      clearTrace?: boolean
+    } = {}
+  ): void {
+    if (!activeWorkspaceId) return
+
+    canceledCapturesRef.current.add(receiptAssetId)
+    if (options.terminalState !== "committed") {
+      activeProcessAbortControllerRef.current?.abort()
+      activeProcessAbortControllerRef.current = null
+    }
+    clearDraftSyncStateForDraftIds(activeWorkspaceId, [draftId])
+    setExpenseCategoriesByItemId((current) => {
+      if (!(receiptAssetId in current)) return current
+      const next = { ...current }
+      delete next[receiptAssetId]
+      return next
+    })
+    if (options.clearTrace !== false) {
+      clearCaptureTraceForReceiptAsset(receiptAssetId)
+    }
+  }
+
+  async function discardReceiptCaptureArtifacts(
+    workspaceId: string,
+    receiptAssetId: string
+  ): Promise<void> {
+    // If createReceiptAsset is still in-flight for this asset, wait for it to
+    // settle before deleting. Without this, a fast cancel causes deleteReceiptAsset
+    // to run against a record that doesn't exist yet — it succeeds silently, then
+    // createReceiptAsset completes and writes an orphaned Firestore record.
+    const pending = pendingCreateAssetRef.current
+    if (pending?.receiptAssetId === receiptAssetId) {
+      await pending.promise.catch(() => {})
+      pendingCreateAssetRef.current = null
+    }
+
+    const cleanupResults = await Promise.allSettled([
+      clearReceiptMediaForAsset(workspaceId, receiptAssetId),
+      deleteReceiptAsset(workspaceId, receiptAssetId),
+    ])
+
+    const failedCleanup = cleanupResults.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected"
+    )
+    if (failedCleanup) {
+      throw failedCleanup.reason
+    }
+  }
 
   async function processReceiptFile(
     file: File,
     captureSource: "camera" | "gallery" | "upload" = "upload"
   ) {
     if (!file || !activeWorkspaceId) return
-    if (!captureMode) {
-      setError("Choose how you want to save this receipt before uploading.")
+
+    // File type validation before any processing.
+    const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]
+    const fileTypeLower = file.type.toLowerCase()
+    const fileNameLower = file.name.toLowerCase()
+    const isAllowedType =
+      ALLOWED_TYPES.includes(fileTypeLower) ||
+      fileNameLower.endsWith(".jpg") ||
+      fileNameLower.endsWith(".jpeg") ||
+      fileNameLower.endsWith(".png") ||
+      fileNameLower.endsWith(".webp") ||
+      fileNameLower.endsWith(".heic")
+    if (!isAllowedType) {
+      setError("Unsupported file type. Please upload a JPEG, PNG, WebP, or HEIC image.")
       return
     }
-    if (!captureCategory.trim()) {
-      setError("Choose an expense category before uploading a receipt.")
+    const MAX_FILE_SIZE_BYTES = 30 * 1024 * 1024 // 30 MB
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      setError("This image is too large. Please use an image under 30 MB.")
       return
     }
 
     setUploading(true)
     setError(null)
     setMessage(null)
+    activeProcessAbortControllerRef.current?.abort()
+    const captureAbortController = new AbortController()
+    activeProcessAbortControllerRef.current = captureAbortController
     const trace = createProfileTrace("receipt_capture", {
       workspaceId: activeWorkspaceId,
       fileName: file.name,
@@ -535,6 +691,7 @@ export default function ReceiptCapturePanel() {
     })
     let decodedReceiptImage: DecodedReceiptImage | null = null
     let optimisticReceiptAssetId: string | null = null
+    let optimisticReceiptAsset: ReceiptAsset | null = null
     const profile = (step: string, metadata: Record<string, string | number | boolean | null | undefined> = {}) => ({
       traceId: trace.traceId,
       flow: trace.flow,
@@ -562,12 +719,44 @@ export default function ReceiptCapturePanel() {
         () => loadReceiptImage(file),
         {}
       )
+      throwIfCaptureProcessAborted(captureAbortController)
+
+      // Normalize EXIF orientation before quality analysis and OCR so the
+      // image arrives upright regardless of camera rotation metadata.
+      decodedReceiptImage = await withProfileStep(
+        trace,
+        "receipt.exif_normalize",
+        () => normalizeExifOrientation(file, decodedReceiptImage!),
+        {}
+      )
+      throwIfCaptureProcessAborted(captureAbortController)
+
+      // Perceptual hash check: detect near-duplicate uploads before any
+      // network calls are made. Warn the user but do not hard block.
+      const imageHash = decodedReceiptImage ? computeImageHash(decodedReceiptImage) : ""
+      if (imageHash) {
+        const nearMatch = findNearMatchByHash(activeWorkspaceId, imageHash)
+        if (nearMatch) {
+          trace.mark("receipt.duplicate_hash_detected", { receiptAssetId: nearMatch.receiptAssetId })
+          const proceed = window.confirm(
+            "This receipt looks like it may have already been uploaded. Upload anyway?"
+          )
+          if (!proceed) {
+            decodedReceiptImage.close()
+            decodedReceiptImage = null
+            setUploading(false)
+            return
+          }
+        }
+      }
+
       const quality = await withProfileStep(
         trace,
         "receipt.quality_check",
         () => analyzeReceiptImageQuality(file, decodedReceiptImage ?? undefined),
         { sizeBytes: file.size }
       )
+      throwIfCaptureProcessAborted(captureAbortController)
 
       if (quality.qualityStatus === "bad") {
         trace.mark("receipt.quality_blocked", {
@@ -580,7 +769,34 @@ export default function ReceiptCapturePanel() {
         )
       }
 
-      setOcrStatus("Uploading receipt image...")
+      const clientReceiptAssetId = createClientReceiptAssetId()
+      trace.mark("receipt.preview_prepare_local", { receiptAssetId: clientReceiptAssetId })
+      optimisticReceiptAsset = createReceiptPreviewAsset(file, {
+        captureSource,
+        quality,
+        receiptAsset: {
+          id: clientReceiptAssetId,
+        },
+      })
+      optimisticReceiptAssetId = optimisticReceiptAsset.id
+      activeCaptureTraceRef.current = trace
+      activeCaptureReceiptAssetIdRef.current = optimisticReceiptAsset.id
+      activeCaptureMilestonesRef.current = {
+        draftShellVisible: false,
+        editableFieldsVisible: false,
+        previewReady: false,
+      }
+      canceledCapturesRef.current.delete(optimisticReceiptAsset.id)
+      lastAnalysisStatusByReceiptAssetRef.current[optimisticReceiptAsset.id] = undefined
+      lastDraftIdByReceiptAssetRef.current[optimisticReceiptAsset.id] = undefined
+      const optimisticDraft = buildOptimisticReceiptDraft(
+        activeWorkspaceId,
+        optimisticReceiptAsset,
+        "single",
+        ""
+      )
+      useReceiptDraftsStore.getState().applyDraft(activeWorkspaceId, optimisticDraft)
+
       const originalUploadFile = await withProfileStep(
         trace,
         "receipt.upload_prepare",
@@ -589,16 +805,54 @@ export default function ReceiptCapturePanel() {
           originalSizeBytes: file.size,
         }
       )
+      throwIfCaptureProcessAborted(captureAbortController)
       trace.mark("receipt.upload_file_ready", {
         originalSizeBytes: file.size,
         originalUploadSizeBytes: originalUploadFile.size,
         uploadMimeType: originalUploadFile.type || "image/jpeg",
       })
-      const receiptAsset = await withProfileStep(
-        trace,
-        "receipt.asset_create",
-        () =>
-          createReceiptAsset(activeWorkspaceId, {
+
+      // Compute storage paths client-side — same formula as the backend.
+      // No API call needed; the asset ID was generated locally and both sides
+      // derive the same paths from it.
+      const clientOriginalStoragePath = buildClientReceiptStoragePath(
+        activeWorkspaceId,
+        clientReceiptAssetId,
+        file.name
+      )
+      const storedReceiptAsset: ReceiptAsset = {
+        ...optimisticReceiptAsset,
+        originalStoragePath: clientOriginalStoragePath,
+        storagePath: clientOriginalStoragePath,
+        previewStoragePath: buildClientReceiptDerivedPath(
+          activeWorkspaceId,
+          clientReceiptAssetId,
+          "preview"
+        ),
+        thumbnailStoragePath: buildClientReceiptDerivedPath(
+          activeWorkspaceId,
+          clientReceiptAssetId,
+          "thumb"
+        ),
+        mimeType: originalUploadFile.type || "image/jpeg",
+        sizeBytes: originalUploadFile.size,
+      }
+
+      // Record the image hash so future uploads of the same receipt are detected.
+      if (imageHash) {
+        saveImageHash(activeWorkspaceId, clientReceiptAssetId, imageHash)
+      }
+
+      // Create the Firestore asset record concurrently with OCR (not awaited).
+      // OCR takes 2-4s; this completes well before the background storage upload starts.
+      // The promise is tracked in pendingCreateAssetRef so that discardReceiptCaptureArtifacts
+      // can await it before deleting — preventing the orphaned-asset race on fast cancel.
+      pendingCreateAssetRef.current = {
+        receiptAssetId: clientReceiptAssetId,
+        promise: createReceiptAsset(
+          activeWorkspaceId,
+          {
+            id: clientReceiptAssetId,
             fileName: file.name,
             mimeType: originalUploadFile.type || "image/jpeg",
             sizeBytes: originalUploadFile.size,
@@ -608,242 +862,28 @@ export default function ReceiptCapturePanel() {
             glareScore: quality.glareScore,
             qualityStatus: quality.qualityStatus,
             qualityWarnings: quality.warnings,
-          }, profile("receipt.asset_create.network_request")),
-        {}
-      )
-      trace.mark("receipt.asset_created", {
-        receiptAssetId: receiptAsset.id,
-        originalStoragePath:
-          receiptAsset.originalStoragePath ?? receiptAsset.storagePath ?? null,
-        previewStoragePath: receiptAsset.previewStoragePath ?? null,
-        thumbnailStoragePath: receiptAsset.thumbnailStoragePath ?? null,
-      })
-      const optimisticDraft = buildOptimisticReceiptDraft(
-        activeWorkspaceId,
-        receiptAsset,
-        captureMode,
-        captureCategory
-      )
-      useReceiptDraftsStore.getState().applyDraft(activeWorkspaceId, optimisticDraft)
-      optimisticReceiptAssetId = receiptAsset.id
-      let storedReceiptAsset = receiptAsset
-      let storageReady = false
-
-      try {
-        const originalUpload = await withProfileStep(
-          trace,
-          "receipt.upload_original",
-          () =>
-            uploadReceiptAssetToStorage(
-              originalUploadFile,
-              receiptAsset.originalStoragePath ?? receiptAsset.storagePath ?? "",
-              { resolveDownloadUrl: false }
-            ),
-          {
-            receiptAssetId: receiptAsset.id,
-            originalStoragePath:
-              receiptAsset.originalStoragePath ?? receiptAsset.storagePath ?? null,
-            originalUploadSizeBytes: originalUploadFile.size,
+            width: quality.width,
+            height: quality.height,
+          },
+          profile("receipt.asset_create.network_request", { receiptAssetId: clientReceiptAssetId }),
+          captureAbortController.signal
+        ).catch((err) => {
+          if (!isAbortError(err)) {
+            trace.error("receipt.asset_create_failed", err, { receiptAssetId: clientReceiptAssetId })
           }
-        )
-        trace.mark("receipt.original_upload_complete", {
-          receiptAssetId: receiptAsset.id,
-          originalStoragePath: originalUpload.storagePath,
-        })
-        storedReceiptAsset = {
-          ...receiptAsset,
-          originalStoragePath: originalUpload.storagePath,
-          storagePath: originalUpload.storagePath,
-          sizeBytes: originalUploadFile.size,
-        }
-        storageReady = true
-        patchDraftLocally(activeWorkspaceId, `pending:${receiptAsset.id}`, {
-          analysisStatus: "analyzing",
-          receiptAsset: storedReceiptAsset,
-          parseWarnings: ["Analyzing receipt..."],
-        })
-
-        const backgroundTrace = trace.child("receipt.media_background", {
-          receiptAssetId: receiptAsset.id,
-        })
-        const backgroundDecodedReceiptImage = decodedReceiptImage
-        decodedReceiptImage = null
-        void (async (
-          workspaceId: string,
-          sourceFile: File,
-          originalAsset: ReceiptAsset
-        ) => {
-          try {
-            const [originalDownloadUrl, previewFile, thumbnailFile] = await Promise.all([
-              getReceiptStorageDownloadUrl(
-                originalAsset.originalStoragePath ?? originalAsset.storagePath ?? ""
-              ),
-              withProfileStep(
-                backgroundTrace,
-                "receipt.preview_prepare",
-                () => prepareReceiptPreviewFile(sourceFile, backgroundDecodedReceiptImage ?? undefined),
-                {}
-              ),
-              withProfileStep(
-                backgroundTrace,
-                "receipt.thumbnail_prepare",
-                () => prepareReceiptThumbnailFile(sourceFile, backgroundDecodedReceiptImage ?? undefined),
-                {}
-              ),
-            ])
-
-            const derivedUploadResults = await withProfileStep(
-              backgroundTrace,
-              "receipt.upload_derived",
-              async () => {
-                const [preview, thumbnail] = await Promise.allSettled([
-                  uploadReceiptAssetToStorage(
-                    previewFile,
-                    originalAsset.previewStoragePath ?? ""
-                  ),
-                  uploadReceiptAssetToStorage(
-                    thumbnailFile,
-                    originalAsset.thumbnailStoragePath ?? ""
-                  ),
-                ])
-
-                return {
-                  preview,
-                  thumbnail,
-                }
-              },
-              {
-                receiptAssetId: originalAsset.id,
-                previewStoragePath: originalAsset.previewStoragePath ?? null,
-                thumbnailStoragePath: originalAsset.thumbnailStoragePath ?? null,
-                previewUploadSizeBytes: previewFile.size,
-                thumbnailUploadSizeBytes: thumbnailFile.size,
-              }
-            )
-
-            const previewUpload =
-              derivedUploadResults.preview.status === "fulfilled"
-                ? derivedUploadResults.preview.value
-                : null
-            const thumbnailUpload =
-              derivedUploadResults.thumbnail.status === "fulfilled"
-                ? derivedUploadResults.thumbnail.value
-                : null
-            const failedDerivedVariants = [
-              ...(previewUpload ? [] : ["preview"]),
-              ...(thumbnailUpload ? [] : ["thumbnail"]),
-            ]
-
-            if (failedDerivedVariants.length > 0) {
-              backgroundTrace.mark("receipt.derived_upload_partial_failure", {
-                receiptAssetId: originalAsset.id,
-                failedVariants: failedDerivedVariants.join(","),
-              })
-
-              for (const result of [
-                { variant: "preview", outcome: derivedUploadResults.preview },
-                { variant: "thumbnail", outcome: derivedUploadResults.thumbnail },
-              ] as const) {
-                if (result.outcome.status === "rejected") {
-                  backgroundTrace.error("receipt.derived_upload_failed", result.outcome.reason, {
-                    receiptAssetId: originalAsset.id,
-                    variant: result.variant,
-                  })
-                }
-              }
-            }
-
-            const finalizedAsset = await withProfileStep(
-              backgroundTrace,
-              "receipt.asset_update",
-              () =>
-                updateReceiptAsset(workspaceId, originalAsset.id, {
-                  originalStoragePath:
-                    originalAsset.originalStoragePath ?? originalAsset.storagePath,
-                  storagePath: originalAsset.storagePath,
-                  originalDownloadUrl,
-                  downloadUrl: originalDownloadUrl,
-                  previewStoragePath: previewUpload?.storagePath,
-                  thumbnailStoragePath: thumbnailUpload?.storagePath,
-                  previewDownloadUrl: previewUpload?.downloadUrl ?? undefined,
-                  thumbnailDownloadUrl: thumbnailUpload?.downloadUrl ?? undefined,
-                  sizeBytes: originalAsset.sizeBytes,
-                }, profile("receipt.asset_update.network_request", {
-                  receiptAssetId: originalAsset.id,
-                  source: "background",
-                })),
-              {
-                receiptAssetId: originalAsset.id,
-              }
-            )
-
-            await withProfileStep(
-              backgroundTrace,
-              "receipt.cache_write",
-              async () => {
-                const version = finalizedAsset.version ?? originalAsset.version ?? 1
-                const cacheWrites: Promise<unknown>[] = []
-
-                if (previewUpload) {
-                  cacheWrites.push(
-                    saveReceiptMediaFromFile(
-                      workspaceId,
-                      finalizedAsset.id,
-                      "preview",
-                      version,
-                      previewFile
-                    )
-                  )
-                }
-
-                if (thumbnailUpload) {
-                  cacheWrites.push(
-                    saveReceiptMediaFromFile(
-                      workspaceId,
-                      finalizedAsset.id,
-                      "thumbnail",
-                      version,
-                      thumbnailFile
-                    )
-                  )
-                }
-
-                await Promise.all(cacheWrites)
-              },
-              {
-                receiptAssetId: finalizedAsset.id,
-                version: finalizedAsset.version ?? originalAsset.version ?? 1,
-              }
-            )
-
-            backgroundTrace.mark("receipt.cache_ready", {
-              receiptAssetId: finalizedAsset.id,
-              version: finalizedAsset.version ?? originalAsset.version ?? 1,
-            })
-          } catch (backgroundError) {
-            backgroundTrace.error("receipt.media_background_failed", backgroundError, {
-              receiptAssetId: originalAsset.id,
-            })
-          } finally {
-            backgroundDecodedReceiptImage?.close()
-          }
-        })(activeWorkspaceId, file, storedReceiptAsset)
-      } catch (uploadError) {
-        trace.error("receipt.upload_failed", uploadError, {
-          receiptAssetId: receiptAsset.id,
-        })
-
-        if (!isStorageUploadError(uploadError)) {
-          throw uploadError
-        }
+        }),
       }
 
-      try {
-        if (!storageReady) {
-          throw new Error("Receipt upload unavailable")
-        }
+      setOcrStatus("Analyzing receipt...")
+      patchDraftLocally(activeWorkspaceId, storedReceiptAsset.id, {
+        analysisStatus: "analyzing",
+        receiptAsset: storedReceiptAsset,
+        parseWarnings: ["Analyzing receipt..."],
+      })
 
-        setOcrStatus("Analyzing receipt...")
+      try {
+        throwIfReceiptSessionInactive(storedReceiptAsset.id)
+
         const analyzed = await withProfileStep(
           trace,
           "receipt.analysis_request",
@@ -851,56 +891,132 @@ export default function ReceiptCapturePanel() {
             analyzeReceiptApi(
               activeWorkspaceId,
               storedReceiptAsset.id,
+              originalUploadFile,
               profile("receipt.analysis_request.network_request", {
                 receiptAssetId: storedReceiptAsset.id,
-              })
+              }),
+              captureAbortController.signal
             ),
           {
             receiptAssetId: storedReceiptAsset.id,
           }
         )
-        const provisionalDraft: ReceiptDraft = {
+        throwIfReceiptSessionInactive(storedReceiptAsset.id)
+
+        // Draft is already persisted in Firestore by analyzeReceipt.
+        const persistedDraft: ReceiptDraft = {
           ...analyzed.draft,
           receiptAsset: storedReceiptAsset,
         }
-        const modePatch = buildModePatch(provisionalDraft, captureMode, captureCategory)
-        useReceiptDraftsStore.getState().applyDraft(activeWorkspaceId, provisionalDraft)
-        patchDraftLocally(activeWorkspaceId, provisionalDraft.id, modePatch)
-        void finalizeReceiptAnalysisApi(
-          activeWorkspaceId,
-          { analysisId: analyzed.analysis.id },
-          profile("receipt.analysis_finalize.network_request", {
-            analysisId: analyzed.analysis.id,
-            receiptAssetId: storedReceiptAsset.id,
+        // Derive mode from what Textract actually found, not a pre-capture default.
+        // Two or more line items → offer multi-category workflow.
+        // Zero or one → single expense, no mode selection needed.
+        const detectedMode: ReceiptDraftAllocationMode =
+          (persistedDraft.lineItems?.length ?? 0) >= 2 ? "multiple" : "single"
+        const modePatch = buildModePatch(persistedDraft, detectedMode, "")
+        useReceiptDraftsStore.getState().applyDraft(activeWorkspaceId, persistedDraft)
+        patchDraftLocally(activeWorkspaceId, persistedDraft.id, modePatch)
+
+        if (optimisticReceiptAsset?.dataUrl?.startsWith("blob:")) {
+          URL.revokeObjectURL(optimisticReceiptAsset.dataUrl)
+        }
+
+        // Sync the user's mode/category selection back to Firestore (background).
+        if (Object.keys(modePatch).length > 0) {
+          void updateDraft(activeWorkspaceId, persistedDraft.id, modePatch).catch((err) => {
+            trace.error("receipt.mode_patch_sync_failed", err, {
+              receiptDraftId: persistedDraft.id,
+            })
           })
-        )
-          .then(async (finalized) => {
-            const currentLocalDraft = useReceiptDraftsStore
-              .getState()
-              .byWorkspaceId[activeWorkspaceId]
-              ?.drafts.find(
-                (candidate) => candidate.receiptAssetId === storedReceiptAsset.id
+        }
+
+        // Storage upload, preview and thumbnail all happen in the background.
+        // The user is already looking at the pre-filled form by this point.
+        const backgroundDecodedReceiptImage = decodedReceiptImage
+        decodedReceiptImage = null
+        void (async (
+          workspaceId: string,
+          sourceFile: File,
+          originalAsset: ReceiptAsset,
+          uploadFile: File
+        ) => {
+          try {
+            throwIfReceiptSessionInactive(originalAsset.id)
+
+            // Upload the original image and render preview/thumbnail canvas files
+            // simultaneously — they are independent of each other. Canvas renders
+            // take ~200–400ms and overlap entirely with the original upload (800ms–3s),
+            // so preview/thumbnail uploads can begin as soon as the original upload lands.
+            const [, previewFile, thumbnailFile] = await Promise.all([
+              withProfileStep(
+                trace,
+                "receipt.upload_original",
+                () =>
+                  uploadReceiptAssetToStorage(
+                    uploadFile,
+                    originalAsset.originalStoragePath ?? originalAsset.storagePath ?? "",
+                    { resolveDownloadUrl: false }
+                  ),
+                {
+                  receiptAssetId: originalAsset.id,
+                  originalStoragePath:
+                    originalAsset.originalStoragePath ?? originalAsset.storagePath ?? null,
+                  originalUploadSizeBytes: uploadFile.size,
+                }
+              ),
+              prepareReceiptPreviewFile(sourceFile, backgroundDecodedReceiptImage ?? undefined),
+              prepareReceiptThumbnailFile(sourceFile, backgroundDecodedReceiptImage ?? undefined),
+            ])
+            throwIfReceiptSessionInactive(originalAsset.id)
+
+            const [previewResult, thumbnailResult] = await Promise.allSettled([
+              uploadReceiptAssetToStorage(previewFile, originalAsset.previewStoragePath ?? ""),
+              uploadReceiptAssetToStorage(thumbnailFile, originalAsset.thumbnailStoragePath ?? ""),
+            ])
+            throwIfReceiptSessionInactive(originalAsset.id)
+
+            const version = originalAsset.version ?? 1
+            const cacheWrites: Promise<unknown>[] = []
+            if (previewResult.status === "fulfilled") {
+              cacheWrites.push(
+                saveReceiptMediaFromFile(
+                  workspaceId,
+                  originalAsset.id,
+                  "preview",
+                  version,
+                  previewFile
+                )
               )
-            const finalizedDraft: ReceiptDraft = {
-              ...finalized.draft,
-              receiptAsset: storedReceiptAsset,
             }
-            const patchToPersist = currentLocalDraft
-              ? buildPatchFromLocalDraft(currentLocalDraft, finalizedDraft)
-              : modePatch
-            useReceiptDraftsStore.getState().applyDraft(activeWorkspaceId, finalizedDraft)
-            if (Object.keys(patchToPersist).length > 0) {
-              patchDraftLocally(activeWorkspaceId, finalizedDraft.id, patchToPersist)
-              await updateDraft(activeWorkspaceId, finalizedDraft.id, patchToPersist)
+            if (thumbnailResult.status === "fulfilled") {
+              cacheWrites.push(
+                saveReceiptMediaFromFile(
+                  workspaceId,
+                  originalAsset.id,
+                  "thumbnail",
+                  version,
+                  thumbnailFile
+                )
+              )
             }
-          })
-          .catch((finalizeError) => {
-            setError(
-              finalizeError instanceof Error
-                ? finalizeError.message
-                : "Receipt analysis is ready, but finishing the draft save failed."
-            )
-          })
+            await Promise.all(cacheWrites)
+
+            trace.mark("receipt.cache_ready", {
+              receiptAssetId: originalAsset.id,
+              version,
+            })
+          } catch (backgroundError) {
+            if (isAbortError(backgroundError)) {
+              return
+            }
+            trace.error("receipt.media_background_failed", backgroundError, {
+              receiptAssetId: originalAsset.id,
+            })
+          } finally {
+            backgroundDecodedReceiptImage?.close()
+          }
+        })(activeWorkspaceId, file, storedReceiptAsset, originalUploadFile)
+
         setExpanded(false)
         setAnalysisOpen(true)
         setMessage(null)
@@ -911,36 +1027,25 @@ export default function ReceiptCapturePanel() {
           draftId: analyzed.draft.id,
         })
       } catch (analysisError) {
+        if (isAbortError(analysisError)) {
+          throw analysisError
+        }
         trace.error("receipt.analysis_failed", analysisError, {
           receiptAssetId: storedReceiptAsset.id,
-          storageReady,
         })
 
-        let resolvedOcrText = ""
-
-        if (!resolvedOcrText) {
-          setOcrStatus(
-            storageReady
-              ? "Receipt analysis unavailable. Reading receipt text locally..."
-              : "Cloud receipt upload unavailable. Reading receipt text locally..."
-          )
-          resolvedOcrText = await withProfileStep(
-            trace,
-            "receipt.ocr",
-            () =>
-              recognizeReceiptText(file, ({ status, progress }) => {
-                const percent = Math.max(0, Math.min(100, Math.round(progress * 100)))
-                setOcrStatus(`${status} (${percent}%)`)
-              }),
-            {}
-          )
-        } else {
-          setOcrStatus(
-            storageReady
-              ? "Receipt analysis unavailable. Using pasted OCR text."
-              : "Cloud receipt upload unavailable. Using pasted OCR text."
-          )
-        }
+        const fallbackStatus = "Receipt analysis unavailable. Reading receipt text locally..."
+        setOcrStatus(fallbackStatus)
+        const resolvedOcrText = await withProfileStep(
+          trace,
+          "receipt.ocr",
+          () =>
+            recognizeReceiptText(file, ({ status, progress }) => {
+              const percent = Math.max(0, Math.min(100, Math.round(progress * 100)))
+              setOcrStatus(`${status} (${percent}%)`)
+            }),
+          {}
+        )
 
         const draftPayload = await withProfileStep(
           trace,
@@ -958,6 +1063,7 @@ export default function ReceiptCapturePanel() {
                 resolvedOcrText.trim().length === 0 ? ["No OCR text provided yet"] : [],
               confidence: resolvedOcrText.trim().length > 0 ? 0.75 : 0.35,
               suggestedExpenseAccount: extracted.suggestedExpenseAccount,
+              vehicleExpenseMode: extracted.vehicleExpenseMode,
               completion: {
                 missingFields: extracted.missingFields,
                 readyToCommit: extracted.missingFields.length === 0,
@@ -965,57 +1071,70 @@ export default function ReceiptCapturePanel() {
               notes: "",
               receiptAssetId: storedReceiptAsset.id,
               receiptAnalysisId: undefined,
-              analysisStatus: storageReady ? "failed" : undefined,
+              analysisStatus: "failed",
               lineItems: [],
               allocations: [],
               fieldConfidence:
                 resolvedOcrText.trim().length > 0 ? { total: 0.75, merchant: 0.7 } : {},
               receiptAsset: storedReceiptAsset,
             }
-            return applyDraftMode(nextDraft, captureMode, captureCategory)
+            // Local OCR never produces structured line items, so single mode is always correct.
+            return applyDraftMode(nextDraft, "single", "")
           },
           {}
         )
-        trace.mark("receipt.draft_prepared", {
-          receiptAssetId: storedReceiptAsset.id,
-        })
         await withProfileStep(
           trace,
           "receipt.draft_create",
-          () =>
-            createDraft(
-              activeWorkspaceId,
-              draftPayload,
-            ),
-          {
-            qualityStatus: quality.qualityStatus,
-            storageReady,
-          }
+          () => createDraft(activeWorkspaceId, draftPayload),
+          { qualityStatus: quality.qualityStatus }
         )
         setExpanded(false)
         setAnalysisOpen(true)
         setMessage(
-          storageReady
-            ? "Receipt draft created with local OCR fallback. Review the extracted fields below before saving."
-            : "Receipt draft created with local OCR because Firebase Storage upload is unavailable. Review the extracted fields below before saving."
+          "Receipt draft created with local OCR fallback. Review the extracted fields below before saving."
         )
         trace.mark("receipt.capture.complete", {
-          mode: storageReady ? "fallback_ocr" : "fallback_ocr_storage_unavailable",
+          mode: "fallback_ocr",
           receiptAssetId: storedReceiptAsset.id,
         })
       }
     } catch (err) {
-      if (err instanceof Error && /canceled/i.test(err.message)) {
+      if (isAbortError(err) || (err instanceof Error && /canceled/i.test(err.message))) {
         trace.mark("receipt.capture.canceled")
+        if (optimisticReceiptAsset?.dataUrl?.startsWith("blob:")) {
+          URL.revokeObjectURL(optimisticReceiptAsset.dataUrl)
+        }
         if (optimisticReceiptAssetId) {
           removeDraftsForReceiptAsset(activeWorkspaceId, optimisticReceiptAssetId)
+          resetReceiptCapture(optimisticReceiptAssetId, optimisticReceiptAssetId, {
+            terminalState: "canceled",
+          })
+          void discardReceiptCaptureArtifacts(
+            activeWorkspaceId,
+            optimisticReceiptAssetId
+          ).catch((cleanupError) => {
+            console.warn("receipt capture cleanup failed after cancel", cleanupError)
+          })
         }
         return
       }
 
       trace.error("receipt.capture_failed", err)
+      if (optimisticReceiptAsset?.dataUrl?.startsWith("blob:")) {
+        URL.revokeObjectURL(optimisticReceiptAsset.dataUrl)
+      }
       if (optimisticReceiptAssetId) {
         removeDraftsForReceiptAsset(activeWorkspaceId, optimisticReceiptAssetId)
+        resetReceiptCapture(optimisticReceiptAssetId, optimisticReceiptAssetId, {
+          terminalState: "canceled",
+        })
+        void discardReceiptCaptureArtifacts(
+          activeWorkspaceId,
+          optimisticReceiptAssetId
+        ).catch((cleanupError) => {
+          console.warn("receipt capture cleanup failed after error", cleanupError)
+        })
       }
 
       setError(
@@ -1027,6 +1146,9 @@ export default function ReceiptCapturePanel() {
       })
       decodedReceiptImage?.close()
       decodedReceiptImage = null
+      if (activeProcessAbortControllerRef.current === captureAbortController) {
+        activeProcessAbortControllerRef.current = null
+      }
       setOcrStatus(null)
       setUploading(false)
     }
@@ -1056,81 +1178,156 @@ export default function ReceiptCapturePanel() {
     }
   }
 
+  const VALID_DATE_RE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/
+
   async function commitReceiptExpense(item: ReceiptDraft) {
     if (!activeWorkspaceId) return
 
     const category =
-      expenseCategoriesByItemId[item.id] || item.suggestedExpenseAccount || ""
+      expenseCategoriesByItemId[item.receiptAssetId] || item.suggestedExpenseAccount || ""
     if (!category) {
       setError("Choose an expense category before saving this receipt.")
       return
     }
 
     const occurredAt = item.occurredAt
-    const amount = Number(item.amount ?? 0)
-    if (!occurredAt || !Number.isFinite(amount) || amount <= 0) {
-      setError("This receipt still needs a valid date and amount.")
+    if (!occurredAt) {
+      setError("Please enter the receipt date before saving.")
       return
     }
+    if (!VALID_DATE_RE.test(occurredAt)) {
+      setError("Please enter a complete, valid date (YYYY-MM-DD) before saving.")
+      return
+    }
+    const receiptDate = new Date(`${occurredAt}T12:00:00`)
+    if (receiptDate > new Date()) {
+      setError("The receipt date is in the future — please check the date before saving.")
+      return
+    }
+
+    const amount = Number(item.amount ?? 0)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setError("Please enter a valid expense amount before saving.")
+      return
+    }
+
+    // In multiple-category mode every line item must have an amount — that is
+    // the entire point of the mode. Textract may not extract amounts for every
+    // line (e.g. bundled items, poorly printed receipts). In that case the user
+    // must fill them in manually before the allocation can be saved correctly.
+    const currentAllocationMode = resolveAllocationMode(item)
+    if (currentAllocationMode === "multiple") {
+      const lineItems = item.lineItems ?? []
+      const missingAmountIndexes = lineItems
+        .map((li, index) => ({ li, index }))
+        .filter(
+          ({ li }) =>
+            typeof li.amount !== "number" ||
+            !Number.isFinite(li.amount) ||
+            li.amount <= 0
+        )
+        .map(({ index }) => index + 1)
+
+      if (missingAmountIndexes.length > 0) {
+        setError(
+          missingAmountIndexes.length === 1
+            ? `Line item ${missingAmountIndexes[0]} is missing an amount. Enter the amount before saving.`
+            : `Line items ${missingAmountIndexes.join(", ")} are missing amounts. Enter all amounts before saving.`
+        )
+        return
+      }
+    }
+
+    // Historical-period gate: warn before updating prior-year P&L.
+    const expenseYear = occurredAt.slice(0, 4)
+    const currentYear = new Date().getFullYear().toString()
+    if (expenseYear < currentYear && pendingHistoricalCommit?.id !== item.id) {
+      setPendingHistoricalCommit(item)
+      return
+    }
+    setPendingHistoricalCommit(null)
 
     setWorkingItemId(item.id)
     setError(null)
     setMessage(null)
 
+    const clientMutationId = `receipt-draft:${item.id}`
+    const periodId = getCalendarMonthBucketFromDate(occurredAt)
+    const vendor = item.counterparty || item.description || "Receipt expense"
+    const description = item.description || item.counterparty || "Receipt expense"
+
+    const vehicleExpenseMode =
+      item.vehicleExpenseMode ?? getVehicleExpenseModeForCategory(category)
+    const allocations =
+      currentAllocationMode === "multiple"
+        ? buildAllocationsFromLineItems(item.lineItems, category)
+        : []
+
+    // Build a temporary expense so it appears in the grid before the server
+    // responds. The tempId lets the store replace it with the canonical record
+    // once the commit resolves.
+    const nowIso = new Date().toISOString()
+    const tempId = `tmp-${item.id}`
+    const optimisticExpense = {
+      tempId,
+      clientMutationId,
+      periodId,
+      date: occurredAt,
+      amount,
+      vendor,
+      description,
+      account: category,
+      receiptAssetId: item.receiptAssetId,
+      receiptAnalysisId: item.receiptAnalysisId,
+      createdFromReceipt: true,
+      allocations,
+      calculationMethod: "manual" as const,
+      vehicleExpenseMode,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      version: 1,
+    }
+
     try {
-      const allocationMode = resolveAllocationMode(item)
-      const allocations =
-        allocationMode === "multiple"
-          ? buildAllocationsFromLineItems(item.lineItems, category)
-          : []
-      const missingFields = [
-        ...(occurredAt ? [] : ["date"]),
-        ...(amount > 0 ? [] : ["amount"]),
-        ...(item.counterparty || item.description ? [] : ["merchant"]),
-        ...(category ? [] : ["expenseCategory"]),
-      ]
-
-      patchDraftLocally(activeWorkspaceId, item.id, {
-        status: "committed",
-        suggestedExpenseAccount: category,
-        allocationMode,
-        allocations,
-        completion: {
-          missingFields,
-          readyToCommit: missingFields.length === 0,
-        },
-      })
-
+      // Optimistically mark the draft committed and add the expense to the
+      // grid — both happen before the network call so the UI responds instantly.
+      patchDraftLocally(activeWorkspaceId, item.id, { status: "committed" })
+      useExpensesStore.getState().addExpense(activeWorkspaceId, optimisticExpense)
       if (pendingReceiptItems.length <= 1) {
         setAnalysisOpen(false)
       }
       setExpanded(false)
 
-      const expense = await expensesService.createExpense(activeWorkspaceId, {
+      // Single atomic backend call: creates expense + marks draft committed
+      // in one Firestore batch. No partial-commit ghost drafts.
+      const { expense } = await commitReceiptDraftApi(activeWorkspaceId, item.id, {
         date: occurredAt,
         amount,
-        vendor: item.counterparty || item.description || "Receipt expense",
-        description: item.description || item.counterparty || "Receipt expense",
+        vendor,
+        description,
         account: category,
-        periodId: occurredAt.slice(0, 7),
-        clientMutationId: `receipt-draft:${item.id}`,
+        periodId,
+        clientMutationId,
         receiptAssetId: item.receiptAssetId,
         receiptAnalysisId: item.receiptAnalysisId,
         allocations,
         calculationMethod: "manual",
+        vehicleExpenseMode,
       })
 
-      patchDraftLocally(activeWorkspaceId, item.id, {
-        status: "committed",
-        suggestedExpenseAccount: category,
-        allocationMode,
-        allocations,
-        completion: {
-          missingFields,
-          readyToCommit: missingFields.length === 0,
-        },
-        committedExpenseId: expense.id,
-      })
+      // Replace the optimistic entry with the canonical server record.
+      useExpensesStore.getState().replaceExpense(activeWorkspaceId, tempId, expense)
+
+      // Write the updated expense list back to the repository cache so the
+      // receipts library finds this expense immediately without waiting for
+      // its next TTL-driven backend refresh.
+      const storeEntry = useExpensesStore.getState().byWorkspaceId[activeWorkspaceId]
+      if (storeEntry) {
+        expenseRepository.prime(activeWorkspaceId, periodId, storeEntry.expenses, {
+          lastSuccessfulSyncAt: storeEntry.lastSuccessfulSyncAt ?? Date.now(),
+          localUpdatedAt: Date.now(),
+        })
+      }
 
       updateExpenseMemory({
         vendor: item.counterparty || item.description || "",
@@ -1139,26 +1336,10 @@ export default function ReceiptCapturePanel() {
       })
 
       setMessage("Receipt saved as a business expense.")
-      setExpanded(false)
-      if (!isProvisionalAnalysisDraft(item)) {
-        void updateDraft(activeWorkspaceId, item.id, {
-          status: "committed",
-          suggestedExpenseAccount: category,
-          allocationMode,
-          allocations,
-          completion: {
-            missingFields,
-            readyToCommit: missingFields.length === 0,
-          },
-          committedExpenseId: expense.id,
-        }).catch(async (err) => {
-          await refreshDrafts(activeWorkspaceId)
-          setError(
-            err instanceof Error ? err.message : "Failed to save receipt expense."
-          )
-        })
-      }
+      resetReceiptCapture(item.receiptAssetId, item.id, { terminalState: "committed" })
     } catch (err) {
+      // Remove the optimistic expense and restore the draft so the user can retry.
+      useExpensesStore.getState().removeExpense(activeWorkspaceId, tempId)
       await refreshDrafts(activeWorkspaceId)
       setError(
         err instanceof Error ? err.message : "Failed to save receipt expense."
@@ -1184,16 +1365,12 @@ export default function ReceiptCapturePanel() {
     }
     setExpanded(false)
 
-    if (isProvisionalAnalysisDraft(item)) {
-      setWorkingItemId(null)
-      setMessage("Receipt draft cleared.")
-      return
-    }
-
+    resetReceiptCapture(item.receiptAssetId, item.id, {
+      terminalState: "dismissed",
+    })
+    removeDraftsForReceiptAsset(activeWorkspaceId, item.receiptAssetId)
     try {
-      await updateDraft(activeWorkspaceId, item.id, {
-        status: "dismissed",
-      })
+      await discardReceiptCaptureArtifacts(activeWorkspaceId, item.receiptAssetId)
       setMessage("Receipt draft cleared.")
     } catch (err) {
       await refreshDrafts(activeWorkspaceId)
@@ -1205,18 +1382,42 @@ export default function ReceiptCapturePanel() {
     }
   }
 
-  function persistReceiptItemPatch(
-    item: ReceiptDraft,
-    patch: ReceiptDraftPatch
-  ) {
+  // Clears a stuck draft and reopens the capture panel so the user can retake
+  // the photo. A draft is "stuck" when it never progressed past analysisStatus:
+  // "analyzing" — typically because the app was closed mid-OCR.
+  async function retryStuckDraft(item: ReceiptDraft) {
+    if (!activeWorkspaceId) return
+
+    setWorkingItemId(item.id)
+    setError(null)
+    setMessage(null)
+
+    resetReceiptCapture(item.receiptAssetId, item.id, {
+      terminalState: "canceled",
+    })
+    removeDraftsForReceiptAsset(activeWorkspaceId, item.receiptAssetId)
+
+    if (pendingReceiptItems.length <= 1) {
+      setAnalysisOpen(false)
+    }
+
+    try {
+      await discardReceiptCaptureArtifacts(activeWorkspaceId, item.receiptAssetId)
+    } catch (err) {
+      // Cleanup failure is non-fatal — the user still gets to retry.
+      console.warn("retryStuckDraft: cleanup failed", err)
+    } finally {
+      setWorkingItemId(null)
+    }
+
+    setExpanded(true)
+  }
+
+  function persistReceiptItemPatch(item: ReceiptDraft, patch: ReceiptDraftPatch) {
     if (!activeWorkspaceId) return
 
     setError(null)
     patchDraftLocally(activeWorkspaceId, item.id, patch)
-
-    if (isProvisionalAnalysisDraft(item)) {
-      return
-    }
 
     const queueKey = `${activeWorkspaceId}:${item.id}`
     draftSyncQueueRef.current[queueKey] = mergeReceiptDraftPatch(
@@ -1268,7 +1469,7 @@ export default function ReceiptCapturePanel() {
       return
     }
     const defaultCategory =
-      expenseCategoriesByItemId[item.id] ||
+      expenseCategoriesByItemId[item.receiptAssetId] ||
       getSuggestedExpenseCategoryForImport(item, getAccountForVendor) ||
       item.suggestedExpenseAccount ||
       ""
@@ -1325,43 +1526,10 @@ export default function ReceiptCapturePanel() {
             <div className="mx-auto max-w-xl px-1 py-1">
             {!uploading ? (
               <div className="space-y-2">
-                <p className="text-xl font-semibold text-foreground">
-                  {captureStep === "mode"
-                    ? "How should we save this receipt?"
-                    : captureStep === "category"
-                      ? "What default category should we start with?"
-                      : "Add a receipt image"}
-                </p>
+                <p className="text-xl font-semibold text-foreground">Add a receipt image</p>
                 <p className="text-sm text-muted-foreground">
-                  {captureStep === "mode"
-                    ? "Choose whether this receipt should land in one category or be split across several."
-                    : captureStep === "category"
-                      ? "Pick the category we should apply first. You can still adjust details after analysis."
-                      : "Use the camera or upload an image from your library to begin receipt analysis."}
+                  Use the camera or upload an image from your library to begin receipt analysis.
                 </p>
-              </div>
-            ) : null}
-
-            {!uploading && (captureMode || captureCategory.trim()) ? (
-              <div className="mt-4 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                {captureMode ? (
-                  <button
-                    type="button"
-                    className="rounded-full border px-3 py-1 transition hover:bg-accent"
-                    onClick={() => setCaptureStep("mode")}
-                  >
-                    Mode: {captureMode === "single" ? "One category" : "Multiple categories"}
-                  </button>
-                ) : null}
-                {captureCategory.trim() ? (
-                  <button
-                    type="button"
-                    className="rounded-full border px-3 py-1 transition hover:bg-accent"
-                    onClick={() => setCaptureStep("category")}
-                  >
-                    Category: {captureCategory}
-                  </button>
-                ) : null}
               </div>
             ) : null}
 
@@ -1375,62 +1543,6 @@ export default function ReceiptCapturePanel() {
                     cardBackground="transparent"
                     textColor="#486b18"
                   />
-                </div>
-              ) : captureStep === "mode" ? (
-                <div className="space-y-3">
-                  <Select
-                    value={captureMode}
-                    onValueChange={(value) => {
-                      setCaptureMode(value as ReceiptDraftAllocationMode)
-                      setCaptureStep("category")
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select receipt mode" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="single">Save to one category</SelectItem>
-                      <SelectItem value="multiple">Split across multiple categories</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    {captureMode === "single"
-                      ? "Recommended for most receipts. We’ll save the full amount into one business expense category."
-                      : captureMode === "multiple"
-                        ? "Use this when one receipt contains items that belong in different expense categories."
-                        : "Choose the structure first and we’ll guide the rest of the flow."}
-                  </p>
-                </div>
-              ) : captureStep === "category" ? (
-                <div className="space-y-3">
-                  <Select
-                    value={captureCategory}
-                    onValueChange={(value) => {
-                      setCaptureCategory(value)
-                      setCaptureStep("source")
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Choose expense category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {EXPENSE_CATEGORY_OPTIONS.map((option) => (
-                        <SelectItem key={option} value={option}>
-                          {option}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <div className="flex justify-start">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="px-0 text-muted-foreground hover:text-foreground"
-                      onClick={() => setCaptureStep("mode")}
-                    >
-                      Back
-                    </Button>
-                  </div>
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -1461,16 +1573,8 @@ export default function ReceiptCapturePanel() {
                       Choose Image
                     </Button>
                   </div>
-                  <div className="flex justify-between gap-3">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="px-0 text-muted-foreground hover:text-foreground"
-                      onClick={() => setCaptureStep("category")}
-                    >
-                      Back
-                    </Button>
-                    {pendingReceiptItems.length > 0 ? (
+                  {pendingReceiptItems.length > 0 ? (
+                    <div className="flex justify-end">
                       <Button
                         type="button"
                         variant="ghost"
@@ -1484,19 +1588,14 @@ export default function ReceiptCapturePanel() {
                           ? "Review 1 pending draft"
                           : `Review ${pendingReceiptItems.length} pending drafts`}
                       </Button>
-                    ) : null}
-                  </div>
+                    </div>
+                  ) : null}
                 </div>
               )}
             </div>
 
             {message ? <p className="mt-4 text-sm text-emerald-700">{message}</p> : null}
             {error ? <p className="mt-4 text-sm text-destructive">{error}</p> : null}
-            {!uploading && pendingReceiptItems.length === 0 ? (
-              <p className="mt-4 text-sm text-muted-foreground">
-                No receipt drafts yet. Start with the receipt mode and we’ll guide the rest.
-              </p>
-            ) : null}
             {!uploading && ocrStatus ? (
               <p className="mt-4 text-sm text-muted-foreground">{ocrStatus}</p>
             ) : null}
@@ -1521,110 +1620,136 @@ export default function ReceiptCapturePanel() {
               ) : (
                 <div className="space-y-4">
             {pendingReceiptItems.map((item) => {
-              const allocationMode = resolveAllocationMode(item)
+              const editableItem = item
+              const cardKey = editableItem.id
+              const isStuck = stuckDraftIds.has(editableItem.id)
+              const allocationMode = resolveAllocationMode(editableItem)
               const isMultiCategory = allocationMode === "multiple"
-              const isProvisional = isProvisionalAnalysisDraft(item)
-              const duplicateExpense = findDuplicateExpense(item, expenses)
-              const lineItemsTotal = sumLineItems(item.lineItems)
+              const clientDuplicate = findDuplicateExpense(editableItem, expenses)
+              const serverResult = serverDuplicateByDraftId[editableItem.id]
+              const hasExactDuplicate = clientDuplicate != null || (serverResult?.exact ?? false)
+              const hasNearDuplicate = !hasExactDuplicate && (serverResult?.near ?? false)
+              const duplicateConfirmed = confirmedDuplicateDraftIds.has(editableItem.id)
+              const lineItemsTotal = sumLineItems(editableItem.lineItems)
+              const fc = editableItem.fieldConfidence ?? {}
               const selectedCategory =
-                expenseCategoriesByItemId[item.id] ||
-                getSuggestedExpenseCategoryForImport(item, getAccountForVendor) ||
-                item.suggestedExpenseAccount ||
+                expenseCategoriesByItemId[editableItem.receiptAssetId] ||
+                getSuggestedExpenseCategoryForImport(editableItem, getAccountForVendor) ||
+                editableItem.suggestedExpenseAccount ||
                 ""
               const liveAllocations =
-                isMultiCategory && item.lineItems?.length
-                  ? buildAllocationsFromLineItems(item.lineItems, selectedCategory)
-                  : item.allocations ?? []
+                isMultiCategory && editableItem.lineItems?.length
+                  ? buildAllocationsFromLineItems(editableItem.lineItems, selectedCategory)
+                  : editableItem.allocations ?? []
               return (
-                <div key={item.id} className="overflow-hidden rounded-xl border p-4">
-                  {duplicateExpense ? (
+                <div key={cardKey} className="overflow-hidden rounded-xl border p-4">
+                  {hasExactDuplicate && !duplicateConfirmed ? (
                     <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                       <Badge variant="outline">Possible duplicate</Badge>
-                      <span>A matching expense already exists for this date and amount.</span>
+                      <span>A matching expense already exists for this exact date and amount.</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-xs text-amber-800 hover:bg-amber-100"
+                        onClick={() =>
+                          setConfirmedDuplicateDraftIds((prev) => new Set([...prev, editableItem.id]))
+                        }
+                      >
+                        Save Anyway
+                      </Button>
+                    </div>
+                  ) : hasExactDuplicate && duplicateConfirmed ? (
+                    <div className="mb-3 flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                      <span>Saving as a new expense (duplicate override active).</span>
+                    </div>
+                  ) : hasNearDuplicate ? (
+                    <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                      <Badge variant="secondary">Similar expense</Badge>
+                      <span>A similar expense exists within a few days of this date. Verify before saving.</span>
                     </div>
                   ) : null}
                   <div className="space-y-3">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="font-medium">
-                          {item.counterparty || item.description || "Receipt draft"}
+                          {editableItem.counterparty || editableItem.description || "Receipt draft"}
                         </p>
                         <Badge variant="outline">receipt</Badge>
-                        {item.analysisStatus ? (
-                          <Badge variant="secondary">{item.analysisStatus}</Badge>
+                        {editableItem.analysisStatus ? (
+                          <Badge variant="secondary">{editableItem.analysisStatus}</Badge>
                         ) : null}
                       </div>
 
-                      <div className="grid gap-4 xl:grid-cols-2">
-                        <div className="space-y-1">
-                          <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                            Merchant
-                          </p>
-                          <Input
-                            value={item.counterparty || item.description || ""}
-                            onChange={(event) =>
-                              persistReceiptItemPatch(item, {
-                                counterparty: event.target.value,
-                                description: event.target.value,
-                              })
-                            }
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                            Total
-                          </p>
-                          <Input
-                            type="number"
-                            step="0.01"
-                            value={item.amount ?? ""}
-                            onChange={(event) =>
-                              persistReceiptItemPatch(item, {
-                                amount:
-                                  event.target.value.trim() === ""
-                                    ? null
-                                    : Number(event.target.value),
-                              })
-                            }
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                            Date
-                          </p>
-                          <Input
-                            type="date"
-                            value={item.occurredAt ?? ""}
-                            onChange={(event) =>
-                              persistReceiptItemPatch(item, {
-                                occurredAt: event.target.value || null,
-                              })
-                            }
-                          />
-                        </div>
+                      {/* Receipt Mode selector is only meaningful when multiple line
+                          items were detected. For single-item receipts the category
+                          picker spans the full width and no mode decision is needed. */}
+                      <div className={`grid gap-4 ${(editableItem.lineItems?.length ?? 0) >= 2 ? "sm:grid-cols-2" : ""}`}>
+                        {(editableItem.lineItems?.length ?? 0) >= 2 ? (
+                          <div className="space-y-1">
+                            <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                              Receipt Mode
+                            </p>
+                            {/* Segmented toggle instead of Select — avoids Radix portal/Dialog
+                                interaction issues on mobile where Select dropdowns are unreliable
+                                inside a full-screen DismissableLayer context. */}
+                            <div className="flex overflow-hidden rounded-md border border-input">
+                              <button
+                                type="button"
+                                className={`flex-1 px-3 py-2 text-sm transition-colors ${
+                                  allocationMode === "single"
+                                    ? "bg-foreground text-background"
+                                    : "bg-background text-foreground hover:bg-muted"
+                                }`}
+                                onClick={() =>
+                                  persistReceiptItemPatch(
+                                    editableItem,
+                                    buildModePatch(editableItem, "single", selectedCategory)
+                                  )
+                                }
+                              >
+                                One category
+                              </button>
+                              <button
+                                type="button"
+                                className={`flex-1 border-l border-input px-3 py-2 text-sm transition-colors ${
+                                  allocationMode === "multiple"
+                                    ? "bg-foreground text-background"
+                                    : "bg-background text-foreground hover:bg-muted"
+                                }`}
+                                onClick={() =>
+                                  persistReceiptItemPatch(
+                                    editableItem,
+                                    buildModePatch(editableItem, "multiple", selectedCategory)
+                                  )
+                                }
+                              >
+                                Multiple categories
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
                         <div className="space-y-1">
                           <p className="text-xs uppercase tracking-wide text-muted-foreground">
                             Category
                           </p>
-                          <Select
+                          <ExpenseCategoryPicker
+                            workspaceId={activeWorkspaceId}
                             value={selectedCategory}
-                            onValueChange={(value) =>
+                            onSelect={(category) => {
                               setExpenseCategoriesByItemId((current) => ({
                                 ...current,
-                                [item.id]: value,
+                                [editableItem.receiptAssetId]: category,
                               }))
-                            }
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Choose expense category" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {EXPENSE_CATEGORY_OPTIONS.map((option) => (
-                                <SelectItem key={option} value={option}>
-                                  {option}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                              persistReceiptItemPatch(editableItem, {
+                                suggestedExpenseAccount: category,
+                                vehicleExpenseMode:
+                                  getVehicleExpenseModeForCategory(category),
+                              })
+                            }}
+                            placeholder="Choose expense category"
+                            dialogTitle="Choose Draft Category"
+                            customDialogTitle="New Draft Category"
+                          />
                           {isMultiCategory ? (
                             <div className="flex items-start gap-1 text-[11px] text-muted-foreground">
                               <Info className="mt-0.5 h-3 w-3 shrink-0" />
@@ -1636,7 +1761,91 @@ export default function ReceiptCapturePanel() {
                         </div>
                       </div>
 
-                      {isMultiCategory && item.lineItems?.length ? (
+                      <div className="grid gap-4 xl:grid-cols-2">
+                        <div className="space-y-1">
+                          <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                            Merchant
+                          </p>
+                          <Input
+                            value={editableItem.counterparty || ""}
+                            onChange={(event) =>
+                              persistReceiptItemPatch(editableItem, {
+                                counterparty: event.target.value,
+                              })
+                            }
+                          />
+                          {typeof fc.merchant === "number" && fc.merchant < 0.65 ? (
+                            <p className="text-[11px] text-amber-600">
+                              Merchant name may be inaccurate.
+                            </p>
+                          ) : null}
+                        </div>
+                        {/* In multiple-category mode the description lives inside each
+                            line item. When the user switches to one category,
+                            buildModePatch populates this field from the line items. */}
+                        {!isMultiCategory ? (
+                          <div className="space-y-1">
+                            <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                              Description
+                            </p>
+                            <Input
+                              value={editableItem.description || ""}
+                              onChange={(event) =>
+                                persistReceiptItemPatch(editableItem, {
+                                  description: event.target.value,
+                                })
+                              }
+                            />
+                          </div>
+                        ) : null}
+                        <div className="space-y-1">
+                          <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                            Total
+                          </p>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            value={editableItem.amount ?? ""}
+                            onChange={(event) =>
+                              persistReceiptItemPatch(editableItem, {
+                                amount:
+                                  event.target.value.trim() === ""
+                                    ? null
+                                    : Number(event.target.value),
+                              })
+                            }
+                          />
+                          {typeof fc.total === "number" && fc.total < 0.65 ? (
+                            <p className="text-[11px] text-amber-600">
+                              Low confidence — verify this amount.
+                            </p>
+                          ) : null}
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                            Date
+                          </p>
+                          <Input
+                            type="date"
+                            value={editableItem.occurredAt ?? ""}
+                            onChange={(event) => {
+                              const val = event.target.value
+                              // Only persist complete dates — partial values corrupt Firestore.
+                              const isComplete = /^\d{4}-\d{2}-\d{2}$/.test(val)
+                              persistReceiptItemPatch(editableItem, {
+                                occurredAt: isComplete ? val : null,
+                              })
+                            }}
+                          />
+                          {typeof fc.date === "number" && fc.date < 0.65 ? (
+                            <p className="text-[11px] text-amber-600">
+                              Date may be incorrect — double-check.
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      {isMultiCategory && editableItem.lineItems?.length ? (
                         <div className="space-y-3 rounded-xl border border-dashed p-3">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div>
@@ -1652,13 +1861,13 @@ export default function ReceiptCapturePanel() {
                                 </Badge>
                               ) : null}
                               {lineItemsTotal != null &&
-                              Math.abs((item.amount ?? 0) - lineItemsTotal) > 0.009 ? (
+                              Math.abs((editableItem.amount ?? 0) - lineItemsTotal) > 0.009 ? (
                                 <Button
                                   type="button"
                                   variant="outline"
                                   size="sm"
                                   onClick={() =>
-                                    persistReceiptItemPatch(item, {
+                                    persistReceiptItemPatch(editableItem, {
                                       amount: lineItemsTotal,
                                     })
                                   }
@@ -1670,13 +1879,13 @@ export default function ReceiptCapturePanel() {
                           </div>
 
                           <div className="space-y-2">
-                            {item.lineItems.map((lineItem, lineItemIndex) => {
+                            {editableItem.lineItems.map((lineItem, lineItemIndex) => {
                               const showQuantity =
                                 typeof lineItem.quantity === "number" && lineItem.quantity > 1
 
                               return (
                                 <div
-                                  key={`${item.id}-line-item-${lineItemIndex}`}
+                                  key={`${cardKey}-line-item-${lineItemIndex}`}
                                   className={
                                     showQuantity
                                       ? "grid gap-3 rounded-lg border bg-muted/10 p-4 xl:grid-cols-[minmax(0,1.4fr)_110px_140px_280px]"
@@ -1690,7 +1899,7 @@ export default function ReceiptCapturePanel() {
                                     <Input
                                       value={lineItem.description}
                                       onChange={(event) =>
-                                        void updateReceiptLineItem(item, lineItemIndex, {
+                                        void updateReceiptLineItem(editableItem, lineItemIndex, {
                                           description: event.target.value,
                                         })
                                       }
@@ -1706,7 +1915,7 @@ export default function ReceiptCapturePanel() {
                                         step="1"
                                         value={lineItem.quantity ?? ""}
                                         onChange={(event) =>
-                                          void updateReceiptLineItem(item, lineItemIndex, {
+                                          void updateReceiptLineItem(editableItem, lineItemIndex, {
                                             quantity:
                                               event.target.value.trim() === ""
                                                 ? undefined
@@ -1725,7 +1934,7 @@ export default function ReceiptCapturePanel() {
                                       step="0.01"
                                       value={lineItem.amount ?? ""}
                                       onChange={(event) =>
-                                        void updateReceiptLineItem(item, lineItemIndex, {
+                                        void updateReceiptLineItem(editableItem, lineItemIndex, {
                                           amount:
                                             event.target.value.trim() === ""
                                               ? undefined
@@ -1738,25 +1947,18 @@ export default function ReceiptCapturePanel() {
                                     <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
                                       Category
                                     </p>
-                                    <Select
+                                    <ExpenseCategoryPicker
+                                      workspaceId={activeWorkspaceId}
                                       value={lineItem.category ?? selectedCategory}
-                                      onValueChange={(value) =>
-                                        void updateReceiptLineItem(item, lineItemIndex, {
-                                          category: value,
+                                      onSelect={(category) =>
+                                        void updateReceiptLineItem(editableItem, lineItemIndex, {
+                                          category,
                                         })
                                       }
-                                    >
-                                      <SelectTrigger>
-                                        <SelectValue placeholder="Choose category" />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        {EXPENSE_CATEGORY_OPTIONS.map((option) => (
-                                          <SelectItem key={option} value={option}>
-                                            {option}
-                                          </SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
+                                      placeholder="Choose category"
+                                      dialogTitle="Choose Line Item Category"
+                                      customDialogTitle="New Line Item Category"
+                                    />
                                   </div>
                                 </div>
                               )
@@ -1766,52 +1968,51 @@ export default function ReceiptCapturePanel() {
                       ) : null}
 
                       <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-                        <span>{formatOccurredAt(item.occurredAt)}</span>
-                        <span>{formatCurrency(item.amount ?? 0)}</span>
-                        {item.receiptAnalysisId ? <span>analysis ready</span> : null}
-                        {item.receiptAsset?.fileName ? (
-                          <span>{item.receiptAsset.fileName}</span>
+                        <span>{formatOccurredAt(editableItem.occurredAt)}</span>
+                        <span>{formatCurrency(editableItem.amount ?? 0)}</span>
+                        {editableItem.receiptAnalysisId ? <span>analysis ready</span> : null}
+                        {editableItem.receiptAsset?.fileName ? (
+                          <span>{editableItem.receiptAsset.fileName}</span>
                         ) : null}
                       </div>
 
-                      {item.receiptAsset?.originalDownloadUrl || item.receiptAsset?.downloadUrl ? (
-                        <a
-                          href={
-                            item.receiptAsset?.originalDownloadUrl ??
-                            item.receiptAsset?.downloadUrl
-                          }
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-xs text-sky-700 underline underline-offset-2"
-                        >
-                          Open uploaded receipt
-                        </a>
+                      {editableItem.receiptAsset?.originalStoragePath ||
+                      editableItem.receiptAsset?.storagePath ? (
+                        <ReceiptViewerTrigger
+                          workspaceId={activeWorkspaceId}
+                          receiptAssetId={editableItem.receiptAssetId}
+                          asset={editableItem.receiptAsset}
+                          label="View uploaded receipt"
+                          variant="ghost"
+                          className="px-0 text-xs text-sky-700 hover:text-sky-600"
+                        />
                       ) : null}
 
-                      {item.parseWarnings.length > 0 ? (
+                      {!isStuck && editableItem.parseWarnings.length > 0 ? (
                         <p className="text-xs text-amber-700">
-                          {item.parseWarnings.join(" • ")}
+                          {editableItem.parseWarnings.join(" • ")}
                         </p>
                       ) : null}
 
-                      {item.analysisStatus === "failed" ? (
+                      {editableItem.analysisStatus === "failed" ? (
                         <p className="text-xs text-destructive">
                           Receipt analysis failed, so this draft may rely on fallback OCR.
                         </p>
                       ) : null}
 
-                      {isProvisional ? (
-                        <p className="text-xs text-muted-foreground">
-                          Finalizing receipt draft in the background. You can keep editing and save now.
-                        </p>
+                      {isStuck ? (
+                        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                          Receipt analysis didn&apos;t complete — the app was likely closed before it finished.
+                          Dismiss this draft or retake the photo to try again.
+                        </div>
                       ) : null}
 
-                      {isMultiCategory && liveAllocations?.length ? (
+                      {!isStuck && isMultiCategory && liveAllocations?.length ? (
                         <div className="rounded-lg border bg-muted/10 p-3">
                           <p className="text-sm font-medium">Allocations</p>
                           <div className="mt-2 flex flex-wrap gap-2">
                             {liveAllocations.map((allocation, index) => (
-                              <Badge key={`${item.id}-allocation-${index}`} variant="outline">
+                              <Badge key={`${cardKey}-allocation-${index}`} variant="outline">
                                 {allocation.category}: {formatCurrency(allocation.amount)}
                               </Badge>
                             ))}
@@ -1820,29 +2021,51 @@ export default function ReceiptCapturePanel() {
                       ) : null}
 
                       <div className="flex flex-wrap gap-2">
-                        <Button
-                          type="button"
-                          onClick={() => commitReceiptExpense(item)}
-                          disabled={
-                            workingItemId === item.id ||
-                            duplicateExpense != null
-                          }
-                        >
-                          <Check className="h-4 w-4" />
-                          Save Receipt Expense
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => dismissReceiptDraft(item)}
-                          disabled={workingItemId === item.id}
-                        >
-                          Cancel
-                        </Button>
-                        <Badge variant="secondary">
-                          <ReceiptText className="h-3 w-3" />
-                          Draft
-                        </Badge>
+                        {isStuck ? (
+                          <>
+                            <Button
+                              type="button"
+                              onClick={() => retryStuckDraft(editableItem)}
+                              disabled={workingItemId === editableItem.id}
+                            >
+                              Retake Photo
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => dismissReceiptDraft(editableItem)}
+                              disabled={workingItemId === editableItem.id}
+                            >
+                              Dismiss
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <Button
+                              type="button"
+                              onClick={() => commitReceiptExpense(editableItem)}
+                              disabled={
+                                workingItemId === editableItem.id ||
+                                (hasExactDuplicate && !duplicateConfirmed)
+                              }
+                            >
+                              <Check className="h-4 w-4" />
+                              Save Receipt Expense
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => dismissReceiptDraft(editableItem)}
+                              disabled={workingItemId === editableItem.id}
+                            >
+                              Cancel
+                            </Button>
+                            <Badge variant="secondary">
+                              <ReceiptText className="h-3 w-3" />
+                              Draft
+                            </Badge>
+                          </>
+                        )}
                       </div>
                   </div>
                 </div>
@@ -1854,6 +2077,44 @@ export default function ReceiptCapturePanel() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Historical period confirmation */}
+      {pendingHistoricalCommit ? (
+        <Dialog open onOpenChange={() => setPendingHistoricalCommit(null)}>
+          <DialogContent className="max-w-sm">
+            <div className="space-y-4 p-2">
+              <p className="text-base font-semibold">Update Historical Records?</p>
+              <p className="text-sm text-muted-foreground">
+                This expense is dated{" "}
+                <span className="font-medium">
+                  {formatOccurredAt(pendingHistoricalCommit.occurredAt)}
+                </span>
+                , which is in a prior tax year. Saving it will update your historical Profit &amp;
+                Loss statement.
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  onClick={() => {
+                    const item = pendingHistoricalCommit
+                    setPendingHistoricalCommit(null)
+                    void commitReceiptExpense(item)
+                  }}
+                >
+                  Update {pendingHistoricalCommit.occurredAt?.slice(0, 4)} P&amp;L
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setPendingHistoricalCommit(null)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </div>
   )
 }

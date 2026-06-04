@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Capacitor } from "@capacitor/core"
 
@@ -9,27 +9,12 @@ import StackInHeader from "@/components/stackin-header"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { useAccountAuthorityState } from "@/contexts/account-authority-context"
 import { useToast } from "@/hooks/use-toast"
-import { API_ENDPOINTS, apiFetch, createWorkspaceAPI } from "@/lib/api"
+import { createWorkspaceAPI } from "@/lib/api"
 import { useAuth } from "@/contexts/auth-context"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
-import type { SubscriptionDoc } from "@shared/contracts/subscription"
-import { getSubscriptionCapabilities } from "@shared/contracts/subscription"
 import type { WorkspaceType } from "@shared/contracts/workspace"
-
-type WelcomeSubscriptionResponse = {
-  isActive?: boolean
-  subscription?: SubscriptionDoc | null
-  allowedWorkspaceTypes?: WorkspaceType[]
-  maxWorkspaces?: number | "unlimited"
-}
-
-type SubscriptionState = {
-  isActive: boolean
-  subscription: SubscriptionDoc | null
-  allowedWorkspaceTypes: WorkspaceType[]
-  maxWorkspaces: number | "unlimited"
-}
 
 function isWelcomeDeepLink(url: string): boolean {
   try {
@@ -48,6 +33,7 @@ export default function WelcomePage() {
   const router = useRouter()
   const { toast } = useToast()
   const { user, authLoading } = useAuth()
+  const { authority, status: authorityStatus, refreshAccountAuthority } = useAccountAuthorityState()
   const workspaceState = useWorkspaceStore((s) => s.state)
   const addWorkspace = useWorkspaceStore((s) => s.addWorkspace)
   const isNativeApp = Capacitor.isNativePlatform()
@@ -56,47 +42,27 @@ export default function WelcomePage() {
   const [type, setType] = useState<WorkspaceType | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [requestedAddWorkspaceMode, setRequestedAddWorkspaceMode] = useState(false)
-  const [subscription, setSubscription] = useState<SubscriptionState | null>(null)
-  const [isLoadingSubscription, setIsLoadingSubscription] = useState(true)
   const lastBillingRefreshAtRef = useRef(0)
 
-  const loadSubscription = useCallback(
+  const loadAccountAuthority = useCallback(
     async (options: { silent?: boolean; showActivatedToast?: boolean } = {}) => {
       if (!user) {
-        setSubscription(null)
-        setIsLoadingSubscription(false)
         return null
       }
 
-      const { silent = false, showActivatedToast = false } = options
-      if (!silent) {
-        setIsLoadingSubscription(true)
-      }
-
       try {
-        const res = await apiFetch<WelcomeSubscriptionResponse>(
-          API_ENDPOINTS.subscription.get
-        )
+        const refreshedAuthority = await refreshAccountAuthority({
+          silent: options.silent,
+        })
 
-        const normalizedSubscription: SubscriptionState = {
-          isActive: res?.isActive ?? false,
-          subscription: res?.subscription ?? null,
-          allowedWorkspaceTypes: Array.isArray(res?.allowedWorkspaceTypes)
-            ? res.allowedWorkspaceTypes
-            : [],
-          maxWorkspaces: res?.maxWorkspaces ?? 0,
-        }
-
-        setSubscription(normalizedSubscription)
-
-        if (!isNativeApp && showActivatedToast && normalizedSubscription.isActive) {
+        if (!isNativeApp && options.showActivatedToast && refreshedAuthority?.isSubscriptionActive) {
           toast({
             title: "Subscription active",
             description: "Your billing is active. You can set up your workspace now.",
           })
         }
 
-        return normalizedSubscription
+        return refreshedAuthority
       } catch (err: any) {
         toast({
           title: isNativeApp ? "Access error" : "Subscription error",
@@ -108,19 +74,10 @@ export default function WelcomePage() {
           variant: "destructive",
         })
         return null
-      } finally {
-        if (!silent) {
-          setIsLoadingSubscription(false)
-        }
       }
     },
-    [toast, user]
+    [isNativeApp, refreshAccountAuthority, toast, user]
   )
-
-  useEffect(() => {
-    if (authLoading) return
-    void loadSubscription()
-  }, [authLoading, loadSubscription])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -135,9 +92,9 @@ export default function WelcomePage() {
     const checkoutStatus = params.get("checkout")
     const billingReturn = params.get("billing_return")
     if (checkoutStatus === "success" || billingReturn === "1") {
-      void loadSubscription({ showActivatedToast: checkoutStatus === "success" })
+      void loadAccountAuthority({ showActivatedToast: checkoutStatus === "success" })
     }
-  }, [isNativeApp, loadSubscription])
+  }, [isNativeApp, loadAccountAuthority])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -146,7 +103,7 @@ export default function WelcomePage() {
       const now = Date.now()
       if (now - lastBillingRefreshAtRef.current < 5000) return
       lastBillingRefreshAtRef.current = now
-      void loadSubscription({ silent: true })
+      void loadAccountAuthority({ silent: true })
     }
 
     const onFocus = () => {
@@ -186,27 +143,15 @@ export default function WelcomePage() {
       document.removeEventListener("visibilitychange", onVisibilityChange)
       removeResume?.()
     }
-  }, [loadSubscription, router])
+  }, [loadAccountAuthority, router])
 
-  const allowedWorkspaceTypes = useMemo<WorkspaceType[]>(() => {
-    if (!subscription) return []
-
-    if (subscription.allowedWorkspaceTypes.length > 0) {
-      return subscription.allowedWorkspaceTypes
-    }
-
-    if (subscription.subscription) {
-      return getSubscriptionCapabilities(subscription.subscription).allowedWorkspaceTypes
-    }
-
-    return []
-  }, [subscription])
+  const allowedWorkspaceTypes = authority?.allowedWorkspaceTypes ?? []
 
   const hasExistingWorkspace = workspaceState.status === "ready"
   const isAddWorkspaceMode = requestedAddWorkspaceMode || hasExistingWorkspace
   const currentWorkspaceCount =
     workspaceState.status === "ready" ? workspaceState.workspaces.length : 0
-  const maxWorkspaces = subscription?.maxWorkspaces ?? 0
+  const maxWorkspaces = authority?.maxWorkspaces ?? 0
   const hasReachedWorkspaceLimit =
     typeof maxWorkspaces === "number" && currentWorkspaceCount >= maxWorkspaces
   const canCreateWorkspace = allowedWorkspaceTypes.length > 0
@@ -217,10 +162,10 @@ export default function WelcomePage() {
       ? "This StackIn account has reached its current workspace limit."
       : `You have used ${currentWorkspaceCount} of ${maxWorkspaces} available workspaces on this subscription.`
     : isNativeApp
-      ? subscription?.isActive
+      ? authority?.isSubscriptionActive
         ? "This StackIn account does not currently include mobile access to create another workspace."
         : "This mobile app is for existing StackIn customers with mobile access. If you expected access, contact support."
-      : subscription?.isActive
+      : authority?.isSubscriptionActive
         ? "Your current subscription does not allow additional workspace creation."
         : "We couldn't find an active subscription for this account yet."
 
@@ -322,7 +267,7 @@ export default function WelcomePage() {
     )
   }
 
-  if (isLoadingSubscription) {
+  if (authorityStatus === "loading" || authorityStatus === "idle") {
     return <AppLoader label={isNativeApp ? "Loading account access..." : "loading subscription"} />
   }
 

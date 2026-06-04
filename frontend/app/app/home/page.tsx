@@ -10,21 +10,34 @@ import IndependentExpenseGauge from "@/components/independent-expense-gauge";
 import EntryForm from "@/components/entry-form";
 import EntriesGrid from "@/components/entries-grid";
 import { useAuth } from "@/contexts/auth-context";
-import { useSettingsStore } from "@/lib/stores/useSettingsStore";
-import { useEntriesStore } from "@/lib/stores/useEntriesStore";
+import {
+    useSettingsData,
+    useSettingsRenderState,
+    useSettingsStore,
+} from "@/lib/stores/useSettingsStore";
+import {
+    useEntriesData,
+    useEntriesRenderState,
+    useEntriesStore,
+} from "@/lib/stores/useEntriesStore";
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore";
-import { getCurrentCalendarMonthPeriodAt, getCurrentEntryPeriod } from "@shared/payPeriods";
 import { useTaxProfileStore } from "@/lib/stores/useTaxProfileStore";
 import { usePayStubsStore } from "@/lib/stores/usePaystubsStore";
+import { getCalendarMonthBucketAt, getCurrentCalendarMonthPeriodAt, getCurrentEntryPeriod } from "@shared/payPeriods";
 import ExpenseForm from "@/components/expense-form";
 import ExpensesGrid from "@/components/expenses-grid";
 import ReceiptCapturePanel from "@/components/receipt-capture-panel";
 import VenmoImportPanel from "@/components/venmo-import-panel";
-import { useExpensesStore } from "@/lib/stores/useExpensesStore";
+import {
+    useExpensesData,
+    useExpensesRenderState,
+    useExpensesStore,
+} from "@/lib/stores/useExpensesStore";
 import { debugLog, debugRender } from "@/lib/debugLoop";
 import { formatCurrency } from "@/lib/helpers";
 import { getActiveProfileTrace } from "@/lib/observability/profileTrace";
 import { useAppBootstrapState } from "@/contexts/app-bootstrap-context";
+import { useHomepageLayoutShiftDiagnostics } from "@/hooks/useHomepageLayoutShiftDiagnostics";
 
 export default function HomePage() {
     const router = useRouter();
@@ -39,11 +52,10 @@ export default function HomePage() {
         ? workspaceState.activeWorkspaceId
         : null;
     const supportsExpenses = activeWorkspace?.type === "independent";
-    const ensureSettingsLoaded = useSettingsStore((s) => s.ensureLoaded);
-    const settingsEntry = useSettingsStore((s) => activeWorkspaceId ? s.byWorkspaceId[activeWorkspaceId] : undefined);
-    const settings = settingsEntry?.data ?? null;
+    const settings = useSettingsData(activeWorkspaceId);
+    const settingsState = useSettingsRenderState(activeWorkspaceId);
     const showVenmoImportPanel = settings?.independent?.enableVenmo === true;
-    const settingsStatus = settingsEntry?.status ?? "idle";
+    const settingsStatus = settingsState.status;
     const settingsLoading = activeWorkspaceId != null
         ? settingsStatus === "idle" || settingsStatus === "loading"
         : true;
@@ -51,31 +63,62 @@ export default function HomePage() {
     const [mode, setMode] = useState<"income" | "expenses">("income");
     const [showNet, setShowNet] = useState(false);
     // ---- ENTRIES STORE ----
-    const entriesEntry = useEntriesStore((s) => activeWorkspaceId ? s.byWorkspaceId[activeWorkspaceId] : undefined);
+    const entries = useEntriesData(activeWorkspaceId);
+    const entriesState = useEntriesRenderState(activeWorkspaceId);
     const hydrateEntries = useEntriesStore((s) => s.hydrateFromCache);
     // ---- EXPENSES STORE ----
-    const expensesEntry = useExpensesStore((s) => activeWorkspaceId ? s.byWorkspaceId[activeWorkspaceId] : undefined);
+    const expenses = useExpensesData(activeWorkspaceId);
+    const expensesState = useExpensesRenderState(activeWorkspaceId);
     const hydrateExpensesOnce = useExpensesStore((s) => s.hydrateFromCacheOnce);
-    const entries = entriesEntry?.entries ?? [];
-    const expenses = expensesEntry?.expenses ?? [];
+    const ensureSettingsLoaded = useSettingsStore((s) => s.ensureLoaded);
     // Hydration once per mount
-    const didHydrateEntriesRef = useRef(false);
+    const didHydrateKeyRef = useRef<string | null>(null);
     const didMarkUsefulRenderRef = useRef(false);
-    debugRender("home-page", {
+    useHomepageLayoutShiftDiagnostics();
+
+    // Kick off settings load as soon as workspace is known — runs in parallel
+    // with bootstrap so settings are ready from cache before bootstrap settles.
+    useEffect(() => {
+        if (!activeWorkspaceId) return;
+        void ensureSettingsLoaded(activeWorkspaceId);
+    }, [activeWorkspaceId, ensureSettingsLoaded]);
+
+    // Tax profile + paystubs — background, don't block rendering.
+    useEffect(() => {
+        if (!user || !activeWorkspaceId) return;
+        void useTaxProfileStore.getState().refreshFromBackend(activeWorkspaceId).catch(() => {});
+        if (activeWorkspace?.type === "w2") {
+            void usePayStubsStore.getState().hydrateFromCacheOnce(activeWorkspaceId).catch(() => {});
+        }
+    }, [user, activeWorkspaceId, activeWorkspace?.type]);
+
+    useEffect(() => {
+        debugRender("home-page", {
+            authLoading,
+            contextReady,
+            userUid: user?.uid ?? null,
+            workspaceStatus: workspaceState.status,
+            activeWorkspaceId,
+            activeWorkspaceType: activeWorkspace?.type ?? null,
+            settingsStatus,
+            settingsLoading,
+            entriesStatus: entriesState.status,
+            expensesStatus: expensesState.status,
+            mode,
+        });
+    }, [
         authLoading,
         contextReady,
-        userUid: user?.uid ?? null,
-        workspaceStatus: workspaceState.status,
+        user?.uid,
+        workspaceState.status,
         activeWorkspaceId,
-        activeWorkspaceType: activeWorkspace?.type ?? null,
+        activeWorkspace?.type,
         settingsStatus,
         settingsLoading,
-        entriesStatus: entriesEntry?.status ?? "idle",
-        expensesStatus: expensesEntry?.status ?? "idle",
+        entriesState.status,
+        expensesState.status,
         mode,
-    });
-    useEffect(() => {
-    }, []);
+    ]);
     useEffect(() => {
         if (!supportsExpenses && mode === "expenses") {
             debugLog("home-page", "force_income_mode");
@@ -86,7 +129,7 @@ export default function HomePage() {
         debugLog("home-page", "workspace_changed_reset_hydration", {
             activeWorkspaceId,
         });
-        didHydrateEntriesRef.current = false;
+        didHydrateKeyRef.current = null;
     }, [activeWorkspaceId]);
     useEffect(() => {
         debugLog("home-page", "mode_or_workspace_reset_show_net", {
@@ -95,14 +138,6 @@ export default function HomePage() {
         });
         setShowNet(false);
     }, [mode, activeWorkspaceId]);
-    useEffect(() => {
-        if (!activeWorkspaceId)
-            return;
-        debugLog("home-page", "ensure_settings_loaded", {
-            activeWorkspaceId,
-        });
-        ensureSettingsLoaded(activeWorkspaceId);
-    }, [activeWorkspaceId, ensureSettingsLoaded]);
     useEffect(() => {
         if (didMarkUsefulRenderRef.current)
             return;
@@ -128,36 +163,10 @@ export default function HomePage() {
         activeWorkspace?.type,
     ]);
     // --------------------------------------------------------------------
-    // Background hydration: taxProfile + payStubs (unchanged)
-    // --------------------------------------------------------------------
-    useEffect(() => {
-        if (!user || !activeWorkspaceId)
-            return;
-        debugLog("home-page", "background_tax_profile_refresh", {
-            activeWorkspaceId,
-            activeWorkspaceType: activeWorkspace?.type ?? null,
-        });
-        useTaxProfileStore
-            .getState()
-            .refreshFromBackend(activeWorkspaceId)
-            .catch((err) => {
-        });
-        if (activeWorkspace?.type === "w2") {
-            debugLog("home-page", "paystubs_cache_hydrate_once", {
-                activeWorkspaceId,
-            });
-            usePayStubsStore
-                .getState()
-                .hydrateFromCacheOnce(activeWorkspaceId)
-                .catch((err) => {
-            });
-        }
-    }, [user, activeWorkspaceId, activeWorkspace?.type]);
-    // --------------------------------------------------------------------
     // Redirect logic (unchanged)
     // --------------------------------------------------------------------
     useEffect(() => {
-        if (authLoading || workspaceState.status !== "ready" || settingsLoading || !contextReady)
+        if (authLoading || workspaceState.status !== "ready" || settingsLoading)
             return;
         if (!user) {
             debugLog("home-page", "redirect_login");
@@ -174,30 +183,33 @@ export default function HomePage() {
             router.replace("/app/settings");
             return;
         }
-    }, [authLoading, workspaceState.status, settingsLoading, contextReady, user, settings, settingsStatus, router]);
+    }, [authLoading, workspaceState.status, settingsLoading, user, settings, settingsStatus, router]);
     // --------------------------------------------------------------------
     // Cache hydration kicks off once the workspace and settings are known.
     // The page shell no longer waits for these requests to finish.
     // --------------------------------------------------------------------
     useEffect(() => {
-        if (didHydrateEntriesRef.current) {
-            return;
-        }
         if (authLoading || workspaceState.status !== "ready" || settingsLoading) {
             return;
         }
         if (!user || !settings || !activeWorkspaceId || !activeWorkspace) {
             return;
         }
-        didHydrateEntriesRef.current = true;
         const entryPeriod = getCurrentEntryPeriod(settings, activeWorkspace.type);
         const entriesPeriodId = entryPeriod.periodId;
         const calendarMonthPeriodId = getCurrentCalendarMonthPeriodAt(settings).periodId;
+        const expensesMonthBucket = getCalendarMonthBucketAt(settings);
+        const hydrationKey = `${activeWorkspaceId}::${entriesPeriodId}::${supportsExpenses ? expensesMonthBucket : "no-expenses"}`;
+        if (didHydrateKeyRef.current === hydrationKey) {
+            return;
+        }
+        didHydrateKeyRef.current = hydrationKey;
         debugLog("home-page", "entries_period_selected", {
             activeWorkspaceId,
             workspaceType: activeWorkspace.type,
             entriesPeriodId,
             calendarMonthPeriodId,
+            expensesMonthBucket,
             periodResolver: activeWorkspace.type === "independent" ? "calendar-month" : "w2-pay-period",
             usesW2PayFrequency: settings?.w2?.payFrequency ?? null,
             w2PayPeriodStartDate: settings?.w2?.payPeriodStartDate ?? null,
@@ -210,9 +222,8 @@ export default function HomePage() {
         });
         hydrateEntries(activeWorkspaceId, entriesPeriodId);
         if (supportsExpenses) {
-            // Expenses use monthly periodId "YYYY-MM"
-            const now = new Date();
-            const expensesPeriodId = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+            // Expenses use the current calendar month bucket "YYYY-MM"
+            const expensesPeriodId = expensesMonthBucket;
             debugLog("home-page", "hydrate_expenses_once", {
                 activeWorkspaceId,
                 expensesPeriodId,
@@ -234,7 +245,8 @@ export default function HomePage() {
         hydrateExpensesOnce,
         supportsExpenses,
     ]);
-    const showBlockingLoader = authLoading || workspaceState.status !== "ready";
+    // Layout already gates on workspace ready; this is a safety net for direct navigation.
+    const showBlockingLoader = workspaceState.status !== "ready";
     const showDashboardShell = !showBlockingLoader && !!user;
     const independentNet = useMemo(() => {
         const grossIncome = entries.reduce((sum, entry) => sum + (entry.totals?.dayTotal ?? 0), 0);

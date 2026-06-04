@@ -7,6 +7,7 @@ This instrumentation captures structured timing events for:
 - `startup`
 - `settings_save`
 - `entry_create`
+- `receipt_capture`
 
 The goal is to measure both:
 
@@ -154,6 +155,49 @@ Primary comparisons:
 - backend service duration
 - tap -> complete
 
+## Receipt capture flow events
+
+Key events:
+
+- `receipt.capture.begin`
+- `receipt.image_decode`
+- `receipt.quality_check`
+- `receipt.upload_prepare`
+- `receipt.asset_create`
+- `receipt.draft_shell_visible`
+- `receipt.upload_original`
+- `receipt.analysis_request.network_request`
+- `receipt.textract.request`
+- `receipt.analysis.normalize`
+- `receipt.analysis_status_transition`
+- `receipt.editable_fields_visible`
+- `receipt.analysis_finalize.network_request`
+- `receipt.analysis.finalize.persist_analysis`
+- `receipt.analysis.finalize.upsert_draft`
+- `receipt.preview_prepare`
+- `receipt.upload_derived`
+- `receipt.preview_ready`
+
+Primary comparisons:
+
+- capture begin -> draft shell visible
+- capture begin -> editable fields visible
+- upload prepare duration
+- original upload duration
+- analysis request duration
+- textract request duration
+- normalize duration
+- finalize duration
+- preview prepare + derived upload duration
+- capture begin -> preview ready
+
+Useful diagnostics:
+
+- `receipt.draft_identity_replaced`
+- `receipt_drafts.store_hydrate_cache`
+- `receipt_drafts.store_refresh`
+- `receipt_drafts.update_remote`
+
 ## Suggested target bands
 
 ### Startup
@@ -173,6 +217,16 @@ Primary comparisons:
 - tap to row visible: under `100ms`
 - tap to success/reset: under `150ms`
 - server canonical response: under `500-800ms`
+
+### Receipt capture
+
+- capture to draft shell visible: under `300ms`
+- capture to editable fields visible on warm path: under `2500ms`
+- capture to editable fields visible on cold path: under `5000ms`
+- original upload: under `1200ms` on standard mobile network
+- textract + normalization: under `1500-2500ms` warm, under `4000ms` cold
+- finalize + canonical draft upsert: under `500ms`
+- preview ready: under `2000ms` in background without blocking editing
 
 ## How to export results
 

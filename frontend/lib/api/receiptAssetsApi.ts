@@ -7,43 +7,46 @@ import { API_ENDPOINTS } from "@/lib/api/core/endpoints"
 export async function createReceiptAsset(
   workspaceId: string,
   body: Partial<ReceiptAsset>,
-  profile?: ApiProfileContext
+  profile?: ApiProfileContext,
+  signal?: AbortSignal
 ): Promise<ReceiptAsset> {
   const res = await tryWrite<{ ok: boolean; asset: ReceiptAsset }>(
     `${API_ENDPOINTS.receiptAssets.post}?workspaceId=${encodeURIComponent(workspaceId)}`,
     "POST",
     body,
-    profile
+    profile,
+    signal
   )
 
   return res.asset
 }
 
-export async function updateReceiptAsset(
-  workspaceId: string,
-  receiptAssetId: string,
-  body: Partial<ReceiptAsset>,
-  profile?: ApiProfileContext
-): Promise<ReceiptAsset> {
-  const res = await tryWrite<{ ok: boolean; asset: ReceiptAsset }>(
-    `${API_ENDPOINTS.receiptAssets.patch}?workspaceId=${encodeURIComponent(workspaceId)}&receiptAssetId=${encodeURIComponent(receiptAssetId)}`,
-    "PATCH",
-    body,
-    profile
-  )
-
-  return res.asset
-}
 
 export async function getReceiptAsset(
   workspaceId: string,
   receiptAssetId: string,
-  profile?: ApiProfileContext
+  profile?: ApiProfileContext,
+  signal?: AbortSignal
 ): Promise<ReceiptAsset> {
   const res = await apiFetch<{ asset: ReceiptAsset }>(
     `${API_ENDPOINTS.receiptAssets.get}?workspaceId=${encodeURIComponent(workspaceId)}&receiptAssetId=${encodeURIComponent(receiptAssetId)}`,
-    { method: "GET", profile }
+    { method: "GET", profile, signal }
   )
 
   return res.asset
+}
+
+export async function deleteReceiptAsset(
+  workspaceId: string,
+  receiptAssetId: string,
+  profile?: ApiProfileContext,
+  signal?: AbortSignal
+): Promise<void> {
+  await tryWrite<{ ok: boolean }>(
+    `${API_ENDPOINTS.receiptAssets.delete}?workspaceId=${encodeURIComponent(workspaceId)}&receiptAssetId=${encodeURIComponent(receiptAssetId)}`,
+    "DELETE",
+    {},
+    profile,
+    signal
+  )
 }

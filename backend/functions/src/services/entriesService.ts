@@ -10,6 +10,7 @@ import { settingsCache, SETTINGS_TTL_MS } from "./settingsCache";
 import { ForbiddenError, NotFoundError, BadRequestError } from "../lib/httpErrors";
 import type { BackendProfileTrace } from "../lib/profileTrace";
 import { withBackendProfileStep } from "../lib/profileTrace";
+import { syncProfitLossForFinancialDates } from "./profitLossService";
 const noopTrace: BackendProfileTrace = {
     traceId: "entry-create-no-trace",
     flow: "entry_create",
@@ -18,11 +19,48 @@ const noopTrace: BackendProfileTrace = {
     end: () => { },
     error: () => { },
 };
+async function syncIndependentProfitLossDates(workspaceId: string, dates: Array<string | null | undefined>) {
+    const normalizedDates = dates.filter((date): date is string => typeof date === "string" && date.length > 0);
+    if (normalizedDates.length === 0) {
+        return;
+    }
+    try {
+        await syncProfitLossForFinancialDates(workspaceId, normalizedDates);
+    }
+    catch (error) {
+        console.warn("profit loss sync failed after entry mutation", {
+            workspaceId,
+            dates: normalizedDates,
+            reason: error instanceof Error ? error.message : String(error),
+        });
+    }
+}
 async function assertWorkspaceMembership(workspaceId: string, uid: string): Promise<void> {
     const memberSnap = await db.doc(`users/${uid}/memberships/${workspaceId}`).get();
     if (!memberSnap.exists) {
         throw new ForbiddenError("Forbidden");
     }
+}
+async function findEntryByClientMutationId(workspaceId: string, clientMutationId: string): Promise<{
+    id: string;
+    entry: EntryType;
+} | null> {
+    const snap = await db
+        .collection(`workspaces/${workspaceId}/entries`)
+        .where("clientMutationId", "==", clientMutationId)
+        .limit(1)
+        .get();
+    if (snap.empty) {
+        return null;
+    }
+    const doc = snap.docs[0];
+    return {
+        id: doc.id,
+        entry: EntrySchema.parse({
+            id: doc.id,
+            ...doc.data(),
+        }),
+    };
 }
 /**
  * List entries for a user, scoped to the current pay period by default.
@@ -161,6 +199,16 @@ export async function createEntry(workspaceId: string, uid: string, input: unkno
     }, settings);
     const createdAtLocal = raw.createdAtLocal ?? nowIso;
     const clientMutationId = raw.clientMutationId;
+    if (typeof clientMutationId === "string" && clientMutationId.length > 0) {
+        const existing = await findEntryByClientMutationId(workspaceId, clientMutationId);
+        if (existing) {
+            return {
+                ok: true,
+                id: existing.id,
+                entry: existing.entry,
+            };
+        }
+    }
     // CHANGE (BACKEND SURGICAL EDIT SET #2):
     // Firestore storage now matches EntrySchema exactly:
     // { workspace, periodId, date, notes, w2?, independent?, totals, createdAtLocal, updatedAtLocal, clientMutationId }
@@ -181,6 +229,9 @@ export async function createEntry(workspaceId: string, uid: string, input: unkno
     // 6. WRITE TO FIRESTORE
     // ----------------------------
     const docRef = await withBackendProfileStep(activeTrace, "entry_create.firestore_write", () => db.collection(`workspaces/${workspaceId}/entries`).add(canonical), { workspaceId, periodId });
+    if (canonical.workspace === "independent") {
+        await syncIndependentProfitLossDates(workspaceId, [canonical.date]);
+    }
     return {
         ok: true,
         id: docRef.id,
@@ -193,6 +244,7 @@ export async function updateEntry(workspaceId: string, uid: string, entryId: str
     const patchData = patch as any;
     const ref = db.doc(`workspaces/${workspaceId}/entries/${entryId}`);
     let finalEntry: EntryType | null = null;
+    let previousEntry: EntryType | null = null;
     // CHANGE: capture clientMutationId from frontend patch if provided.
     const clientMutationId = patchData.clientMutationId;
     await db.runTransaction(async (tx) => {
@@ -202,7 +254,11 @@ export async function updateEntry(workspaceId: string, uid: string, entryId: str
         const snap = await tx.get(ref);
         if (!snap.exists)
             throw new NotFoundError("Entry not found");
-        const existing = snap.data() as EntryType;
+        const existing = EntrySchema.parse({
+            id: snap.id,
+            ...snap.data(),
+        });
+        previousEntry = existing;
         // ---------------------------
         // 2. Merge existing + patch (deep merge for nested blocks)
         //    FRONTEND sends partial patches for w2/independent.
@@ -272,13 +328,21 @@ export async function updateEntry(workspaceId: string, uid: string, entryId: str
         // ---------------------------
         tx.set(ref, updatePayload);
     });
+    const updatedEntry = finalEntry as EntryType | null;
+    const priorEntry = previousEntry as EntryType | null;
+    if (!updatedEntry) {
+        throw new Error("Entry update failed");
+    }
+    if (priorEntry?.workspace === "independent" || updatedEntry.workspace === "independent") {
+        await syncIndependentProfitLossDates(workspaceId, [priorEntry?.date, updatedEntry.date]);
+    }
     // ---------------------------
     // 7. Return canonical entry
     // ---------------------------
     return {
         ok: true,
         id: entryId,
-        entry: finalEntry,
+        entry: updatedEntry,
     };
 }
 /**
@@ -288,6 +352,7 @@ export async function deleteEntry(workspaceId: string, uid: string, entryId: str
     await assertWorkspaceMembership(workspaceId, uid);
     const ref = db.doc(`workspaces/${workspaceId}/entries/${entryId}`);
     let deleted = false;
+    let deletedEntry: EntryType | null = null;
     await db.runTransaction(async (tx) => {
         const snap = await tx.get(ref);
         // Idempotent delete — no error if entry doesn't exist
@@ -295,6 +360,10 @@ export async function deleteEntry(workspaceId: string, uid: string, entryId: str
             deleted = false;
             return;
         }
+        deletedEntry = EntrySchema.parse({
+            id: snap.id,
+            ...snap.data(),
+        });
         // Perform deletion
         tx.delete(ref);
         deleted = true;
@@ -307,6 +376,10 @@ export async function deleteEntry(workspaceId: string, uid: string, entryId: str
             path: ref.path,
         });
     });
+    const removedEntry = deletedEntry as EntryType | null;
+    if (removedEntry?.workspace === "independent") {
+        await syncIndependentProfitLossDates(workspaceId, [removedEntry.date]);
+    }
     return {
         ok: true,
         id: entryId,

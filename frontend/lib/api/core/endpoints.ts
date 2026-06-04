@@ -27,19 +27,22 @@ export const API_ENDPOINTS = {
   receiptAssets: {
     get: "https://getreceiptasset-3lc2fwdgwq-uc.a.run.app",
     post: "https://createreceiptasset-3lc2fwdgwq-uc.a.run.app",
-    patch: "https://updatereceiptasset-3lc2fwdgwq-uc.a.run.app",
+    delete: "https://deletereceiptasset-3lc2fwdgwq-uc.a.run.app",
   },
 
   receiptAnalysis: {
-    get: "https://getreceiptanalysis-3lc2fwdgwq-uc.a.run.app",
     post: "https://analyzereceipt-3lc2fwdgwq-uc.a.run.app",
-    finalize: "https://finalizereceiptanalysis-3lc2fwdgwq-uc.a.run.app",
   },
 
   receiptDrafts: {
     get: "https://getreceiptdrafts-3lc2fwdgwq-uc.a.run.app",
     post: "https://createreceiptdraft-3lc2fwdgwq-uc.a.run.app",
     patch: "https://updatereceiptdraft-3lc2fwdgwq-uc.a.run.app",
+    commit: "https://commitreceiptdraft-3lc2fwdgwq-uc.a.run.app",
+  },
+
+  expenseDuplicateCheck: {
+    post: "https://checkduplicateexpense-3lc2fwdgwq-uc.a.run.app",
   },
 
   taxProfile: {

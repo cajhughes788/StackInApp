@@ -3,7 +3,6 @@ import { z } from "zod"
 
 import { deriveWorkspaceCapabilities } from "@shared/contracts/capabilities"
 import type { AppBootstrapSnapshot } from "@shared/contracts/appBootstrap"
-import { getSubscriptionCapabilities, type SubscriptionDoc } from "@shared/contracts/subscription"
 import type { WorkspaceDoc, WorkspaceMembership, WorkspaceSummary } from "@shared/contracts/workspace"
 import { SettingsDocSchema, type SettingsType } from "@shared/schemas/settings"
 import { db } from "../admin"
@@ -16,15 +15,11 @@ import {
   UnauthorizedError,
   sendHttpError,
 } from "../lib/httpErrors"
+import { buildAccountAuthorityFromSubscriptionSnapshot } from "../services/accountAuthority"
 
 const QuerySchema = z.object({
   workspaceId: z.string().min(1),
 })
-
-const ACTIVE_SUBSCRIPTION_STATUSES = new Set<SubscriptionDoc["status"]>([
-  "active",
-  "trialing",
-])
 
 export async function getAppBootstrapHandler(
   req: Request,
@@ -74,6 +69,8 @@ export async function getAppBootstrapHandler(
       cachedSettingsEntry &&
       Date.now() - cachedSettingsEntry.ts <= SETTINGS_TTL_MS
 
+    // All four reads run in parallel. The settings read is skipped only when
+    // the in-process cache is warm — same behaviour as before.
     const [membershipSnap, workspaceSnap, subscriptionSnap, settingsSnap] =
       await withBackendProfileStep(
         trace,
@@ -90,6 +87,21 @@ export async function getAppBootstrapHandler(
         { uid, workspaceId }
       )
 
+    // Check whether the workspace doc carries a fresh embedded settings
+    // snapshot (written atomically on every settings save). Used as a
+    // fallback when the settings doc is empty (new workspace, migration) and
+    // to prime the in-process cache immediately on cold function instances so
+    // the next request within 5 min hits the cache instead of Firestore.
+    const EMBEDDED_SETTINGS_TTL_MS = SETTINGS_TTL_MS * 2 // 10 min
+    const workspaceRaw = workspaceSnap.data() as Record<string, unknown>
+    const embedded = workspaceRaw?.settingsSnapshot as
+      | { data: unknown; version: number; at: number }
+      | undefined
+    const embeddedIsFresh =
+      embedded &&
+      typeof embedded.at === "number" &&
+      Date.now() - embedded.at < EMBEDDED_SETTINGS_TTL_MS
+
     if (!membershipSnap.exists) {
       throw new ForbiddenError("Forbidden")
     }
@@ -101,6 +113,10 @@ export async function getAppBootstrapHandler(
     const workspaceData = workspaceSnap.data() as WorkspaceDoc
     const membership = membershipSnap.data() as WorkspaceMembership
 
+    if (workspaceData.status !== "active") {
+      throw new ForbiddenError("Workspace is not active")
+    }
+
     const workspace: WorkspaceSummary = {
       id: workspaceSnap.id,
       name: workspaceData.name,
@@ -109,38 +125,74 @@ export async function getAppBootstrapHandler(
     }
 
     let settings: SettingsType | null = null
-    if (canUseCachedSettings) {
+    let settingsMeta: import("@shared/contracts/settingsSync").SettingsDocumentMeta | null = null
+
+    if (canUseCachedSettings && cachedSettingsEntry) {
+      // 1. In-process cache hit — warm function instance, no Firestore read needed.
       settings = cachedSettingsEntry.data
+      settingsMeta = cachedSettingsEntry.meta ?? null
     } else if (settingsSnap?.exists) {
-      const parsedSettings = SettingsDocSchema.safeParse(settingsSnap.data())
+      // 2. Settings subcollection read (all cold-start cases).
+      const loadedSettings = await withBackendProfileStep(
+        trace,
+        "startup.settings_snapshot_parse",
+        () => Promise.resolve(settingsSnap.data()),
+        { workspaceId }
+      )
+      const parsedSettings = SettingsDocSchema.safeParse(loadedSettings)
+      const parsedMeta =
+        loadedSettings &&
+        typeof loadedSettings === "object" &&
+        typeof (loadedSettings as Record<string, unknown>).version === "number" &&
+        typeof (loadedSettings as Record<string, unknown>).updatedAt === "string"
+          ? {
+              version: (loadedSettings as Record<string, unknown>).version as number,
+              updatedAt: (loadedSettings as Record<string, unknown>).updatedAt as string,
+            }
+          : null
       if (parsedSettings.success) {
         settings = parsedSettings.data
+        settingsMeta = parsedMeta
         settingsCache[workspaceId] = {
           data: parsedSettings.data,
+          meta: parsedMeta ?? { version: 0, updatedAt: new Date(0).toISOString() },
+          ts: Date.now(),
+        }
+      }
+    } else if (embeddedIsFresh && embedded) {
+      // 3. Workspace doc embedded snapshot — fallback when the settings
+      //    subcollection doc doesn't exist yet (new workspace before first
+      //    settings save, or migration gap). Also primes the in-process cache
+      //    so the next request within 5 min is a guaranteed cache hit.
+      const parsedEmbedded = SettingsDocSchema.safeParse(embedded.data)
+      if (parsedEmbedded.success) {
+        settings = parsedEmbedded.data
+        settingsMeta = {
+          version: embedded.version,
+          updatedAt: new Date(embedded.at).toISOString(),
+        }
+        settingsCache[workspaceId] = {
+          data: parsedEmbedded.data,
+          meta: settingsMeta,
           ts: Date.now(),
         }
       }
     }
 
-    const subscription = subscriptionSnap.exists
-      ? (subscriptionSnap.data() as SubscriptionDoc)
-      : null
-    const isSubscriptionActive = subscription
-      ? ACTIVE_SUBSCRIPTION_STATUSES.has(subscription.status)
-      : false
-    const subscriptionCapabilities =
-      subscription && isSubscriptionActive
-        ? getSubscriptionCapabilities(subscription)
-        : null
+    const accountAuthority = await buildAccountAuthorityFromSubscriptionSnapshot(
+      subscriptionRef,
+      subscriptionSnap
+    )
 
     const snapshot: AppBootstrapSnapshot = {
       workspace,
       membershipRole: membership.role,
       settings,
+      settingsMeta: settingsMeta ?? null,
       workspaceCapabilities: deriveWorkspaceCapabilities(workspace.type),
-      subscription,
-      subscriptionCapabilities,
-      isSubscriptionActive,
+      subscription: accountAuthority.subscription,
+      subscriptionCapabilities: accountAuthority.subscriptionCapabilities,
+      isSubscriptionActive: accountAuthority.isSubscriptionActive,
     }
 
     res.status(200).json({

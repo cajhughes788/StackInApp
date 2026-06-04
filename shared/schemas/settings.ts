@@ -114,9 +114,11 @@ export const IndependentSettings = z.object({
   enableZelle: z.boolean().optional(),
   enablePosSales: z.boolean().optional(),
   enableCashSales: z.boolean().optional(),
+  trackVehicleExpenses: z.boolean().optional(),
   trackBusinessMileage: z.boolean().optional(),
   incomeTargetPerMonth: z.number().optional(),
   expenseTargetPerMonth: z.number().optional(),
+  customExpenseCategories: z.array(z.string().trim().min(1)).optional(),
   // Sparse — no defaults!
   customIncomeFields: z
     .array(

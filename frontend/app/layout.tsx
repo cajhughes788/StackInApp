@@ -3,6 +3,7 @@ import type { Metadata } from "next"
 import { Inter } from "next/font/google"
 import "./globals.css"
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
+import { AccountAuthorityProvider } from "@/contexts/account-authority-context"
 import { AuthProvider } from "@/contexts/auth-context"
 import { ThemeProvider } from "@/components/theme-provider"
 
@@ -61,8 +62,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className={`${inter.variable} font-sans antialiased`}>
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} storageKey="stackin-theme">
           <AuthProvider>
-            {children}
-            <PWAInstallPrompt />
+            <AccountAuthorityProvider>
+              {children}
+              <PWAInstallPrompt />
+            </AccountAuthorityProvider>
           </AuthProvider>
         </ThemeProvider>
       </body>

@@ -13,11 +13,14 @@ import { safeSchemaParse } from "@/lib/utils/safeSchemaParse";
 import type { WorkspaceId } from "@shared/contracts/workspace";
 export type PayStubsLoadResult = {
     data: PayStub.Type[];
-    lastBackendSync: number | null;
+    lastSuccessfulSyncAt: number | null;
+    localUpdatedAt: number | null;
+    source: "cache" | "backend";
+    didFetch: boolean;
 };
 const PAY_STUBS_BACKEND_TTL_MS = 5 * 60 * 1000;
 const inFlightLoads = new Map<WorkspaceId, Promise<PayStubsLoadResult>>();
-const lastBackendSyncByWorkspace = new Map<WorkspaceId, number | null>();
+const lastSuccessfulSyncAtByWorkspace = new Map<WorkspaceId, number | null>();
 /**
  * Normalize possible API responses to a consistent array of PayStub.Type
  */
@@ -32,11 +35,11 @@ function normalizeResponse(res: any): PayStub.Type[] {
         return res.data;
     return [];
 }
-function getLastBackendSync(workspaceId: WorkspaceId): number | null {
-    return lastBackendSyncByWorkspace.get(workspaceId) ?? null;
+function getLastSuccessfulSyncAt(workspaceId: WorkspaceId): number | null {
+    return lastSuccessfulSyncAtByWorkspace.get(workspaceId) ?? null;
 }
-function setLastBackendSync(workspaceId: WorkspaceId, timestamp: number | null): void {
-    lastBackendSyncByWorkspace.set(workspaceId, timestamp);
+function setLastSuccessfulSyncAt(workspaceId: WorkspaceId, timestamp: number | null): void {
+    lastSuccessfulSyncAtByWorkspace.set(workspaceId, timestamp);
 }
 export async function readCachedSnapshot(workspaceId: WorkspaceId): Promise<PayStubsLoadResult> {
     return measureAsync("pay_stubs.read_cached_snapshot", async () => {
@@ -44,32 +47,46 @@ export async function readCachedSnapshot(workspaceId: WorkspaceId): Promise<PayS
         if (cached === null) {
             return {
                 data: [],
-                lastBackendSync: null,
+                lastSuccessfulSyncAt: null,
+                localUpdatedAt: null,
+                source: "cache",
+                didFetch: false,
             };
         }
         return {
             data: cached.data,
-            lastBackendSync: getLastBackendSync(workspaceId) ?? cached.cachedAt,
+            lastSuccessfulSyncAt: getLastSuccessfulSyncAt(workspaceId) ?? cached.lastSuccessfulSyncAt,
+            localUpdatedAt: cached.localUpdatedAt,
+            source: "cache",
+            didFetch: false,
         };
     }, { workspaceId });
 }
 export function prime(workspaceId: WorkspaceId, list: PayStub.Type[], options: {
-    lastBackendSync?: number | null;
+    lastSuccessfulSyncAt?: number | null;
+    localUpdatedAt?: number | null;
 } = {}): PayStubsLoadResult {
-    const lastBackendSync = options.lastBackendSync ?? Date.now();
-    setLastBackendSync(workspaceId, lastBackendSync);
-    void savePayStubsCache(workspaceId, list);
+    const lastSuccessfulSyncAt = options.lastSuccessfulSyncAt ?? null;
+    const localUpdatedAt = options.localUpdatedAt ?? Date.now();
+    setLastSuccessfulSyncAt(workspaceId, lastSuccessfulSyncAt);
+    void savePayStubsCache(workspaceId, list, {
+        lastSuccessfulSyncAt,
+        localUpdatedAt,
+    });
     return {
         data: list,
-        lastBackendSync,
+        lastSuccessfulSyncAt,
+        localUpdatedAt,
+        source: "cache",
+        didFetch: false,
     };
 }
 export function clearSyncMetadata(workspaceId?: WorkspaceId): void {
     if (!workspaceId) {
-        lastBackendSyncByWorkspace.clear();
+        lastSuccessfulSyncAtByWorkspace.clear();
         return;
     }
-    lastBackendSyncByWorkspace.delete(workspaceId);
+    lastSuccessfulSyncAtByWorkspace.delete(workspaceId);
 }
 async function fetchBackend(workspaceId: WorkspaceId): Promise<PayStubsLoadResult> {
     return measureAsync("pay_stubs.fetch_backend", async () => {
@@ -79,12 +96,18 @@ async function fetchBackend(workspaceId: WorkspaceId): Promise<PayStubsLoadResul
         if (!parsed.success) {
             throw parsed.error;
         }
-        await savePayStubsCache(workspaceId, parsed.data);
         const syncedAt = Date.now();
-        setLastBackendSync(workspaceId, syncedAt);
+        await savePayStubsCache(workspaceId, parsed.data, {
+            lastSuccessfulSyncAt: syncedAt,
+            localUpdatedAt: syncedAt,
+        });
+        setLastSuccessfulSyncAt(workspaceId, syncedAt);
         return {
             data: parsed.data,
-            lastBackendSync: syncedAt,
+            lastSuccessfulSyncAt: syncedAt,
+            localUpdatedAt: syncedAt,
+            source: "backend",
+            didFetch: true,
         };
     }, { workspaceId });
 }
@@ -101,9 +124,9 @@ export async function ensureLoaded(workspaceId: WorkspaceId, options: {
         });
         const cached = await readCachedSnapshot(workspaceId);
         const forceBackend = options.forceBackend === true;
-        const isFresh = cached.lastBackendSync !== null &&
-            Date.now() - cached.lastBackendSync <= PAY_STUBS_BACKEND_TTL_MS;
-        const hasCache = cached.data.length > 0 || cached.lastBackendSync !== null;
+        const isFresh = cached.lastSuccessfulSyncAt !== null &&
+            Date.now() - cached.lastSuccessfulSyncAt <= PAY_STUBS_BACKEND_TTL_MS;
+        const hasCache = cached.data.length > 0 || cached.lastSuccessfulSyncAt !== null;
         if (!forceBackend && hasCache && isFresh) {
             timer.success({ source: "cache-fresh", hasCache });
             return cached;

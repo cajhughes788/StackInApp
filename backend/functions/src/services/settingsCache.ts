@@ -1,8 +1,10 @@
 // settingsCache.ts
+import type { SettingsDocumentMeta } from "@shared/contracts/settingsSync"
 import type { SettingsType } from "@shared/schemas/settings"
 
 export interface SettingsCacheEntry {
   data: SettingsType
+  meta?: SettingsDocumentMeta | null
   ts: number
 }
 

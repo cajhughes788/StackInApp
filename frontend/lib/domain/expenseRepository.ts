@@ -9,19 +9,22 @@ import { getAuthSessionVersion, isAuthSessionCurrent } from "@/lib/authSession";
 import { debugLog } from "@/lib/debugLoop";
 export type ExpensesLoadResult = {
     data: any[];
-    lastBackendSync: number | null;
+    lastSuccessfulSyncAt: number | null;
+    localUpdatedAt: number | null;
+    source: "cache" | "backend";
+    didFetch: boolean;
 };
 const EXPENSES_BACKEND_TTL_MS = 5 * 60 * 1000;
 const inFlightLoads = new Map<string, Promise<ExpensesLoadResult>>();
-const lastBackendSyncByScopedPeriod = new Map<string, number | null>();
+const lastSuccessfulSyncAtByScopedPeriod = new Map<string, number | null>();
 function makeScopedPeriodKey(workspaceId: WorkspaceId, periodId: string): string {
     return `${workspaceId}::${periodId}`;
 }
-function getLastBackendSync(scopedPeriodKey: string): number | null {
-    return lastBackendSyncByScopedPeriod.get(scopedPeriodKey) ?? null;
+function getLastSuccessfulSyncAt(scopedPeriodKey: string): number | null {
+    return lastSuccessfulSyncAtByScopedPeriod.get(scopedPeriodKey) ?? null;
 }
-function setLastBackendSync(scopedPeriodKey: string, timestamp: number | null): void {
-    lastBackendSyncByScopedPeriod.set(scopedPeriodKey, timestamp);
+function setLastSuccessfulSyncAt(scopedPeriodKey: string, timestamp: number | null): void {
+    lastSuccessfulSyncAtByScopedPeriod.set(scopedPeriodKey, timestamp);
 }
 export async function readCachedSnapshot(workspaceId: WorkspaceId, periodId: string): Promise<ExpensesLoadResult> {
     return measureAsync("expenses.read_cached_snapshot", async () => {
@@ -30,12 +33,18 @@ export async function readCachedSnapshot(workspaceId: WorkspaceId, periodId: str
         if (cached === null) {
             return {
                 data: [],
-                lastBackendSync: null,
+                lastSuccessfulSyncAt: null,
+                localUpdatedAt: null,
+                source: "cache",
+                didFetch: false,
             };
         }
         return {
             data: cached.data,
-            lastBackendSync: getLastBackendSync(scopedPeriodKey) ?? cached.cachedAt,
+            lastSuccessfulSyncAt: getLastSuccessfulSyncAt(scopedPeriodKey) ?? cached.lastSuccessfulSyncAt,
+            localUpdatedAt: cached.localUpdatedAt,
+            source: "cache",
+            didFetch: false,
         };
     }, { workspaceId, periodId });
 }
@@ -58,15 +67,24 @@ export async function fetchBackend(workspaceId: WorkspaceId, periodId: string): 
             });
             return {
                 data: parsed.data,
-                lastBackendSync: getLastBackendSync(scopedPeriodKey),
+                lastSuccessfulSyncAt: getLastSuccessfulSyncAt(scopedPeriodKey),
+                localUpdatedAt: null,
+                source: "backend",
+                didFetch: true,
             };
         }
-        await domainExpenses.setExpensesForPeriod(scopedPeriodKey, parsed.data);
         const syncedAt = Date.now();
-        setLastBackendSync(scopedPeriodKey, syncedAt);
+        await domainExpenses.setExpensesForPeriod(scopedPeriodKey, parsed.data, {
+            lastSuccessfulSyncAt: syncedAt,
+            localUpdatedAt: syncedAt,
+        });
+        setLastSuccessfulSyncAt(scopedPeriodKey, syncedAt);
         return {
             data: parsed.data,
-            lastBackendSync: syncedAt,
+            lastSuccessfulSyncAt: syncedAt,
+            localUpdatedAt: syncedAt,
+            source: "backend",
+            didFetch: true,
         };
     }, { workspaceId, periodId });
 }
@@ -85,9 +103,9 @@ export async function ensureLoaded(workspaceId: WorkspaceId, periodId: string, o
         });
         const cached = await readCachedSnapshot(workspaceId, periodId);
         const forceBackend = options.forceBackend === true;
-        const hasCache = cached.data.length > 0 || cached.lastBackendSync !== null;
-        const isFresh = cached.lastBackendSync !== null &&
-            Date.now() - cached.lastBackendSync <= EXPENSES_BACKEND_TTL_MS;
+        const hasCache = cached.data.length > 0 || cached.lastSuccessfulSyncAt !== null;
+        const isFresh = cached.lastSuccessfulSyncAt !== null &&
+            Date.now() - cached.lastSuccessfulSyncAt <= EXPENSES_BACKEND_TTL_MS;
         if (!forceBackend && hasCache && isFresh) {
             timer.success({ source: "cache-fresh", hasCache });
             return cached;
@@ -105,33 +123,40 @@ export async function ensureLoaded(workspaceId: WorkspaceId, periodId: string, o
     }
 }
 export function prime(workspaceId: WorkspaceId, periodId: string, expenses: any[], options: {
-    lastBackendSync?: number | null;
+    lastSuccessfulSyncAt?: number | null;
+    localUpdatedAt?: number | null;
 } = {}): ExpensesLoadResult {
     const scopedPeriodKey = makeScopedPeriodKey(workspaceId, periodId);
-    const lastBackendSync = options.lastBackendSync ?? Date.now();
-    setLastBackendSync(scopedPeriodKey, lastBackendSync);
-    void domainExpenses.setExpensesForPeriod(scopedPeriodKey, expenses);
+    const lastSuccessfulSyncAt = options.lastSuccessfulSyncAt ?? null;
+    setLastSuccessfulSyncAt(scopedPeriodKey, lastSuccessfulSyncAt);
+    void domainExpenses.setExpensesForPeriod(scopedPeriodKey, expenses, {
+        lastSuccessfulSyncAt,
+        localUpdatedAt: options.localUpdatedAt ?? Date.now(),
+    });
     return {
         data: expenses,
-        lastBackendSync,
+        lastSuccessfulSyncAt,
+        localUpdatedAt: options.localUpdatedAt ?? Date.now(),
+        source: "cache",
+        didFetch: false,
     };
 }
 export function clearSyncMetadata(workspaceId?: WorkspaceId, periodId?: string): void {
     if (!workspaceId) {
-        lastBackendSyncByScopedPeriod.clear();
+        lastSuccessfulSyncAtByScopedPeriod.clear();
         inFlightLoads.clear();
         return;
     }
     if (periodId) {
         const scopedPeriodKey = makeScopedPeriodKey(workspaceId, periodId);
-        lastBackendSyncByScopedPeriod.delete(scopedPeriodKey);
+        lastSuccessfulSyncAtByScopedPeriod.delete(scopedPeriodKey);
         inFlightLoads.delete(scopedPeriodKey);
         return;
     }
     const prefix = `${workspaceId}::`;
-    for (const key of Array.from(lastBackendSyncByScopedPeriod.keys())) {
+    for (const key of Array.from(lastSuccessfulSyncAtByScopedPeriod.keys())) {
         if (key.startsWith(prefix)) {
-            lastBackendSyncByScopedPeriod.delete(key);
+            lastSuccessfulSyncAtByScopedPeriod.delete(key);
         }
     }
     for (const key of Array.from(inFlightLoads.keys())) {

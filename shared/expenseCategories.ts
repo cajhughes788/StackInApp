@@ -1,3 +1,11 @@
+import type { WorkspaceType } from "./contracts/workspace"
+import type { IndependentSettingsType } from "./schemas/settings"
+import {
+  VEHICLE_EXPENSE_CATEGORY_KEY,
+  VEHICLE_EXPENSE_CATEGORY_LABEL,
+  isVehicleExpenseTrackingEnabled,
+} from "./vehicleExpenses"
+
 export type CpaExpenseCategory =
   | "Advertising"
   | "Car and truck expenses"
@@ -21,6 +29,16 @@ export type ExpenseCategoryGuideEntry = {
   ruleOfThumb: string
   shortSummary: string
   cpaCategory: CpaExpenseCategory
+}
+
+export type ExpenseCategoryVisibilityContext = {
+  workspaceType?: WorkspaceType | null
+  independentSettings?: Partial<IndependentSettingsType> | null
+}
+
+export type ExpenseCategoryRuntimeConfig = {
+  key: string
+  isVisible?: (context?: ExpenseCategoryVisibilityContext) => boolean
 }
 
 const LEGACY_CATEGORY_ALIASES: Record<string, string> = {
@@ -137,6 +155,24 @@ export const EXPENSE_CATEGORY_GUIDE: ExpenseCategoryGuideEntry[] = [
     cpaCategory: "Insurance",
   },
   {
+    category: "Interest on Loan",
+    simpleDefinition:
+      "The extra cost you pay when you borrow money for your business.",
+    includes:
+      "Interest charges on business loans, equipment financing, business credit cards, payment plans, and other borrowing costs tied to the business.",
+    examples: [
+      "Interest charged on a business credit card used for supplies",
+      "Interest portion of an equipment financing payment for a massage table",
+      "Financing charge on a salon chair or tattoo machine bought on a payment plan",
+      "Interest on a loan used to cover business startup or operating costs",
+    ],
+    ruleOfThumb:
+      "Put only the interest or finance charge here, not the part of the payment that pays back what you borrowed.",
+    shortSummary:
+      "Use for interest and finance charges tied to business borrowing, loans, credit cards, and payment plans.",
+    cpaCategory: "Other expenses",
+  },
+  {
     category: "Travel",
     simpleDefinition:
       "Business trips or travel away from your normal work area for work-related reasons.",
@@ -208,6 +244,24 @@ export const EXPENSE_CATEGORY_GUIDE: ExpenseCategoryGuideEntry[] = [
     shortSummary:
       "Use for accountants, legal help, consulting, bookkeeping, and similar expert business services.",
     cpaCategory: "Legal and professional services",
+  },
+  {
+    category: "Subcontractor Work",
+    simpleDefinition:
+      "Payments to non-employees you hire to help with client work or business tasks.",
+    includes:
+      "Independent contractors, freelancers, assistants, outsourced labor, guest artists, and specialists hired to help complete services or support business operations.",
+    examples: [
+      "Freelance assistant helping with a large bridal styling job",
+      "Guest artist payout for shared client work",
+      "Independent contractor paid to cover overflow appointments",
+      "Virtual assistant hired to help with scheduling and client messages",
+    ],
+    ruleOfThumb:
+      "If you paid another non-employee person to help do the work or keep the business running, start here.",
+    shortSummary:
+      "Use for freelancers, contractors, assistants, and other non-employees you pay to help with the business.",
+    cpaCategory: "Commissions and fees",
   },
   {
     category: "Cleaning & Sanitation",
@@ -341,13 +395,66 @@ export const EXPENSE_CATEGORY_OPTIONS = EXPENSE_CATEGORY_GUIDE.map(
   (entry) => entry.category
 )
 
+const EXPENSE_CATEGORY_CONFIG_BY_NORMALIZED_LABEL = new Map<
+  string,
+  ExpenseCategoryRuntimeConfig
+>(
+  EXPENSE_CATEGORY_GUIDE.map((entry) => [
+    normalizeExpenseCategory(entry.category),
+    {
+      key: createExpenseCategoryKey(entry.category),
+      isVisible:
+        entry.category === VEHICLE_EXPENSE_CATEGORY_LABEL
+          ? (context?: ExpenseCategoryVisibilityContext) =>
+              isVehicleExpenseTrackingEnabled(context?.independentSettings)
+          : undefined,
+    },
+  ])
+)
+
+function createExpenseCategoryKey(category: string): string {
+  return category
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, " ")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+}
+
+export function sanitizeExpenseCategoryName(value: string): string {
+  return value.trim().replace(/\s+/g, " ")
+}
+
 export function normalizeExpenseCategory(value: string): string {
-  return value.trim().toLowerCase()
+  return sanitizeExpenseCategoryName(value).toLowerCase()
 }
 
 function resolveCategoryAlias(value: string): string {
   const normalized = normalizeExpenseCategory(value)
   return LEGACY_CATEGORY_ALIASES[normalized] ?? value.trim()
+}
+
+export function getExpenseCategoryRuntimeConfig(
+  value: string
+): ExpenseCategoryRuntimeConfig | null {
+  const aliased = resolveCategoryAlias(value)
+  const normalized = normalizeExpenseCategory(aliased)
+  if (!normalized) return null
+
+  return EXPENSE_CATEGORY_CONFIG_BY_NORMALIZED_LABEL.get(normalized) ?? null
+}
+
+export function getExpenseCategoryKey(value: string): string | null {
+  return getExpenseCategoryRuntimeConfig(value)?.key ?? null
+}
+
+export function isExpenseCategoryVisible(
+  value: string,
+  context?: ExpenseCategoryVisibilityContext
+): boolean {
+  const config = getExpenseCategoryRuntimeConfig(value)
+  if (!config?.isVisible) return true
+  return config.isVisible(context)
 }
 
 export function findExpenseCategoryGuideEntry(
@@ -364,12 +471,126 @@ export function findExpenseCategoryGuideEntry(
   )
 }
 
-export function normalizeExpenseCategoryLabel(value: string): string {
+export function getCustomExpenseCategoryOptions(
+  categories?: readonly string[] | null
+): string[] {
+  const next: string[] = []
+  const seen = new Set<string>()
+
+  for (const category of categories ?? []) {
+    const sanitized = sanitizeExpenseCategoryName(category)
+    const normalized = normalizeExpenseCategory(sanitized)
+
+    if (!normalized || seen.has(normalized)) continue
+
+    seen.add(normalized)
+    next.push(sanitized)
+  }
+
+  return next
+}
+
+export function getExpenseCategoryOptions(
+  customCategories?: readonly string[] | null
+): string[] {
+  const custom = getCustomExpenseCategoryOptions(customCategories)
+  const seen = new Set(custom.map((category) => normalizeExpenseCategory(category)))
+  const builtIn = EXPENSE_CATEGORY_OPTIONS.filter((category) => {
+    const normalized = normalizeExpenseCategory(category)
+    return !seen.has(normalized)
+  })
+
+  return [...custom, ...builtIn]
+}
+
+export function getVisibleExpenseCategoryOptions(
+  customCategories?: readonly string[] | null,
+  context?: ExpenseCategoryVisibilityContext,
+  options: {
+    includeCategories?: readonly string[] | null
+  } = {}
+): string[] {
+  const custom = getCustomExpenseCategoryOptions(customCategories)
+  const seen = new Set(custom.map((category) => normalizeExpenseCategory(category)))
+  const visibleBuiltIn = EXPENSE_CATEGORY_OPTIONS.filter((category) => {
+    if (!isExpenseCategoryVisible(category, context)) {
+      return false
+    }
+
+    const normalized = normalizeExpenseCategory(category)
+    return !seen.has(normalized)
+  })
+  const next = [...custom, ...visibleBuiltIn]
+
+  for (const category of options.includeCategories ?? []) {
+    const resolved = resolveExpenseCategoryLabel(category, customCategories)
+    const normalized = normalizeExpenseCategory(resolved ?? category)
+    if (!normalized || next.some((entry) => normalizeExpenseCategory(entry) === normalized)) {
+      continue
+    }
+
+    next.push(resolved ?? sanitizeExpenseCategoryName(category))
+  }
+
+  return next
+}
+
+export function isExpenseCategorySelectable(
+  value: string,
+  customCategories?: readonly string[] | null,
+  context?: ExpenseCategoryVisibilityContext
+): boolean {
+  const resolved = resolveExpenseCategoryLabel(value, customCategories)
+  if (!resolved) return false
+
+  const entry = findExpenseCategoryGuideEntry(resolved)
+  if (!entry) return true
+
+  return isExpenseCategoryVisible(entry.category, context)
+}
+
+export function resolveExpenseCategoryLabel(
+  value: string,
+  customCategories?: readonly string[] | null
+): string | null {
   const entry = findExpenseCategoryGuideEntry(value)
-  return entry?.category ?? (value.trim() || "Uncategorized")
+  if (entry) return entry.category
+
+  const normalized = normalizeExpenseCategory(value)
+  if (!normalized) return null
+
+  return (
+    getCustomExpenseCategoryOptions(customCategories).find(
+      (category) => normalizeExpenseCategory(category) === normalized
+    ) ?? null
+  )
+}
+
+export function isExpenseCategoryNameTaken(
+  value: string,
+  customCategories?: readonly string[] | null
+): boolean {
+  const normalized = normalizeExpenseCategory(value)
+  if (!normalized) return false
+
+  return getExpenseCategoryOptions(customCategories).some(
+    (category) => normalizeExpenseCategory(category) === normalized
+  )
+}
+
+export function normalizeExpenseCategoryLabel(
+  value: string,
+  customCategories?: readonly string[] | null
+): string {
+  return (
+    resolveExpenseCategoryLabel(value, customCategories) ??
+    (sanitizeExpenseCategoryName(value) || "Uncategorized")
+  )
 }
 
 export function getCpaExpenseCategory(value: string): CpaExpenseCategory {
   const entry = findExpenseCategoryGuideEntry(value)
   return entry?.cpaCategory ?? "Other expenses"
 }
+
+export { VEHICLE_EXPENSE_CATEGORY_KEY, VEHICLE_EXPENSE_CATEGORY_LABEL }

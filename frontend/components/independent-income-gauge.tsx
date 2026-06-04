@@ -2,11 +2,18 @@
 
 import { useMemo } from "react"
 import { formatCurrency } from "@/lib/helpers"
-import { useEntriesStore } from "@/lib/stores/useEntriesStore"
-import { useSettingsStore } from "@/lib/stores/useSettingsStore"
+import {
+  useEntriesData,
+  useEntriesRenderState,
+} from "@/lib/stores/useEntriesStore"
+import {
+  useSettingsData,
+  useSettingsRenderState,
+} from "@/lib/stores/useSettingsStore"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import { debugRender } from "@/lib/debugLoop"
 import { computeIncomeGaugeForEntries } from "@shared/computeIncomeGauge"
+import SyncStatusIndicator from "@/components/sync-status-indicator"
 import {
   getIncomeBreakdownTotalForPaymentMethod,
   getIncomeBreakdownTotalForPaymentMethodAndCategory,
@@ -20,27 +27,23 @@ export default function IndependentIncomeGauge() {
   const activeWorkspaceId =
     workspaceState.status === "ready" ? workspaceState.activeWorkspaceId : null
 
-  const entriesEntry = useEntriesStore((s) =>
-    activeWorkspaceId ? s.byWorkspaceId[activeWorkspaceId] : undefined
-  )
-  const settingsEntry = useSettingsStore((s) =>
-    activeWorkspaceId ? s.byWorkspaceId[activeWorkspaceId] : undefined
-  )
-
-  const entries = entriesEntry?.entries ?? []
-  const settings = settingsEntry?.data ?? null
-  const entriesLoading =
-    activeWorkspaceId != null
-      ? (entriesEntry?.status ?? "idle") === "loading"
-      : true
-  const entriesRefreshing = entriesEntry?.isRefreshing ?? false
-  const settingsLoading =
-    activeWorkspaceId != null
-      ? (settingsEntry?.status ?? "idle") === "loading"
-      : true
+  const entries = useEntriesData(activeWorkspaceId)
+  const settings = useSettingsData(activeWorkspaceId)
+  const {
+    status: entriesStatus,
+    isHydrating: entriesHydrating,
+    isRevalidating: entriesRevalidating,
+    lastSuccessfulSyncAt: entriesLastSuccessfulSyncAt,
+  } = useEntriesRenderState(activeWorkspaceId)
+  const {
+    status: settingsStatus,
+    isHydrating: settingsHydrating,
+    isRevalidating: settingsRevalidating,
+  } = useSettingsRenderState(activeWorkspaceId)
   const hasRenderableEntries =
-    entries.length > 0 || (entriesEntry?.lastBackendSync ?? null) !== null
+    entries.length > 0 || entriesLastSuccessfulSyncAt !== null
   const hasRenderableSettings = settings !== null
+  const showSyncIndicator = entriesRevalidating || settingsRevalidating
 
   const totals = useMemo(() => {
     if (!settings) {
@@ -119,8 +122,8 @@ export default function IndependentIncomeGauge() {
   debugRender("independent-income-gauge", {
     workspaceId: activeWorkspaceId,
     workspaceType: activeWorkspace?.type ?? null,
-    entriesStatus: entriesEntry?.status ?? "idle",
-    settingsStatus: settingsEntry?.status ?? "idle",
+    entriesStatus,
+    settingsStatus,
     entriesCount: entries.length,
     hasSettings: settings !== null,
   })
@@ -129,19 +132,15 @@ export default function IndependentIncomeGauge() {
     workspaceState.status !== "ready" ||
     !activeWorkspaceId ||
     activeWorkspace?.type !== "independent" ||
-    (entriesLoading && !hasRenderableEntries) ||
-    (settingsLoading && !hasRenderableSettings)
+    (entriesHydrating && !hasRenderableEntries) ||
+    (settingsHydrating && !hasRenderableSettings)
   ) {
     return <div className="p-4 text-gray-400 text-sm">Loading monthly income…</div>
   }
 
   return (
-    <div className="bg-card rounded-lg border p-4 shadow-sm sm:p-6">
-      {entriesRefreshing || settingsLoading ? (
-        <div className="mb-3 text-xs text-muted-foreground">
-          Refreshing monthly income…
-        </div>
-      ) : null}
+    <div className="relative bg-card rounded-lg border p-4 shadow-sm sm:p-6">
+      <SyncStatusIndicator visible={showSyncIndicator} label="Syncing income" />
 
       <h2 className="mb-4 text-lg font-semibold">Current Month: {monthLabel}</h2>
 

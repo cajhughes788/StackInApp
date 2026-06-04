@@ -5,22 +5,26 @@
 // NEW ARCHITECTURE — cache-first, infinite TTL, offline queue,
 // idempotent writes, no raw storage.* calls.
 // ------------------------------------------------------------
-import { 
+import {
 // NEW — domain storage for tax profile
-loadTaxProfileCache, saveTaxProfileCache, clearTaxProfileCache, loadTaxProfileHash, saveTaxProfileHash } from "@/lib/storage/taxProfileCache";
+loadTaxProfileCache, readTaxProfileCacheRecord, saveTaxProfileCache, clearTaxProfileCache, clearTaxProfileHash, loadTaxProfileHash, saveTaxProfileHash } from "@/lib/storage/taxProfileCache";
 import * as offlineQueue from "@/lib/storage/offlineQueue";
 import { getTaxProfile as apiGetTaxProfile, saveTaxProfile as apiSaveTaxProfile, API_ENDPOINTS, shouldQueueOfflineMutation } from "@/lib/api";
+import { ApiError } from "@/lib/api/core/errors";
 import { measureAsync, startPerfTimer } from "@/lib/observability/perf";
 import { TaxProfile } from "@shared/schemas";
 import type { WorkspaceId } from "@shared/contracts/workspace";
 import { safeSchemaParse, type SchemaParseResult } from "@/lib/utils/safeSchemaParse";
 export type TaxProfileLoadResult = {
     data: TaxProfile.Type | null;
-    lastBackendSync: number | null;
+    lastSuccessfulSyncAt: number | null;
+    localUpdatedAt: number | null;
+    source: "cache" | "backend";
+    didFetch: boolean;
 };
 const TAX_PROFILE_BACKEND_TTL_MS = 5 * 60 * 1000;
 const inFlightLoads = new Map<WorkspaceId, Promise<TaxProfileLoadResult>>();
-const lastBackendSyncByWorkspace = new Map<WorkspaceId, number | null>();
+const lastSuccessfulSyncAtByWorkspace = new Map<WorkspaceId, number | null>();
 // ------------------------------------------------------------
 // Helpers
 // ------------------------------------------------------------
@@ -37,47 +41,67 @@ function normalizeResponse(res: any): TaxProfile.Type | null {
         return res.taxProfile;
     return res as TaxProfile.Type;
 }
-function getLastBackendSync(workspaceId: WorkspaceId): number | null {
-    return lastBackendSyncByWorkspace.get(workspaceId) ?? null;
+function getLastSuccessfulSyncAt(workspaceId: WorkspaceId): number | null {
+    return lastSuccessfulSyncAtByWorkspace.get(workspaceId) ?? null;
 }
-function setLastBackendSync(workspaceId: WorkspaceId, timestamp: number | null): void {
-    lastBackendSyncByWorkspace.set(workspaceId, timestamp);
+function setLastSuccessfulSyncAt(workspaceId: WorkspaceId, timestamp: number | null): void {
+    lastSuccessfulSyncAtByWorkspace.set(workspaceId, timestamp);
+}
+async function hashTaxProfile(profile: TaxProfile.Type): Promise<string> {
+    const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(profile)));
+    return Array.from(new Uint8Array(hash))
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("");
 }
 export async function readCachedSnapshot(workspaceId: WorkspaceId): Promise<TaxProfileLoadResult> {
     return measureAsync("tax_profile.read_cached_snapshot", async () => {
-        const cached = await loadTaxProfileCache(workspaceId);
+        const cached = await readTaxProfileCacheRecord(workspaceId);
         if (!cached) {
             return {
                 data: null,
-                lastBackendSync: null,
+                lastSuccessfulSyncAt: null,
+                localUpdatedAt: null,
+                source: "cache",
+                didFetch: false,
             };
         }
-        const parsed = safeSchemaParse(TaxProfile.Schema, cached);
         return {
-            data: parsed.success ? parsed.data : null,
-            lastBackendSync: parsed.success ? getLastBackendSync(workspaceId) : null,
+            data: cached.data,
+            lastSuccessfulSyncAt:
+                getLastSuccessfulSyncAt(workspaceId) ?? cached.lastSuccessfulSyncAt,
+            localUpdatedAt: cached.localUpdatedAt,
+            source: "cache",
+            didFetch: false,
         };
     }, { workspaceId });
 }
 export function prime(workspaceId: WorkspaceId, profile: TaxProfile.Type | null, options: {
-    lastBackendSync?: number | null;
+    lastSuccessfulSyncAt?: number | null;
+    localUpdatedAt?: number | null;
 } = {}): TaxProfileLoadResult {
-    const lastBackendSync = options.lastBackendSync ?? Date.now();
-    setLastBackendSync(workspaceId, lastBackendSync);
+    const lastSuccessfulSyncAt = options.lastSuccessfulSyncAt ?? null;
+    const localUpdatedAt = options.localUpdatedAt ?? Date.now();
+    setLastSuccessfulSyncAt(workspaceId, lastSuccessfulSyncAt);
     void (profile === null
         ? clearTaxProfileCache(workspaceId)
-        : saveTaxProfileCache(workspaceId, profile));
+        : saveTaxProfileCache(workspaceId, profile, {
+            lastSuccessfulSyncAt,
+            localUpdatedAt,
+        }));
     return {
         data: profile,
-        lastBackendSync,
+        lastSuccessfulSyncAt,
+        localUpdatedAt,
+        source: "cache",
+        didFetch: false,
     };
 }
 export function clearSyncMetadata(workspaceId?: WorkspaceId): void {
     if (!workspaceId) {
-        lastBackendSyncByWorkspace.clear();
+        lastSuccessfulSyncAtByWorkspace.clear();
         return;
     }
-    lastBackendSyncByWorkspace.delete(workspaceId);
+    lastSuccessfulSyncAtByWorkspace.delete(workspaceId);
 }
 export async function ensureLoaded(workspaceId: WorkspaceId, options: {
     forceBackend?: boolean;
@@ -92,8 +116,8 @@ export async function ensureLoaded(workspaceId: WorkspaceId, options: {
         });
         const cached = await readCachedSnapshot(workspaceId);
         const forceBackend = options.forceBackend === true;
-        const isFresh = cached.lastBackendSync !== null &&
-            Date.now() - cached.lastBackendSync <= TAX_PROFILE_BACKEND_TTL_MS;
+        const isFresh = cached.lastSuccessfulSyncAt !== null &&
+            Date.now() - cached.lastSuccessfulSyncAt <= TAX_PROFILE_BACKEND_TTL_MS;
         if (!forceBackend && cached.data !== null && isFresh) {
             timer.success({ source: "cache-fresh", hasCache: true });
             return cached;
@@ -120,27 +144,39 @@ async function fetchBackend(workspaceId: WorkspaceId): Promise<TaxProfileLoadRes
         const data = normalizeResponse(res);
         if (!data) {
             await clearTaxProfileCache(workspaceId);
-            setLastBackendSync(workspaceId, Date.now());
+            setLastSuccessfulSyncAt(workspaceId, Date.now());
             return {
                 data: null,
-                lastBackendSync: getLastBackendSync(workspaceId),
+                lastSuccessfulSyncAt: getLastSuccessfulSyncAt(workspaceId),
+                localUpdatedAt: Date.now(),
+                source: "backend",
+                didFetch: true,
             };
         }
         const parsed = safeSchemaParse(TaxProfile.Schema, data);
         if (!parsed.success) {
             await clearTaxProfileCache(workspaceId);
-            setLastBackendSync(workspaceId, Date.now());
+            setLastSuccessfulSyncAt(workspaceId, Date.now());
             return {
                 data: null,
-                lastBackendSync: getLastBackendSync(workspaceId),
+                lastSuccessfulSyncAt: getLastSuccessfulSyncAt(workspaceId),
+                localUpdatedAt: Date.now(),
+                source: "backend",
+                didFetch: true,
             };
         }
-        await saveTaxProfileCache(workspaceId, parsed.data);
         const syncedAt = Date.now();
-        setLastBackendSync(workspaceId, syncedAt);
+        await saveTaxProfileCache(workspaceId, parsed.data, {
+            lastSuccessfulSyncAt: syncedAt,
+            localUpdatedAt: syncedAt,
+        });
+        setLastSuccessfulSyncAt(workspaceId, syncedAt);
         return {
             data: parsed.data,
-            lastBackendSync: syncedAt,
+            lastSuccessfulSyncAt: syncedAt,
+            localUpdatedAt: syncedAt,
+            source: "backend",
+            didFetch: true,
         };
     }, { workspaceId });
 }
@@ -171,12 +207,9 @@ export async function save(workspaceId: WorkspaceId, next: Partial<TaxProfile.Ty
     }
     // 4) Optimistic local cache write
     await saveTaxProfileCache(workspaceId, valid.data);
-    setLastBackendSync(workspaceId, null);
+    setLastSuccessfulSyncAt(workspaceId, null);
     // 5) Idempotency: skip network if hash unchanged
-    const newHash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(valid.data)));
-    const newHashHex = Array.from(new Uint8Array(newHash))
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("");
+    const newHashHex = await hashTaxProfile(valid.data);
     const existingHash = await loadTaxProfileHash(workspaceId);
     if (existingHash && existingHash === newHashHex) {
         return valid.data;
@@ -202,7 +235,7 @@ export async function save(workspaceId: WorkspaceId, next: Partial<TaxProfile.Ty
             throw finalParsed.error;
         await saveTaxProfileCache(workspaceId, finalParsed.data);
         await saveTaxProfileHash(workspaceId, newHashHex);
-        setLastBackendSync(workspaceId, Date.now());
+        setLastSuccessfulSyncAt(workspaceId, Date.now());
         return finalParsed.data;
     }
     catch (err) {
@@ -219,6 +252,61 @@ export async function save(workspaceId: WorkspaceId, next: Partial<TaxProfile.Ty
         await saveTaxProfileHash(workspaceId, newHashHex);
         return valid.data;
     }
+}
+
+export async function applyReplaySuccess(workspaceId: WorkspaceId, response: unknown): Promise<TaxProfileLoadResult> {
+    const normalized = normalizeResponse(response);
+    const parsed = safeSchemaParse(TaxProfile.Schema, normalized);
+    if (!parsed.success) {
+        throw parsed.error;
+    }
+    const syncedAt = Date.now();
+    await saveTaxProfileCache(workspaceId, parsed.data, {
+        lastSuccessfulSyncAt: syncedAt,
+        localUpdatedAt: syncedAt,
+    });
+    await saveTaxProfileHash(workspaceId, await hashTaxProfile(parsed.data));
+    setLastSuccessfulSyncAt(workspaceId, syncedAt);
+    return {
+        data: parsed.data,
+        lastSuccessfulSyncAt: syncedAt,
+        localUpdatedAt: syncedAt,
+        source: "backend",
+        didFetch: true,
+    };
+}
+
+export async function applyReplayFailure(workspaceId: WorkspaceId): Promise<void> {
+    setLastSuccessfulSyncAt(workspaceId, null);
+    await clearTaxProfileHash(workspaceId);
+}
+
+export function getTaxProfileReplayFailureFeedback(error: unknown): {
+    title: string;
+    description: string;
+} {
+    if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+        return {
+            title: "Tax profile needs attention",
+            description: "A queued tax profile change could not sync because your session needs attention. Sign in again, then review your tax profile.",
+        };
+    }
+    if (error instanceof ApiError && error.status === 400) {
+        return {
+            title: "Tax profile needs attention",
+            description: "A queued tax profile change is no longer valid. Review your tax profile and save again.",
+        };
+    }
+    if (error instanceof ApiError && error.status === 409) {
+        return {
+            title: "Tax profile needs attention",
+            description: "A queued tax profile change conflicted with newer tax data. Review your tax profile and save again.",
+        };
+    }
+    return {
+        title: "Tax profile needs attention",
+        description: "A queued tax profile change could not be synced. Review your tax profile and try again.",
+    };
 }
 // ------------------------------------------------------------
 // GETTERS (UPDATED TO REMOVE storage.*)

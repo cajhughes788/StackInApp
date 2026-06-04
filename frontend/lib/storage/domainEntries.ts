@@ -25,10 +25,15 @@ import { getWithMeta, setWithMeta, clearWithMeta, clearKeysWithMeta, listKeysWit
 import { EntrySchema, EntryType } from "@shared/schemas/entry";
 import { safeSchemaParse } from "@/lib/utils/safeSchemaParse";
 import { CACHE_VERSIONS } from "./cacheVersions";
+import { type PersistedCachePayload, isPersistedCachePayload } from "./cachePayload";
+import { debugError } from "@/lib/debugLoop";
 export type EntriesCacheRecord = {
     data: EntryType[];
+    lastSuccessfulSyncAt: number | null;
+    localUpdatedAt: number | null;
     cachedAt: number;
 };
+type PersistedEntriesPayload = PersistedCachePayload<EntryType[], "entries">;
 // ------------------------------------------------------------
 // Key Helpers
 // ------------------------------------------------------------
@@ -82,7 +87,7 @@ export async function loadEntries(scopedKey: string): Promise<EntryType[] | null
 // ------------------------------------------------------------
 export async function readEntriesCacheRecord(scopedKey: string): Promise<EntriesCacheRecord | null> {
     const key = makeEntriesKey(scopedKey);
-    const rec = await getWithMeta<EntryType[]>(key, {
+    const rec = await getWithMeta<PersistedEntriesPayload | EntryType[]>(key, {
         expectedVersion: CACHE_VERSIONS.entries,
     });
     if (!rec)
@@ -90,9 +95,40 @@ export async function readEntriesCacheRecord(scopedKey: string): Promise<Entries
     if (!rec.data)
         return {
             data: [],
+            lastSuccessfulSyncAt: null,
+            localUpdatedAt: rec.ts,
             cachedAt: rec.ts,
         };
-    const parsed = safeSchemaParse(EntrySchema.array(), rec.data);
+    const payload = Array.isArray(rec.data)
+        ? {
+            entries: rec.data,
+            lastSuccessfulSyncAt: null,
+            localUpdatedAt: rec.ts,
+        }
+        : isPersistedCachePayload<EntryType[], "entries">(rec.data, "entries")
+            ? rec.data
+            : {
+                entries: (rec.data as {
+                    entries: EntryType[];
+                    lastBackendSync?: number | null;
+                    localUpdatedAt?: number | null;
+                }).entries,
+                lastSuccessfulSyncAt: typeof (rec.data as {
+                    lastBackendSync?: unknown;
+                }).lastBackendSync === "number"
+                    ? (rec.data as {
+                        lastBackendSync: number;
+                    }).lastBackendSync
+                    : null,
+                localUpdatedAt: typeof (rec.data as {
+                    localUpdatedAt?: unknown;
+                }).localUpdatedAt === "number"
+                    ? (rec.data as {
+                        localUpdatedAt: number;
+                    }).localUpdatedAt
+                    : rec.ts,
+            };
+    const parsed = safeSchemaParse(EntrySchema.array(), payload.entries);
     if (!parsed.success) {
         ;
         ;
@@ -102,21 +138,34 @@ export async function readEntriesCacheRecord(scopedKey: string): Promise<Entries
     ;
     return {
         data: parsed.data,
+        lastSuccessfulSyncAt: typeof payload.lastSuccessfulSyncAt === "number" ? payload.lastSuccessfulSyncAt : null,
+        localUpdatedAt: typeof payload.localUpdatedAt === "number" ? payload.localUpdatedAt : rec.ts,
         cachedAt: rec.ts,
     };
 }
 // ------------------------------------------------------------
 // Save entries for a specific workspace-scoped cache key
 // ------------------------------------------------------------
-export async function saveEntries(scopedKey: string, entries: EntryType[]): Promise<void> {
+export async function saveEntries(scopedKey: string, entries: EntryType[], options: {
+    lastSuccessfulSyncAt?: number | null;
+    localUpdatedAt?: number | null;
+} = {}): Promise<void> {
     const parsed = safeSchemaParse(EntrySchema.array(), entries);
     if (!parsed.success) {
-        ;
-        return;
+        debugError("domain-entries", "save_entries_validation_failed", {
+            scopedKey,
+            entryCount: entries.length,
+            firstIssue: parsed.error?.issues?.[0]?.message ?? "unknown",
+        });
+        throw new Error(`saveEntries: schema validation failed for ${scopedKey}`);
     }
     const key = makeEntriesKey(scopedKey);
     ;
-    await setWithMeta(key, parsed.data, {
+    await setWithMeta<PersistedEntriesPayload>(key, {
+        entries: parsed.data,
+        lastSuccessfulSyncAt: options.lastSuccessfulSyncAt ?? null,
+        localUpdatedAt: options.localUpdatedAt ?? Date.now(),
+    }, {
         ttlMs: Infinity,
         version: CACHE_VERSIONS.entries,
     }); // infinite TTL (manual refresh only)

@@ -26,6 +26,7 @@ type TextractAnalyzeExpenseResponse = {
 
 type NormalizedReceiptAnalysis = {
   merchant: string | null
+  description: string | null
   receiptDate: string | null
   subtotal: number | null
   tax: number | null
@@ -144,6 +145,18 @@ function sanitizeDescriptionFragment(value: string | null | undefined): string |
 function normalizeLineItemDescription(value: string | null | undefined): string | null {
   const trimmed = value?.trim() ?? ""
   return trimmed.length > 0 ? trimmed : null
+}
+
+// Returns a description suitable for storing on the draft:
+// - 0 items  → null   (no semantic description available)
+// - 1 item   → that item's description (it IS the expense)
+// - 2+ items → null   (no single description represents the receipt;
+//               the line items themselves are the source of truth)
+function buildStoredDescription(lineItems: ReceiptLineItem[]): string | null {
+  if (lineItems.length === 1) {
+    return normalizeLineItemDescription(lineItems[0].description)
+  }
+  return null
 }
 
 function getFieldConfidence(field: TextractField): number | null {
@@ -336,9 +349,11 @@ export function normalizeTextractExpense(raw: unknown): NormalizedReceiptAnalysi
       .map((item) => item.confidence)
       .filter((value): value is number => typeof value === "number"),
   ]
+  const description = buildStoredDescription(lineItems)
 
   return {
     merchant: getFieldValue(merchantField ?? {}),
+    description,
     receiptDate: parseDate(getFieldValue(dateField ?? {})),
     subtotal: parseCurrencyAmount(getFieldValue(subtotalField ?? {})),
     tax: parseCurrencyAmount(getFieldValue(taxField ?? {})),
@@ -355,18 +370,19 @@ export function normalizeTextractExpense(raw: unknown): NormalizedReceiptAnalysi
     lineItemsRaw,
     normalized: {
       ...stripUndefined({
-      merchant: getFieldValue(merchantField ?? {}),
-      receiptDate: parseDate(getFieldValue(dateField ?? {})),
-      subtotal: parseCurrencyAmount(getFieldValue(subtotalField ?? {})),
-      tax: parseCurrencyAmount(getFieldValue(taxField ?? {})),
-      tip: parseCurrencyAmount(getFieldValue(tipField ?? {})),
-      total: parseCurrencyAmount(getFieldValue(totalField ?? {})),
-      currency: getFieldValue(currencyField ?? {}),
-      lineItems,
-      confidence:
-        allConfidences.length > 0
-          ? allConfidences.reduce((sum, value) => sum + value, 0) / allConfidences.length
-          : null,
+        merchant: getFieldValue(merchantField ?? {}),
+        description,
+        receiptDate: parseDate(getFieldValue(dateField ?? {})),
+        subtotal: parseCurrencyAmount(getFieldValue(subtotalField ?? {})),
+        tax: parseCurrencyAmount(getFieldValue(taxField ?? {})),
+        tip: parseCurrencyAmount(getFieldValue(tipField ?? {})),
+        total: parseCurrencyAmount(getFieldValue(totalField ?? {})),
+        currency: getFieldValue(currencyField ?? {}),
+        lineItems,
+        confidence:
+          allConfidences.length > 0
+            ? allConfidences.reduce((sum, value) => sum + value, 0) / allConfidences.length
+            : null,
       }),
     },
   }

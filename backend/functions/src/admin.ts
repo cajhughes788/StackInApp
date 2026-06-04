@@ -33,5 +33,8 @@ if (!getApps().length) {
 }
 
 export const db = getFirestore()
+// Safeguard: Firestore rejects `undefined` values by default.
+// ignoreUndefinedProperties silently drops them instead of throwing a 500.
+db.settings({ ignoreUndefinedProperties: true })
 export const auth = getAuth()
 export const storage = getStorage()

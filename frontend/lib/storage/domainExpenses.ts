@@ -22,12 +22,16 @@ import { getWithMeta, setWithMeta, clearWithMeta, clearKeysWithMeta, listKeysWit
 import { ExpenseSchema } from "@shared/schemas/expense"; // <-- must exist
 import { safeSchemaParse } from "@/lib/utils/safeSchemaParse";
 import { CACHE_VERSIONS } from "./cacheVersions";
+import { type PersistedCachePayload, isPersistedCachePayload } from "./cachePayload";
 
 export type ExpensesCacheRecord = {
     data: any[];
+    lastSuccessfulSyncAt: number | null;
+    localUpdatedAt: number | null;
     cachedAt: number;
 };
 const PREFIX = "expenses"; // final key: "expenses:{workspaceId}::{periodId}"
+type PersistedExpensesPayload = PersistedCachePayload<any[], "expenses">;
 // ------------------------------------------------------------
 // Key helper
 // ------------------------------------------------------------
@@ -71,11 +75,14 @@ export async function loadAllExpenses(): Promise<any[]> {
     const expenseKeys = allKeys.filter((key) => key.startsWith(`${PREFIX}:`));
     let all: any[] = [];
     for (const key of expenseKeys) {
-        const rec = await getWithMeta<any[]>(key, {
+        const rec = await getWithMeta<any[] | PersistedExpensesPayload>(key, {
             expectedVersion: CACHE_VERSIONS.expenses,
         });
         if (rec?.data) {
-            const parsed = safeSchemaParse(ExpenseSchema.array(), rec.data);
+            const payload = isPersistedCachePayload<any[], "expenses">(rec.data, "expenses")
+                ? rec.data.expenses
+                : rec.data;
+            const parsed = safeSchemaParse(ExpenseSchema.array(), payload);
             if (parsed.success) {
                 all = all.concat(parsed.data);
             }
@@ -94,28 +101,68 @@ export async function loadExpenses(scopedPeriodKey: string): Promise<any[]> {
 
 export async function readExpensesCacheRecord(scopedPeriodKey: string): Promise<ExpensesCacheRecord | null> {
     const key = makeExpensesKey(scopedPeriodKey);
-    const rec = await getWithMeta<any[]>(key, {
+    const rec = await getWithMeta<any[] | PersistedExpensesPayload>(key, {
         expectedVersion: CACHE_VERSIONS.expenses,
     });
     if (!rec?.data)
         return null;
-    const parsed = safeSchemaParse(ExpenseSchema.array(), rec.data);
-    if (!parsed.success) {
-        ;
+    const payload = isPersistedCachePayload<any[], "expenses">(rec.data, "expenses")
+        ? rec.data
+        : {
+            expenses: rec.data,
+            lastSuccessfulSyncAt: null,
+            localUpdatedAt: rec.ts,
+        };
+    // Validate each expense individually so that optimistic expenses (which
+    // have a tempId but no id/createdAt/updatedAt/version and therefore fail
+    // ExpenseSchema) do not invalidate the entire period cache. Canonical
+    // expenses that fail validation are dropped; optimistic ones are kept as-is
+    // so they survive an app restart while offline and remain visible until
+    // the offline queue replays and reconciles them to canonical.
+    const rawExpenses = Array.isArray(payload.expenses) ? payload.expenses : [];
+    const validatedExpenses: any[] = [];
+    let hadInvalidCanonical = false;
+    for (const expense of rawExpenses) {
+        const result = safeSchemaParse(ExpenseSchema, expense);
+        if (result.success) {
+            validatedExpenses.push(result.data);
+        } else if (typeof expense?.tempId === "string" && expense.tempId.length > 0) {
+            // Optimistic expense — keep the raw object so it is visible in the
+            // UI after restart. It will be reconciled to canonical on reconnect.
+            validatedExpenses.push(expense);
+        } else {
+            hadInvalidCanonical = true;
+        }
+    }
+    if (hadInvalidCanonical && validatedExpenses.length === 0) {
+        // All entries were invalid canonical records — cache is corrupt, clear it.
         await clearWithMeta(key);
         return null;
     }
     return {
-        data: parsed.data,
+        data: validatedExpenses,
+        lastSuccessfulSyncAt: typeof payload.lastSuccessfulSyncAt === "number"
+            ? payload.lastSuccessfulSyncAt
+            : null,
+        localUpdatedAt: typeof payload.localUpdatedAt === "number"
+            ? payload.localUpdatedAt
+            : rec.ts,
         cachedAt: rec.ts,
     };
 }
 // ------------------------------------------------------------
 // Overwrite all expenses for a single workspace-period key (canonical sync)
 // ------------------------------------------------------------
-export async function setExpensesForPeriod(scopedPeriodKey: string, expenses: any[]): Promise<void> {
+export async function setExpensesForPeriod(scopedPeriodKey: string, expenses: any[], options: {
+    lastSuccessfulSyncAt?: number | null;
+    localUpdatedAt?: number | null;
+} = {}): Promise<void> {
     const key = makeExpensesKey(scopedPeriodKey);
-    await setWithMeta(key, expenses, {
+    await setWithMeta<PersistedExpensesPayload>(key, {
+        expenses,
+        lastSuccessfulSyncAt: options.lastSuccessfulSyncAt ?? null,
+        localUpdatedAt: options.localUpdatedAt ?? Date.now(),
+    }, {
         ttlMs: Infinity,
         version: CACHE_VERSIONS.expenses,
     });
@@ -126,10 +173,17 @@ export async function setExpensesForPeriod(scopedPeriodKey: string, expenses: an
 export async function saveExpense(scopedPeriodKey: string, expense: any): Promise<void> {
     const key = makeExpensesKey(scopedPeriodKey);
     // Load existing array (if any)
-    const rec = await getWithMeta<any[]>(key, {
+    const rec = await getWithMeta<any[] | PersistedExpensesPayload>(key, {
         expectedVersion: CACHE_VERSIONS.expenses,
     });
-    const existing = Array.isArray(rec?.data) ? rec.data : [];
+    const payload = isPersistedCachePayload<any[], "expenses">(rec?.data, "expenses")
+        ? rec.data
+        : null;
+    const existing = Array.isArray(payload?.expenses)
+        ? payload.expenses
+        : Array.isArray(rec?.data)
+            ? rec.data
+            : [];
     // Try canonical validation
     const canonicalParsed = safeSchemaParse(ExpenseSchema, expense);
     if (!canonicalParsed.success) {
@@ -142,7 +196,11 @@ export async function saveExpense(scopedPeriodKey: string, expense: any): Promis
     }
     // Append at top
     const updated = dedupeExpenses([expense, ...existing]);
-    await setWithMeta(key, updated, {
+    await setWithMeta<PersistedExpensesPayload>(key, {
+        expenses: updated,
+        lastSuccessfulSyncAt: payload?.lastSuccessfulSyncAt ?? null,
+        localUpdatedAt: Date.now(),
+    }, {
         ttlMs: Infinity,
         version: CACHE_VERSIONS.expenses,
     });
@@ -152,10 +210,17 @@ export async function saveExpense(scopedPeriodKey: string, expense: any): Promis
 // ------------------------------------------------------------
 export async function replaceExpense(scopedPeriodKey: string, tempIdOrId: string, canonical: any): Promise<void> {
     const key = makeExpensesKey(scopedPeriodKey);
-    const rec = await getWithMeta<any[]>(key, {
+    const rec = await getWithMeta<any[] | PersistedExpensesPayload>(key, {
         expectedVersion: CACHE_VERSIONS.expenses,
     });
-    const existing = Array.isArray(rec?.data) ? rec.data : [];
+    const payload = isPersistedCachePayload<any[], "expenses">(rec?.data, "expenses")
+        ? rec.data
+        : null;
+    const existing = Array.isArray(payload?.expenses)
+        ? payload.expenses
+        : Array.isArray(rec?.data)
+            ? rec.data
+            : [];
     // Canonical must match ExpenseSchema
     const parsed = safeSchemaParse(ExpenseSchema, canonical);
     if (!parsed.success) {
@@ -163,7 +228,11 @@ export async function replaceExpense(scopedPeriodKey: string, tempIdOrId: string
         return;
     }
     const updated = dedupeExpenses(existing.map((e) => matchesReplacementTarget(e, tempIdOrId, parsed.data) ? parsed.data : e));
-    await setWithMeta(key, updated, {
+    await setWithMeta<PersistedExpensesPayload>(key, {
+        expenses: updated,
+        lastSuccessfulSyncAt: payload?.lastSuccessfulSyncAt ?? null,
+        localUpdatedAt: Date.now(),
+    }, {
         ttlMs: Infinity,
         version: CACHE_VERSIONS.expenses,
     });
@@ -173,12 +242,23 @@ export async function replaceExpense(scopedPeriodKey: string, tempIdOrId: string
 // ------------------------------------------------------------
 export async function deleteExpense(scopedPeriodKey: string, id: string): Promise<void> {
     const key = makeExpensesKey(scopedPeriodKey);
-    const rec = await getWithMeta<any[]>(key, {
+    const rec = await getWithMeta<any[] | PersistedExpensesPayload>(key, {
         expectedVersion: CACHE_VERSIONS.expenses,
     });
-    const existing = Array.isArray(rec?.data) ? rec.data : [];
+    const payload = isPersistedCachePayload<any[], "expenses">(rec?.data, "expenses")
+        ? rec.data
+        : null;
+    const existing = Array.isArray(payload?.expenses)
+        ? payload.expenses
+        : Array.isArray(rec?.data)
+            ? rec.data
+            : [];
     const updated = existing.filter((e) => e.id !== id && e.tempId !== id);
-    await setWithMeta(key, updated, {
+    await setWithMeta<PersistedExpensesPayload>(key, {
+        expenses: updated,
+        lastSuccessfulSyncAt: payload?.lastSuccessfulSyncAt ?? null,
+        localUpdatedAt: Date.now(),
+    }, {
         ttlMs: Infinity,
         version: CACHE_VERSIONS.expenses,
     });

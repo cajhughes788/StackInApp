@@ -48,10 +48,28 @@ export async function analyzeReceiptHandler(
       return
     }
 
+    // When the client sends image bytes directly we skip the GCS round-trip.
+    const imageBytes =
+      typeof req.body?.imageBase64 === "string" && req.body.imageBase64.length > 0
+        ? Buffer.from(req.body.imageBase64, "base64")
+        : undefined
+
+    trace.mark("receipt.analysis.bytes_source", {
+      hasBytesInRequest: Boolean(imageBytes),
+      bytesLength: imageBytes?.length ?? 0,
+    })
+
     const result = await withBackendProfileStep(
       trace,
       "receipt.analysis.service_analyze",
-      () => receiptAnalysisSvc.analyzeReceipt(parsedQuery.data.workspaceId, uid, req.body, trace),
+      () =>
+        receiptAnalysisSvc.analyzeReceipt(
+          parsedQuery.data.workspaceId,
+          uid,
+          req.body,
+          trace,
+          imageBytes
+        ),
       {
         workspaceId: parsedQuery.data.workspaceId,
       }

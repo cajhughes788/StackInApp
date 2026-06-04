@@ -32,7 +32,7 @@ The transition goal became:
 
 `move from generic annual tax parameters to true payroll withholding logic, state by state`
 
-## UI / Pay Stub Work Already Completed
+## UI / Earnings Work Already Completed
 
 We fixed the pay stub page so it no longer misrepresents stored entry data.
 
@@ -56,7 +56,7 @@ That mismatch caused the row table to show zeros even when summary totals were n
 
 This was patched in:
 
-- [frontend/app/app/paystubs/page.tsx](/Users/cajetanhughes/Desktop/App/TrackdOptimized/frontend/app/app/paystubs/page.tsx)
+- [frontend/app/app/earnings/page.tsx](/Users/cajetanhughes/Desktop/App/TrackdOptimized/frontend/app/app/earnings/page.tsx)
 
 ### 2. FICA / Medicare double-counting bug fixed
 
@@ -80,7 +80,7 @@ This was fixed by:
 
 Primary file:
 
-- [frontend/app/app/paystubs/page.tsx](/Users/cajetanhughes/Desktop/App/TrackdOptimized/frontend/app/app/paystubs/page.tsx)
+- [frontend/app/app/earnings/page.tsx](/Users/cajetanhughes/Desktop/App/TrackdOptimized/frontend/app/app/earnings/page.tsx)
 
 ### 3. Pay stub wording direction
 
@@ -199,7 +199,7 @@ Files:
 
 - [frontend/components/tax/TaxForm.tsx](/Users/cajetanhughes/Desktop/App/TrackdOptimized/frontend/components/tax/TaxForm.tsx)
 - [frontend/components/income-gauge.tsx](/Users/cajetanhughes/Desktop/App/TrackdOptimized/frontend/components/income-gauge.tsx)
-- [frontend/app/app/paystubs/page.tsx](/Users/cajetanhughes/Desktop/App/TrackdOptimized/frontend/app/app/paystubs/page.tsx)
+- [frontend/app/app/earnings/page.tsx](/Users/cajetanhughes/Desktop/App/TrackdOptimized/frontend/app/app/earnings/page.tsx)
 
 ## Phase 3A: Non-Local Payroll Logic Conversion
 

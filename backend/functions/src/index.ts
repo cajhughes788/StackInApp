@@ -1,6 +1,6 @@
 ﻿import { setGlobalOptions } from "firebase-functions/v2"
 setGlobalOptions({ region: "us-central1" })
-export { 
+export {
   signup,
   stripeWebhook,
   createEntry,
@@ -29,14 +29,14 @@ export {
   getImportItems,
   updateImportItem,
   createReceiptAsset,
-  updateReceiptAsset,
   getReceiptAsset,
+  deleteReceiptAsset,
   createReceiptDraft,
   getReceiptDrafts,
   updateReceiptDraft,
+  commitReceiptDraft,
+  checkDuplicateExpense,
   analyzeReceipt,
-  finalizeReceiptAnalysis,
-  getReceiptAnalysis,
   createCheckoutSession,
   getSubscription,
   getAppBootstrap,
@@ -48,4 +48,5 @@ export {
 export { generatePayStubsDaily } from "./scheduled/generatePayStubsDaily"
 export { generateProfitLossStatementsMonthly } from "./scheduled/generateProfitLossStatementsMonthly"
 export { deleteScheduledAccounts } from "./scheduled/deleteScheduledAccounts"
+export { cleanupOrphanReceiptAssets } from "./scheduled/cleanupOrphanReceiptAssets"
 export { notifySupportReportCreated } from "./triggers/notifySupportReportCreated"

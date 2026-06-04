@@ -267,7 +267,7 @@ export default function LoginPage() {
           <CardDescription className="text-center">
             {isNativeApp
                 ? showCreateAccount
-                    ? "U.S. users can create an account in a secure browser window, then come back here to sign in."
+                    ? "Sign in with your StackIn email and password."
                     : "International users need to create their account on the StackIn website first, then return to the app to sign in."
                 : "Log in to access your account."}
           </CardDescription>
@@ -300,11 +300,9 @@ export default function LoginPage() {
               </button>
             </div>
 
-            {isNativeApp ? (
+            {isNativeApp && !showCreateAccount ? (
               <div className="rounded-xl border border-border bg-card/60 px-4 py-3 text-center text-sm text-muted-foreground">
-                {showCreateAccount
-                    ? "Create your account in the browser window, then come back here and sign in with that email and password."
-                    : "Sign in with your existing StackIn email and password. If you are outside the U.S., create your account on the StackIn website first, then return to the app to log in."}
+                Sign in with your existing StackIn email and password. If you are outside the U.S., create your account on the StackIn website first, then return to the app to log in.
               </div>
             ) : null}
 
@@ -348,11 +346,11 @@ export default function LoginPage() {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Need help signing in?</DialogTitle>
-            <DialogDescription>
-              {showCreateAccount
-                  ? "Create your account in the browser, then return to the app and sign in."
-                  : "International users need to create their account on the StackIn website first, then return here to sign in."}
-            </DialogDescription>
+            {!showCreateAccount ? (
+              <DialogDescription>
+                International users need to create their account on the StackIn website first, then return here to sign in.
+              </DialogDescription>
+            ) : null}
           </DialogHeader>
 
           <div className="space-y-3 text-sm text-muted-foreground">

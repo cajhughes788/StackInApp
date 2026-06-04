@@ -45,12 +45,7 @@ import {
   syncAllWorkspaceGeofenceReminders,
 } from "@/lib/mobile/geofenceReminderSync"
 import { debugError, debugLog } from "@/lib/debugLoop"
-import type { SubscriptionDoc } from "@shared/contracts/subscription"
-
-type AccountSubscriptionResponse = {
-  subscription?: SubscriptionDoc | null
-  isActive?: boolean
-}
+import { useAppBootstrapState } from "@/contexts/app-bootstrap-context"
 
 export default function AccountPage() {
   const router = useRouter()
@@ -58,6 +53,7 @@ export default function AccountPage() {
   const { user, logout } = useAuth()
   const { toast } = useToast()
   const { theme, setTheme } = useTheme()
+  const { authority, authorityStatus, refreshAuthority } = useAppBootstrapState()
   const workspaceState = useWorkspaceStore((s) => s.state)
   const updateWorkspace = useWorkspaceStore((s) => s.updateWorkspace)
   const removeWorkspace = useWorkspaceStore((s) => s.removeWorkspace)
@@ -77,8 +73,6 @@ export default function AccountPage() {
   const [isCancellingDeletion, setIsCancellingDeletion] = useState(false)
   const [isResetting, setIsResetting] = useState(false)
   const [mounted, setMounted] = useState(false)
-  const [subscription, setSubscription] = useState<SubscriptionDoc | null>(null)
-  const [isLoadingSubscription, setIsLoadingSubscription] = useState(true)
   const [workspaceName, setWorkspaceName] = useState("")
   const [isSavingWorkspaceName, setIsSavingWorkspaceName] = useState(false)
   const [workspaceToDeleteId, setWorkspaceToDeleteId] = useState("")
@@ -90,33 +84,8 @@ export default function AccountPage() {
   useEffect(() => {
     setMounted(true)
   }, [])
-
-  const loadSubscription = async () => {
-    try {
-      setIsLoadingSubscription(true)
-      const res = await apiFetch<AccountSubscriptionResponse>(
-        API_ENDPOINTS.subscription.get
-      )
-      setSubscription(res?.subscription ?? null)
-    } catch (err: any) {
-      toast({
-        title: isNativeApp ? "Access error" : "Subscription error",
-        description:
-          err?.message ||
-          (isNativeApp
-            ? "Unable to load account access information."
-            : "Unable to load subscription information."),
-        variant: "destructive",
-      })
-    } finally {
-      setIsLoadingSubscription(false)
-    }
-  }
-
-  useEffect(() => {
-    if (!user) return
-    void loadSubscription()
-  }, [user])
+  const subscription = authority?.subscription ?? null
+  const isLoadingSubscription = authorityStatus === "loading" || authorityStatus === "idle"
 
 const handleLogout = async () => {
   await logout()        // from auth-context
@@ -297,7 +266,11 @@ const handleLogout = async () => {
       })
       setDeletePassword("")
       setShowConfirmDelete(false)
-      await loadSubscription()
+      await refreshAuthority().catch((error) => {
+        debugError("account-page", "refresh_authority_after_delete_schedule_failed", {
+          message: error instanceof Error ? error.message : String(error),
+        })
+      })
     } catch (err: any) {
       toast({
         title: "Error",
@@ -322,7 +295,11 @@ const handleLogout = async () => {
           ? "Your account deletion request has been removed and your access will continue."
           : "Your subscription and account deletion request have been restored.",
       })
-      await loadSubscription()
+      await refreshAuthority().catch((error) => {
+        debugError("account-page", "refresh_authority_after_delete_cancel_failed", {
+          message: error instanceof Error ? error.message : String(error),
+        })
+      })
     } catch (err: any) {
       toast({
         title: "Error",

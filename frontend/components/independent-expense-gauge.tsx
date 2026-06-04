@@ -3,15 +3,16 @@
 import { useMemo } from "react"
 import { formatCurrency } from "@/lib/helpers"
 import { normalizeExpenseCategoryLabel } from "@/lib/expenseCategories"
-import { useExpensesStore } from "@/lib/stores/useExpensesStore"
-import { useSettingsStore } from "@/lib/stores/useSettingsStore"
+import {
+  useExpensesData,
+  useExpensesRenderState,
+} from "@/lib/stores/useExpensesStore"
+import {
+  useSettingsData,
+  useSettingsRenderState,
+} from "@/lib/stores/useSettingsStore"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
-
-type CategoryTotal = {
-  category: string
-  amount: number
-  count: number
-}
+import SyncStatusIndicator from "@/components/sync-status-indicator"
 
 export default function IndependentExpenseGauge() {
   const workspaceState = useWorkspaceStore((s) => s.state)
@@ -20,57 +21,48 @@ export default function IndependentExpenseGauge() {
   const activeWorkspaceId =
     workspaceState.status === "ready" ? workspaceState.activeWorkspaceId : null
 
-  const expensesEntry = useExpensesStore((s) =>
-    activeWorkspaceId ? s.byWorkspaceId[activeWorkspaceId] : undefined
-  )
-  const settingsEntry = useSettingsStore((s) =>
-    activeWorkspaceId ? s.byWorkspaceId[activeWorkspaceId] : undefined
-  )
-  const expenses = expensesEntry?.expenses ?? []
-  const settings = settingsEntry?.data ?? null
-  const expensesLoading =
-    activeWorkspaceId != null
-      ? (expensesEntry?.status ?? "idle") === "loading"
-      : true
-  const settingsLoading =
-    activeWorkspaceId != null
-      ? (settingsEntry?.status ?? "idle") === "loading"
-      : true
+  const expenses = useExpensesData(activeWorkspaceId)
+  const settings = useSettingsData(activeWorkspaceId)
+  const {
+    isHydrating: expensesHydrating,
+    isRevalidating: expensesRevalidating,
+    lastSuccessfulSyncAt: expensesLastSuccessfulSyncAt,
+  } = useExpensesRenderState(activeWorkspaceId)
+  const {
+    isHydrating: settingsHydrating,
+    isRevalidating: settingsRevalidating,
+  } = useSettingsRenderState(activeWorkspaceId)
   const hasRenderableExpenses =
-    expenses.length > 0 || (expensesEntry?.lastBackendSync ?? null) !== null
+    expenses.length > 0 || expensesLastSuccessfulSyncAt !== null
   const hasRenderableSettings = settings !== null
+  const showSyncIndicator = expensesRevalidating || settingsRevalidating
 
   const totalExpenses = useMemo(
     () => expenses.reduce((sum, expense) => sum + (expense.amount ?? 0), 0),
     [expenses]
   )
 
-  const categoryTotals = useMemo<CategoryTotal[]>(() => {
-    const map = new Map<string, CategoryTotal>()
+  const { categoryCount, topCategory } = useMemo(() => {
+    const map = new Map<string, number>()
 
     for (const expense of expenses) {
       const category = normalizeExpenseCategoryLabel(
         expense.account ?? "Uncategorized"
       )
-      const existing = map.get(category)
-
-      if (existing) {
-        existing.amount += expense.amount ?? 0
-        existing.count += 1
-        continue
-      }
-
-      map.set(category, {
-        category,
-        amount: expense.amount ?? 0,
-        count: 1,
-      })
+      map.set(category, (map.get(category) ?? 0) + (expense.amount ?? 0))
     }
 
-    return [...map.values()].sort((a, b) => b.amount - a.amount)
-  }, [expenses])
+    let topCat: string | null = null
+    let topAmt = -Infinity
+    for (const [cat, amt] of map) {
+      if (amt > topAmt) {
+        topAmt = amt
+        topCat = cat
+      }
+    }
 
-  const topCategory = categoryTotals[0] ?? null
+    return { categoryCount: map.size, topCategory: topCat }
+  }, [expenses])
   const maxAmount = 5000
   const targetExpenses =
     settings?.independent?.expenseTargetPerMonth &&
@@ -88,19 +80,15 @@ export default function IndependentExpenseGauge() {
     workspaceState.status !== "ready" ||
     !activeWorkspaceId ||
     activeWorkspace?.type !== "independent" ||
-    (expensesLoading && !hasRenderableExpenses) ||
-    (settingsLoading && !hasRenderableSettings)
+    (expensesHydrating && !hasRenderableExpenses) ||
+    (settingsHydrating && !hasRenderableSettings)
   ) {
     return <div className="p-4 text-gray-400 text-sm">Loading monthly expenses…</div>
   }
 
   return (
-    <div className="bg-card rounded-lg border p-4 shadow-sm sm:p-6">
-      {expensesLoading || settingsLoading ? (
-        <div className="mb-3 text-xs text-muted-foreground">
-          Refreshing monthly expenses…
-        </div>
-      ) : null}
+    <div className="relative bg-card rounded-lg border p-4 shadow-sm sm:p-6">
+      <SyncStatusIndicator visible={showSyncIndicator} label="Syncing expenses" />
 
       <h2 className="mb-4 text-lg font-semibold">Current Month: {monthLabel}</h2>
 
@@ -125,52 +113,23 @@ export default function IndependentExpenseGauge() {
         </div>
       </div>
 
-      <div className="mb-6 grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-4">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-4">
         <div className="rounded-lg border border-border/70 bg-secondary/40 px-3 py-3 text-center">
           <div className="text-2xl font-bold tabular-nums text-foreground">{expenses.length}</div>
           <div className="text-xs text-muted-foreground">Expenses</div>
         </div>
 
         <div className="rounded-lg border border-border/70 bg-secondary/40 px-3 py-3 text-center">
-          <div className="text-2xl font-bold tabular-nums text-foreground">{categoryTotals.length}</div>
+          <div className="text-2xl font-bold tabular-nums text-foreground">{categoryCount}</div>
           <div className="text-xs text-muted-foreground">Categories</div>
         </div>
 
         <div className="rounded-lg border border-border/70 bg-secondary/40 px-3 py-3 text-center">
           <div className="text-sm font-bold text-foreground sm:text-base">
-            {topCategory?.category ?? "None"}
+            {topCategory ?? "None"}
           </div>
           <div className="text-xs text-muted-foreground">Top Category</div>
         </div>
-      </div>
-
-      <div className="space-y-3">
-        <div className="flex items-center justify-between text-sm font-medium">
-          <span>Category Breakdown</span>
-          <span className="text-muted-foreground">Highest to lowest</span>
-        </div>
-
-        {categoryTotals.length === 0 ? (
-          <div className="text-sm text-muted-foreground">No expenses recorded this month.</div>
-        ) : (
-          categoryTotals.map((item) => (
-            <div
-              key={item.category}
-              className="flex items-center justify-between rounded-md border px-3 py-2"
-            >
-              <div>
-                <div className="font-medium text-foreground">{item.category}</div>
-                <div className="text-xs text-muted-foreground">
-                  {item.count} {item.count === 1 ? "expense" : "expenses"}
-                </div>
-              </div>
-
-              <div className="font-semibold text-foreground">
-                {formatCurrency(item.amount)}
-              </div>
-            </div>
-          ))
-        )}
       </div>
     </div>
   )

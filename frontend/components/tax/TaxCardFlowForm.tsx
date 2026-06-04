@@ -593,6 +593,7 @@ export default function TaxCardFlowForm({ onClose }: { onClose?: () => void }) {
     activeWorkspaceId ? s.byWorkspaceId[activeWorkspaceId] : undefined
   );
   const taxProfile = taxEntry?.taxProfile ?? null;
+  const taxSyncIssueMessage = taxEntry?.syncIssueMessage ?? null;
   const taxLoading =
     activeWorkspaceId != null ? (taxEntry?.status ?? "idle") === "loading" : true;
   const setTaxProfileStore = useTaxProfileStore((s) => s.setTaxProfile);
@@ -1450,6 +1451,13 @@ export default function TaxCardFlowForm({ onClose }: { onClose?: () => void }) {
         currentIndex={currentStepIndex}
         totalSteps={steps.length}
       >
+        {taxSyncIssueMessage ? (
+          <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
+            <p className="font-medium">Needs Attention</p>
+            <p className="mt-1">{taxSyncIssueMessage}</p>
+          </div>
+        ) : null}
+
         {currentStep.id === "filing_status" ? (
           <ChoiceGrid
             value={formData.filingStatus}

@@ -4,6 +4,7 @@ import { createContext, useContext, useState, useEffect, useMemo, useCallback, u
 import { getAuthSafe } from "@/lib/firebase";
 import { logout as firebaseLogout } from "@/lib/auth";
 import { clearApiCaches } from "@/lib/api";
+import { clearAllSettingsHints } from "@/lib/storage/localSettingsHint";
 import { bumpAuthSessionVersion } from "@/lib/authSession";
 import { debugError, debugLog } from "@/lib/debugLoop";
 // Zustand stores
@@ -112,6 +113,7 @@ export function AuthProvider({ children }: {
                 if (!fbUser) {
                     bumpAuthSessionVersion();
                     clearApiCaches();
+                    clearAllSettingsHints();
                     setUser(null);
                     try {
                         debugLog("auth", "logout_cleanup_start", snapshotLogoutState());

@@ -42,50 +42,26 @@ async function loadAssetBytes(
   asset: ReceiptAsset,
   trace?: BackendProfileTrace
 ): Promise<Buffer> {
-  const originalDownloadUrl = asset.originalDownloadUrl ?? asset.downloadUrl
   const originalStoragePath = asset.originalStoragePath ?? asset.storagePath
-
-  if (originalStoragePath) {
-    trace?.mark("receipt.textract.asset_fetch.begin", {
-      source: "originalStoragePath",
-      receiptAssetId: asset.id,
-      storagePath: originalStoragePath,
-    })
-    const [buffer] = await storage.bucket().file(originalStoragePath).download()
-    if (buffer.length === 0) {
-      throw new BadRequestError("Receipt asset is empty")
-    }
-    trace?.mark("receipt.textract.asset_fetch.complete", {
-      source: "originalStoragePath",
-      receiptAssetId: asset.id,
-      sizeBytes: buffer.length,
-    })
-    return buffer
+  if (!originalStoragePath) {
+    throw new BadRequestError("Receipt asset has no accessible storage location")
   }
 
-  if (originalDownloadUrl) {
-    trace?.mark("receipt.textract.asset_fetch.begin", {
-      source: "originalDownloadUrl",
-      receiptAssetId: asset.id,
-      host: new URL(originalDownloadUrl).host,
-    })
-    const response = await fetch(originalDownloadUrl)
-    if (!response.ok) {
-      throw new BadRequestError(`Unable to fetch receipt asset bytes: HTTP ${response.status}`)
-    }
-    const buffer = Buffer.from(await response.arrayBuffer())
-    if (buffer.length === 0) {
-      throw new BadRequestError("Receipt asset is empty")
-    }
-    trace?.mark("receipt.textract.asset_fetch.complete", {
-      source: "originalDownloadUrl",
-      receiptAssetId: asset.id,
-      sizeBytes: buffer.length,
-    })
-    return buffer
+  trace?.mark("receipt.textract.asset_fetch.begin", {
+    source: "originalStoragePath",
+    receiptAssetId: asset.id,
+    storagePath: originalStoragePath,
+  })
+  const [buffer] = await storage.bucket().file(originalStoragePath).download()
+  if (buffer.length === 0) {
+    throw new BadRequestError("Receipt asset is empty")
   }
-
-  throw new BadRequestError("Receipt asset has no accessible storage location")
+  trace?.mark("receipt.textract.asset_fetch.complete", {
+    source: "originalStoragePath",
+    receiptAssetId: asset.id,
+    sizeBytes: buffer.length,
+  })
+  return buffer
 }
 
 function getSecretValue(secret: { value: () => string }, name: string): string {
@@ -96,34 +72,16 @@ function getSecretValue(secret: { value: () => string }, name: string): string {
   return value
 }
 
-export async function analyzeReceiptWithTextract(
-  asset: ReceiptAsset,
-  trace?: BackendProfileTrace
+async function callTextractAnalyzeExpense(
+  bytes: Buffer,
+  region: string,
+  accessKeyId: string,
+  secretAccessKey: string
 ): Promise<TextractAnalyzeExpenseResponse> {
-  const accessKeyId = getSecretValue(AWS_TEXTRACT_ACCESS_KEY_ID, "AWS_TEXTRACT_ACCESS_KEY_ID")
-  const secretAccessKey = getSecretValue(
-    AWS_TEXTRACT_SECRET_ACCESS_KEY,
-    "AWS_TEXTRACT_SECRET_ACCESS_KEY"
-  )
-  const region = getSecretValue(AWS_TEXTRACT_REGION, "AWS_TEXTRACT_REGION")
-  trace?.mark("receipt.textract.config_loaded", {
-    receiptAssetId: asset.id,
-    region,
-    mimeType: asset.mimeType,
-    sizeBytes: asset.sizeBytes,
-  })
-
-  const bytes = await loadAssetBytes(asset, trace)
   const body = JSON.stringify({
     Document: {
       Bytes: bytes.toString("base64"),
     },
-  })
-  trace?.mark("receipt.textract.request_prepared", {
-    receiptAssetId: asset.id,
-    region,
-    sourceBytes: bytes.length,
-    requestBodyBytes: Buffer.byteLength(body),
   })
 
   const host = `textract.${region}.amazonaws.com`
@@ -189,12 +147,6 @@ export async function analyzeReceiptWithTextract(
     },
     body,
   })
-  trace?.mark("receipt.textract.response_received", {
-    receiptAssetId: asset.id,
-    region,
-    status: response.status,
-    ok: response.ok,
-  })
 
   const rawText = await response.text().catch(() => "")
   let payload: TextractErrorPayload = {}
@@ -212,26 +164,71 @@ export async function analyzeReceiptWithTextract(
       (rawText || undefined) ??
       String(response.status)
 
-    throw new BadRequestError(
-      `Textract AnalyzeExpense failed: ${detail}`,
-      {
-        status: response.status,
-        errorType: headerErrorType ?? payload.__type ?? null,
-        region,
-        receiptAssetId: asset.id,
-        mimeType: asset.mimeType,
-        sizeBytes: asset.sizeBytes,
-      }
-    )
+    throw new BadRequestError(`Textract AnalyzeExpense failed: ${detail}`, {
+      status: response.status,
+      errorType: headerErrorType ?? payload.__type ?? null,
+      region,
+    })
   }
 
-  const successPayload = payload as TextractAnalyzeExpenseResponse
+  return payload as TextractAnalyzeExpenseResponse
+}
+
+export async function analyzeReceiptWithTextract(
+  asset: ReceiptAsset,
+  trace?: BackendProfileTrace
+): Promise<TextractAnalyzeExpenseResponse> {
+  const accessKeyId = getSecretValue(AWS_TEXTRACT_ACCESS_KEY_ID, "AWS_TEXTRACT_ACCESS_KEY_ID")
+  const secretAccessKey = getSecretValue(
+    AWS_TEXTRACT_SECRET_ACCESS_KEY,
+    "AWS_TEXTRACT_SECRET_ACCESS_KEY"
+  )
+  const region = getSecretValue(AWS_TEXTRACT_REGION, "AWS_TEXTRACT_REGION")
+  trace?.mark("receipt.textract.config_loaded", {
+    receiptAssetId: asset.id,
+    region,
+    mimeType: asset.mimeType,
+    sizeBytes: asset.sizeBytes,
+  })
+
+  const bytes = await loadAssetBytes(asset, trace)
+  trace?.mark("receipt.textract.request_prepared", {
+    receiptAssetId: asset.id,
+    region,
+    sourceBytes: bytes.length,
+    requestBodyBytes: Buffer.byteLength(bytes.toString("base64")) + 50,
+  })
+
+  const result = await callTextractAnalyzeExpense(bytes, region, accessKeyId, secretAccessKey)
   trace?.mark("receipt.textract.response_parsed", {
     receiptAssetId: asset.id,
     region,
-    expenseDocumentCount: successPayload.ExpenseDocuments?.length ?? 0,
-    hasDocumentMetadata: Boolean(successPayload.DocumentMetadata),
+    expenseDocumentCount: result.ExpenseDocuments?.length ?? 0,
+    hasDocumentMetadata: Boolean(result.DocumentMetadata),
+  })
+  return result
+}
+
+export async function analyzeReceiptBytesWithTextract(
+  bytes: Buffer,
+  trace?: BackendProfileTrace
+): Promise<TextractAnalyzeExpenseResponse> {
+  const accessKeyId = getSecretValue(AWS_TEXTRACT_ACCESS_KEY_ID, "AWS_TEXTRACT_ACCESS_KEY_ID")
+  const secretAccessKey = getSecretValue(
+    AWS_TEXTRACT_SECRET_ACCESS_KEY,
+    "AWS_TEXTRACT_SECRET_ACCESS_KEY"
+  )
+  const region = getSecretValue(AWS_TEXTRACT_REGION, "AWS_TEXTRACT_REGION")
+  trace?.mark("receipt.textract.config_loaded_bytes", {
+    region,
+    sourceBytes: bytes.length,
   })
 
-  return successPayload
+  const result = await callTextractAnalyzeExpense(bytes, region, accessKeyId, secretAccessKey)
+  trace?.mark("receipt.textract.response_parsed", {
+    region,
+    expenseDocumentCount: result.ExpenseDocuments?.length ?? 0,
+    hasDocumentMetadata: Boolean(result.DocumentMetadata),
+  })
+  return result
 }

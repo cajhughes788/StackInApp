@@ -13,19 +13,22 @@ import { safeSchemaParse } from "@/lib/utils/safeSchemaParse"
 
 export type ReceiptDraftsLoadResult = {
   data: ReceiptDraft[]
-  lastBackendSync: number | null
+  lastSuccessfulSyncAt: number | null
+  localUpdatedAt: number | null
+  source: "cache" | "backend"
+  didFetch: boolean
 }
 
 const RECEIPT_DRAFTS_BACKEND_TTL_MS = 5 * 60 * 1000
 const inFlightLoads = new Map<WorkspaceId, Promise<ReceiptDraftsLoadResult>>()
-const lastBackendSyncByWorkspace = new Map<WorkspaceId, number | null>()
+const lastSuccessfulSyncAtByWorkspace = new Map<WorkspaceId, number | null>()
 
-function getLastBackendSync(workspaceId: WorkspaceId): number | null {
-  return lastBackendSyncByWorkspace.get(workspaceId) ?? null
+function getLastSuccessfulSyncAt(workspaceId: WorkspaceId): number | null {
+  return lastSuccessfulSyncAtByWorkspace.get(workspaceId) ?? null
 }
 
-function setLastBackendSync(workspaceId: WorkspaceId, timestamp: number | null): void {
-  lastBackendSyncByWorkspace.set(workspaceId, timestamp)
+function setLastSuccessfulSyncAt(workspaceId: WorkspaceId, timestamp: number | null): void {
+  lastSuccessfulSyncAtByWorkspace.set(workspaceId, timestamp)
 }
 
 export async function readCachedSnapshot(
@@ -36,13 +39,20 @@ export async function readCachedSnapshot(
     if (!cached) {
       return {
         data: [],
-        lastBackendSync: null,
+        lastSuccessfulSyncAt: null,
+        localUpdatedAt: null,
+        source: "cache",
+        didFetch: false,
       }
     }
 
     return {
       data: cached.data,
-      lastBackendSync: getLastBackendSync(workspaceId) ?? cached.cachedAt,
+      lastSuccessfulSyncAt:
+        getLastSuccessfulSyncAt(workspaceId) ?? cached.lastSuccessfulSyncAt,
+      localUpdatedAt: cached.localUpdatedAt,
+      source: "cache",
+      didFetch: false,
     }
   }, { workspaceId })
 }
@@ -50,26 +60,36 @@ export async function readCachedSnapshot(
 export function prime(
   workspaceId: WorkspaceId,
   drafts: ReceiptDraft[],
-  options: { lastBackendSync?: number | null } = {}
+  options: {
+    lastSuccessfulSyncAt?: number | null
+    localUpdatedAt?: number | null
+  } = {}
 ): ReceiptDraftsLoadResult {
-  const lastBackendSync = options.lastBackendSync ?? Date.now()
-  setLastBackendSync(workspaceId, lastBackendSync)
-  void saveReceiptDraftsCache(workspaceId, drafts)
+  const lastSuccessfulSyncAt = options.lastSuccessfulSyncAt ?? null
+  const localUpdatedAt = options.localUpdatedAt ?? Date.now()
+  setLastSuccessfulSyncAt(workspaceId, lastSuccessfulSyncAt)
+  void saveReceiptDraftsCache(workspaceId, drafts, {
+    lastSuccessfulSyncAt,
+    localUpdatedAt,
+  })
 
   return {
     data: drafts,
-    lastBackendSync,
+    lastSuccessfulSyncAt,
+    localUpdatedAt,
+    source: "cache",
+    didFetch: false,
   }
 }
 
 export function clearSyncMetadata(workspaceId?: WorkspaceId): void {
   if (!workspaceId) {
-    lastBackendSyncByWorkspace.clear()
+    lastSuccessfulSyncAtByWorkspace.clear()
     inFlightLoads.clear()
     return
   }
 
-  lastBackendSyncByWorkspace.delete(workspaceId)
+  lastSuccessfulSyncAtByWorkspace.delete(workspaceId)
   inFlightLoads.delete(workspaceId)
 }
 
@@ -81,13 +101,19 @@ async function fetchBackend(workspaceId: WorkspaceId): Promise<ReceiptDraftsLoad
       throw parsed.error
     }
 
-    await saveReceiptDraftsCache(workspaceId, parsed.data)
     const syncedAt = Date.now()
-    setLastBackendSync(workspaceId, syncedAt)
+    await saveReceiptDraftsCache(workspaceId, parsed.data, {
+      lastSuccessfulSyncAt: syncedAt,
+      localUpdatedAt: syncedAt,
+    })
+    setLastSuccessfulSyncAt(workspaceId, syncedAt)
 
     return {
       data: parsed.data,
-      lastBackendSync: syncedAt,
+      lastSuccessfulSyncAt: syncedAt,
+      localUpdatedAt: syncedAt,
+      source: "backend",
+      didFetch: true,
     }
   }, { workspaceId })
 }
@@ -107,10 +133,10 @@ export async function ensureLoaded(
 
     const cached = await readCachedSnapshot(workspaceId)
     const forceBackend = options.forceBackend === true
-    const hasCache = cached.data.length > 0 || cached.lastBackendSync !== null
+    const hasCache = cached.data.length > 0 || cached.lastSuccessfulSyncAt !== null
     const isFresh =
-      cached.lastBackendSync !== null &&
-      Date.now() - cached.lastBackendSync <= RECEIPT_DRAFTS_BACKEND_TTL_MS
+      cached.lastSuccessfulSyncAt !== null &&
+      Date.now() - cached.lastSuccessfulSyncAt <= RECEIPT_DRAFTS_BACKEND_TTL_MS
 
     if (!forceBackend && hasCache && isFresh) {
       timer.success({ source: "cache-fresh", hasCache })

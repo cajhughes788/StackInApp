@@ -1,12 +1,12 @@
 import { z } from "zod"
 
-export const ReceiptAnalysisStatusSchema = z.enum([
-  "queued",
-  "analyzing",
-  "analysis_complete_draft_pending",
-  "succeeded",
-  "failed",
-])
+export const ReceiptAnalysisStatusSchema = z
+  .enum(["succeeded", "failed", "analyzing"])
+  // Preserve whatever string is in Firestore rather than masking unknown values.
+  // "queued" and "analysis_complete_draft_pending" existed in the old architecture
+  // and may still appear in legacy documents — they parse as their actual string
+  // value instead of throwing.
+  .catch((ctx) => ctx.input as "succeeded" | "failed" | "analyzing")
 
 export const ReceiptAnalysisProviderSchema = z.enum(["aws_textract"])
 
@@ -46,6 +46,7 @@ export const ReceiptAnalysisSchema = z.object({
   lineItemsRaw: z.unknown().optional(),
   normalized: z.record(z.string(), z.unknown()).optional(),
   merchant: z.string().trim().nullable().optional(),
+  description: z.string().trim().nullable().optional(),
   receiptDate: z.string().nullable().optional(),
   subtotal: z.number().nonnegative().nullable().optional(),
   tax: z.number().nonnegative().nullable().optional(),

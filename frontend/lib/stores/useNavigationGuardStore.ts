@@ -2,8 +2,11 @@
 
 import { create } from "zustand"
 
+export type NavigationGuardMode = "block" | "background" | "none"
+
 type NavigationGuard = {
-  shouldBlock: boolean
+  mode: NavigationGuardMode
+  reason?: string
   flush: () => Promise<boolean>
 }
 

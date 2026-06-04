@@ -8,18 +8,24 @@ import { GridEditorPopoverContent } from "@/components/grid-editor-popover-conte
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { MessageCircle, MoreVertical } from "lucide-react"
-import { useExpensesStore } from "@/lib/stores/useExpensesStore"
+import {
+  useExpensesData,
+  useExpensesRenderState,
+} from "@/lib/stores/useExpensesStore"
+import { useSettingsData } from "@/lib/stores/useSettingsStore"
 import * as expensesService from "@/lib/domain/expenseService"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import {
-  EXPENSE_CATEGORY_OPTIONS,
   findExpenseCategoryGuideEntry,
+  getVisibleExpenseCategoryOptions,
   normalizeExpenseCategoryLabel,
+  resolveExpenseCategoryLabel,
 } from "@/lib/expenseCategories"
 import { formatCurrency, parseLocalDate } from "@/lib/helpers"
 import { thBase, tdBase } from "@/lib/tableStyles"
 import { cn } from "@/lib/utils"
 import ReceiptViewerTrigger from "@/components/receipt-viewer-trigger"
+import SyncStatusIndicator from "@/components/sync-status-indicator"
 
 const formatShortDate = (iso: string) =>
   parseLocalDate(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" })
@@ -43,16 +49,15 @@ export default function ExpensesGrid() {
     workspaceState.status === "ready"
       ? workspaceState.activeWorkspaceId
       : null
-  const expensesEntry = useExpensesStore((s) =>
-    activeWorkspaceId ? s.byWorkspaceId[activeWorkspaceId] : undefined
-  )
-  const expenses = expensesEntry?.expenses ?? []
-  const expensesLoading =
-    activeWorkspaceId != null
-      ? (expensesEntry?.status ?? "idle") === "loading"
-      : true
-  const hasRenderableExpenses =
-    expenses.length > 0 || (expensesEntry?.lastBackendSync ?? null) !== null
+  const activeWorkspaceType =
+    workspaceState.status === "ready" ? workspaceState.activeWorkspace.type : null
+  const expenses = useExpensesData(activeWorkspaceId)
+  const {
+    isHydrating: expensesHydrating,
+    isRevalidating: expensesRevalidating,
+    lastSuccessfulSyncAt: expensesLastSuccessfulSyncAt,
+  } = useExpensesRenderState(activeWorkspaceId)
+  const settings = useSettingsData(activeWorkspaceId)
 
   // Track which popover is open + initial value
   const [popoverState, setPopoverState] = useState<{
@@ -64,6 +69,33 @@ export default function ExpensesGrid() {
     id: string
     field: EditableExpenseField
   } | null>(null)
+
+  const customExpenseCategories =
+    settings?.independent?.customExpenseCategories ?? []
+  const expenseCategoryOptions = useMemo(
+    () =>
+      getVisibleExpenseCategoryOptions(
+        customExpenseCategories,
+        {
+          workspaceType: activeWorkspaceType,
+          independentSettings: settings?.independent ?? null,
+        },
+        {
+          includeCategories:
+            popoverState?.field === "account" && popoverState.value
+              ? [popoverState.value]
+              : [],
+        }
+      ),
+    [
+      activeWorkspaceType,
+      customExpenseCategories,
+      popoverState,
+      settings?.independent,
+    ]
+  )
+  const hasRenderableExpenses =
+    expenses.length > 0 || expensesLastSuccessfulSyncAt !== null
 
   const openEditor = useCallback((id: string, field: EditableExpenseField, value: string) => {
     setArmedCell(null)
@@ -119,12 +151,12 @@ export default function ExpensesGrid() {
     if (popoverState?.field !== "account") return []
 
     const query = popoverState.value.trim().toLowerCase()
-    if (!query) return EXPENSE_CATEGORY_OPTIONS
+    if (!query) return expenseCategoryOptions
 
-    return EXPENSE_CATEGORY_OPTIONS.filter((option) =>
+    return expenseCategoryOptions.filter((option) =>
       option.toLowerCase().includes(query)
     )
-  }, [popoverState])
+  }, [expenseCategoryOptions, popoverState])
 
   const selectedCategoryEntry = useMemo(() => {
     if (popoverState?.field !== "account") return null
@@ -149,12 +181,15 @@ export default function ExpensesGrid() {
     }
 
     if (field === "account") {
-      const normalizedAccountEntry = findExpenseCategoryGuideEntry(value)
-      if (!normalizedAccountEntry) {
-        alert("Please choose an expense category from the built-in list.")
+      const normalizedAccount = resolveExpenseCategoryLabel(
+        value,
+        customExpenseCategories
+      )
+      if (!normalizedAccount) {
+        alert("Please choose a valid expense category.")
         return
       }
-      patch.account = normalizedAccountEntry.category
+      patch.account = normalizedAccount
     }
 
     if (field === "vendor") {
@@ -188,7 +223,7 @@ export default function ExpensesGrid() {
     return sorted.reduce((acc, e) => acc + (e.amount ?? 0), 0)
   }, [sorted])
 
-  if (workspaceState.status !== "ready" || (expensesLoading && !hasRenderableExpenses)) {
+  if (workspaceState.status !== "ready" || (expensesHydrating && !hasRenderableExpenses)) {
     return <div className="p-4 text-gray-400 text-sm">Loading expenses…</div>
   }
 
@@ -196,13 +231,9 @@ export default function ExpensesGrid() {
     <div
       ref={gridRootRef}
       data-expenses-grid-root="true"
-      className="bg-card rounded-lg border shadow-sm overflow-hidden"
+      className="relative overflow-hidden rounded-lg border bg-card shadow-sm"
     >
-      {expensesLoading ? (
-        <div className="border-b border-border px-4 py-2 text-xs text-muted-foreground">
-          Refreshing expenses…
-        </div>
-      ) : null}
+      <SyncStatusIndicator visible={expensesRevalidating} label="Syncing expenses" />
 
       <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: "touch" }}>
         <table className="min-w-[26rem] w-full table-fixed border-separate border-spacing-0 border border-border divide-y divide-border sm:min-w-full">
@@ -456,8 +487,7 @@ export default function ExpensesGrid() {
                                 key={category}
                                 type="button"
                                 className="block w-full border-b border-border px-3 py-2 text-left text-sm last:border-b-0 hover:bg-accent"
-                                onMouseDown={(event) => {
-                                  event.preventDefault()
+                                onClick={() => {
                                   setPopoverState((state) =>
                                     state ? { ...state, value: category } : state
                                   )
@@ -472,7 +502,7 @@ export default function ExpensesGrid() {
                               ? `Saving as ${normalizeExpenseCategoryLabel(
                                   selectedCategoryEntry.category
                                 )}`
-                              : "Choose one of the built-in expense categories."}
+                              : "Choose one of your available expense categories."}
                           </div>
                           <Button className="w-full" onClick={handleSave}>
                             Save

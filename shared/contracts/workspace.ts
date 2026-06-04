@@ -39,6 +39,18 @@ export interface WorkspaceDoc {
 
   createdAt: number
   updatedAt: number
+
+  /**
+   * Embedded settings snapshot written on every settings save.
+   * Allows bootstrap to skip the separate settings subcollection read
+   * when the snapshot is fresh (< 10 min). Optional — absent on
+   * workspaces that have never saved settings.
+   */
+  settingsSnapshot?: {
+    data: unknown
+    version: number
+    at: number // Date.now() at write time
+  }
 }
 
 /**

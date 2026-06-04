@@ -1,7 +1,6 @@
 import { DateTime } from "luxon";
 import { db } from "../admin";
-import { aggregateIndependentPnL } from "@shared/pnlService";
-import { getCpaExpenseCategory } from "@shared/expenseCategories";
+import { findExpenseCategoryGuideEntry, getCpaExpenseCategory } from "@shared/expenseCategories";
 import { EntrySchema, type EntryType, type IncomeCategory, } from "@shared/schemas/entry";
 import { ExpenseSchema, type ExpenseType, } from "@shared/schemas/expense";
 import type { ProfitLossDetailItem } from "@shared/schemas/profitLoss";
@@ -32,6 +31,14 @@ type PeriodDescriptor = {
     periodStart: string;
     periodEnd: string;
     label: string;
+};
+type WorkspaceFinancialData = {
+    entries: EntryType[];
+    expenses: ExpenseType[];
+};
+type ProfitLossTarget = {
+    periodType: ProfitLossPeriodType;
+    periodKey: string;
 };
 function roundCurrency(value: number): number {
     return Math.round((Number(value) || 0) * 100) / 100;
@@ -104,7 +111,10 @@ function buildExpenseCategories(expenses: ExpenseType[]) {
     }>();
     for (const expense of expenses) {
         const amount = roundCurrency(Number(expense.amount) || 0);
-        const key = getCpaExpenseCategory(expense.account ?? "Uncategorized");
+        const builtInCategory = findExpenseCategoryGuideEntry(expense.account ?? "");
+        const key = builtInCategory
+            ? getCpaExpenseCategory(builtInCategory.category)
+            : (expense.account?.trim() || "Uncategorized");
         const current = expenseByCategoryMap.get(key) ?? { items: [] };
         current.items.push({
             id: expense.id,
@@ -113,6 +123,7 @@ function buildExpenseCategories(expenses: ExpenseType[]) {
             description: expense.vendor && expense.description
                 ? expense.description
                 : expense.account ?? null,
+            appCategory: expense.account ?? null,
             amount,
         });
         expenseByCategoryMap.set(key, current);
@@ -195,6 +206,20 @@ function getLastCompletedPeriodEnd(periodType: ProfitLossPeriodType, now = DateT
         return now.startOf("quarter").minus({ days: 1 }).endOf("day");
     return now.startOf("year").minus({ days: 1 }).endOf("day");
 }
+function getPeriodStart(periodType: ProfitLossPeriodType, anchor: DateTime): DateTime {
+    if (periodType === "month")
+        return anchor.startOf("month");
+    if (periodType === "quarter")
+        return anchor.startOf("quarter");
+    return anchor.startOf("year");
+}
+function advancePeriod(periodType: ProfitLossPeriodType, cursor: DateTime): DateTime {
+    if (periodType === "month")
+        return cursor.plus({ months: 1 });
+    if (periodType === "quarter")
+        return cursor.plus({ quarters: 1 });
+    return cursor.plus({ years: 1 });
+}
 function getSourceUpdatedAtEntry(entry: EntryType): string | null {
     return maxIso(toIsoOrNull(entry.updatedAtLocal), toIsoOrNull(entry.createdAtLocal));
 }
@@ -210,10 +235,7 @@ async function ensureIndependentWorkspace(workspaceId: string) {
         throw new Error("Profit & loss is only available for independent workspaces");
     }
 }
-async function loadWorkspaceFinancialData(workspaceId: string): Promise<{
-    entries: EntryType[];
-    expenses: ExpenseType[];
-}> {
+async function loadWorkspaceFinancialData(workspaceId: string): Promise<WorkspaceFinancialData> {
     const [entriesSnap, expensesSnap] = await Promise.all([
         db.collection(`workspaces/${workspaceId}/entries`).get(),
         db.collection(`workspaces/${workspaceId}/expenses`).get(),
@@ -238,7 +260,16 @@ async function loadWorkspaceFinancialData(workspaceId: string): Promise<{
         .filter((expense): expense is ExpenseType => expense !== null);
     return { entries, expenses };
 }
-function buildCompletedPeriods(periodType: ProfitLossPeriodType, entries: EntryType[], expenses: ExpenseType[], now = DateTime.now().setZone(DEFAULT_TIME_ZONE)): PeriodDescriptor[] {
+function filterEntriesForPeriod(entries: EntryType[], descriptor: PeriodDescriptor): EntryType[] {
+    return entries.filter((entry) => entry.date >= descriptor.periodStart && entry.date <= descriptor.periodEnd);
+}
+function filterExpensesForPeriod(expenses: ExpenseType[], descriptor: PeriodDescriptor): ExpenseType[] {
+    return expenses.filter((expense) => expense.date >= descriptor.periodStart && expense.date <= descriptor.periodEnd);
+}
+function buildPeriods(periodType: ProfitLossPeriodType, entries: EntryType[], expenses: ExpenseType[], opts: {
+    includeInProgress?: boolean;
+    now?: DateTime;
+} = {}): PeriodDescriptor[] {
     const sourceDates = [
         ...entries.map((entry) => normalizeDate(entry.date)),
         ...expenses.map((expense) => normalizeDate(expense.date)),
@@ -246,29 +277,30 @@ function buildCompletedPeriods(periodType: ProfitLossPeriodType, entries: EntryT
     if (sourceDates.length === 0)
         return [];
     const firstSource = sourceDates.reduce((min, current) => current.toMillis() < min.toMillis() ? current : min);
+    const lastSource = sourceDates.reduce((max, current) => current.toMillis() > max.toMillis() ? current : max);
+    const now = opts.now ?? DateTime.now().setZone(DEFAULT_TIME_ZONE);
     const lastCompletedEnd = getLastCompletedPeriodEnd(periodType, now);
-    if (firstSource.toMillis() > lastCompletedEnd.toMillis())
+    const finalPeriodStart = opts.includeInProgress
+        ? getPeriodStart(periodType, lastSource)
+        : getPeriodStart(periodType, lastCompletedEnd);
+    const firstPeriodStart = getPeriodStart(periodType, firstSource);
+    if (firstPeriodStart.toMillis() > finalPeriodStart.toMillis())
         return [];
     const periods: PeriodDescriptor[] = [];
-    let cursor = periodType === "month"
-        ? firstSource.startOf("month")
-        : periodType === "quarter"
-            ? firstSource.startOf("quarter")
-            : firstSource.startOf("year");
-    while (cursor.toMillis() <= lastCompletedEnd.toMillis()) {
+    let cursor = firstPeriodStart;
+    while (cursor.toMillis() <= finalPeriodStart.toMillis()) {
         periods.push(getPeriodDescriptor(periodType, cursor));
-        cursor =
-            periodType === "month"
-                ? cursor.plus({ months: 1 })
-                : periodType === "quarter"
-                    ? cursor.plus({ quarters: 1 })
-                    : cursor.plus({ years: 1 });
+        cursor = advancePeriod(periodType, cursor);
     }
     return periods.reverse();
 }
 function buildStatement(workspaceId: string, descriptor: PeriodDescriptor, entries: EntryType[], expenses: ExpenseType[], previousVersion = 0): ProfitLossStatement {
-    const income = aggregateIndependentPnL(entries).income;
+    // Single pass — derive top-level totals from the same computation that
+    // builds the category line items, eliminating the redundant aggregateIndependentPnL pass.
     const incomeCategories = buildIncomeCategories(entries);
+    const incomeTotals = new Map(incomeCategories.map((c) => [c.category, c.amount]));
+    const incomeTotal = roundCurrency(incomeCategories.reduce((sum, c) => sum + c.amount, 0));
+
     const byCategory = buildExpenseCategories(expenses);
     const totalExpenses = roundCurrency(byCategory.reduce((sum, item) => sum + item.amount, 0));
     let sourceUpdatedThrough: string | null = null;
@@ -288,18 +320,18 @@ function buildStatement(workspaceId: string, descriptor: PeriodDescriptor, entri
         periodEnd: descriptor.periodEnd,
         label: descriptor.label,
         income: {
-            services: roundCurrency(income.services),
-            tips: roundCurrency(income.tips),
-            products: roundCurrency(income.products),
-            other: roundCurrency(income.other),
-            total: roundCurrency(income.total),
+            services: incomeTotals.get("services") ?? 0,
+            tips: incomeTotals.get("tips") ?? 0,
+            products: incomeTotals.get("products") ?? 0,
+            other: incomeTotals.get("other") ?? 0,
+            total: incomeTotal,
             categories: incomeCategories,
         },
         expenses: {
             byCategory,
             total: totalExpenses,
         },
-        netProfit: roundCurrency(income.total - totalExpenses),
+        netProfit: roundCurrency(incomeTotal - totalExpenses),
         meta: {
             incomeEntryCount: entries.length,
             expenseCount: expenses.length,
@@ -315,6 +347,148 @@ async function upsertStatement(workspaceId: string, statement: ProfitLossStateme
     await ref.set(statement, { merge: true });
     return statement;
 }
+
+async function markStatementStale(workspaceId: string, descriptor: PeriodDescriptor): Promise<void> {
+    try {
+        const ref = db.doc(`workspaces/${workspaceId}/profitLossStatements/${descriptor.id}`);
+        await ref.set({ meta: { stale: true } }, { merge: true });
+    } catch {
+        // Best-effort — failure to mark stale is non-fatal
+    }
+}
+
+async function loadWorkspaceFinancialDataForPeriod(
+    workspaceId: string,
+    descriptor: PeriodDescriptor
+): Promise<WorkspaceFinancialData> {
+    const [entriesSnap, expensesSnap] = await Promise.all([
+        db.collection(`workspaces/${workspaceId}/entries`)
+            .where("date", ">=", descriptor.periodStart)
+            .where("date", "<=", descriptor.periodEnd)
+            .get(),
+        db.collection(`workspaces/${workspaceId}/expenses`)
+            .where("date", ">=", descriptor.periodStart)
+            .where("date", "<=", descriptor.periodEnd)
+            .get(),
+    ]);
+    const entries = entriesSnap.docs
+        .map((doc) => {
+            const parsed = EntrySchema.safeParse({ id: doc.id, ...doc.data() });
+            return parsed.success ? parsed.data : null;
+        })
+        .filter((e): e is EntryType => e !== null && e.workspace === "independent");
+    const expenses = expensesSnap.docs
+        .map((doc) => {
+            const parsed = ExpenseSchema.safeParse({ id: doc.id, ...doc.data() });
+            return parsed.success ? parsed.data : null;
+        })
+        .filter((e): e is ExpenseType => e !== null);
+    return { entries, expenses };
+}
+async function deleteStatement(workspaceId: string, descriptor: PeriodDescriptor): Promise<void> {
+    await db.doc(`workspaces/${workspaceId}/profitLossStatements/${descriptor.id}`).delete();
+}
+function getComparableStatementShape(statement: ProfitLossStatement) {
+    return {
+        workspaceId: statement.workspaceId,
+        workspaceType: statement.workspaceType,
+        periodType: statement.periodType,
+        periodKey: statement.periodKey,
+        periodStart: statement.periodStart,
+        periodEnd: statement.periodEnd,
+        label: statement.label,
+        income: statement.income,
+        expenses: statement.expenses,
+        netProfit: statement.netProfit,
+        meta: {
+            incomeEntryCount: statement.meta.incomeEntryCount,
+            expenseCount: statement.meta.expenseCount,
+            sourceUpdatedThrough: statement.meta.sourceUpdatedThrough,
+            stale: statement.meta.stale,
+        },
+    };
+}
+function statementsMatch(a: ProfitLossStatement | null, b: ProfitLossStatement): boolean {
+    if (!a)
+        return false;
+    return JSON.stringify(getComparableStatementShape(a)) ===
+        JSON.stringify(getComparableStatementShape(b));
+}
+async function loadExistingStatement(workspaceId: string, descriptor: PeriodDescriptor): Promise<ProfitLossStatement | null> {
+    const snap = await db
+        .doc(`workspaces/${workspaceId}/profitLossStatements/${descriptor.id}`)
+        .get();
+    if (!snap.exists)
+        return null;
+    const parsed = ProfitLossStatementSchema.safeParse({ id: snap.id, ...snap.data() });
+    return parsed.success ? parsed.data : null;
+}
+async function materializeStatementForDescriptor(workspaceId: string, descriptor: PeriodDescriptor, data: WorkspaceFinancialData): Promise<ProfitLossStatement | null> {
+    const entriesForPeriod = filterEntriesForPeriod(data.entries, descriptor);
+    const expensesForPeriod = filterExpensesForPeriod(data.expenses, descriptor);
+    const existing = await loadExistingStatement(workspaceId, descriptor);
+    if (entriesForPeriod.length === 0 && expensesForPeriod.length === 0) {
+        if (existing) {
+            await deleteStatement(workspaceId, descriptor);
+        }
+        return null;
+    }
+    const rebuilt = buildStatement(workspaceId, descriptor, entriesForPeriod, expensesForPeriod, existing?.meta.version ?? 0);
+    if (statementsMatch(existing, rebuilt)) {
+        return existing;
+    }
+    // Mark stale before writing so the UI knows a rebuild is in progress.
+    // On success upsertStatement writes stale: false.
+    await markStatementStale(workspaceId, descriptor);
+    return upsertStatement(workspaceId, { ...rebuilt, meta: { ...rebuilt.meta, stale: false } });
+}
+function uniqueTargets(targets: ProfitLossTarget[]): ProfitLossTarget[] {
+    const deduped = new Map<string, ProfitLossTarget>();
+    for (const target of targets) {
+        deduped.set(`${target.periodType}:${target.periodKey}`, target);
+    }
+    return [...deduped.values()];
+}
+function getTargetsForDate(date: string, periodTypes: ProfitLossPeriodType[] = ["month", "quarter", "year"]): ProfitLossTarget[] {
+    const anchor = normalizeDate(date);
+    if (!anchor.isValid)
+        return [];
+    return periodTypes.map((periodType) => {
+        const descriptor = getPeriodDescriptor(periodType, anchor);
+        return {
+            periodType,
+            periodKey: descriptor.periodKey,
+        };
+    });
+}
+async function syncProfitLossTargets(workspaceId: string, targets: ProfitLossTarget[]): Promise<void> {
+    const unique = uniqueTargets(targets);
+    if (unique.length === 0)
+        return;
+    await ensureIndependentWorkspace(workspaceId);
+    // Load data per-period rather than doing one unbounded workspace scan.
+    // Each expense mutation touches at most 3 periods (month + quarter + year)
+    // so this reads only the relevant date ranges instead of all historical data.
+    for (const target of unique) {
+        const descriptor = getDescriptorFromKey(target.periodType, target.periodKey);
+        const data = await loadWorkspaceFinancialDataForPeriod(workspaceId, descriptor);
+        await materializeStatementForDescriptor(workspaceId, descriptor, data);
+    }
+}
+async function syncRollupAncestors(workspaceId: string, descriptor: PeriodDescriptor): Promise<void> {
+    const ancestorPeriodTypes: ProfitLossPeriodType[] = descriptor.periodType === "month"
+        ? ["quarter", "year"]
+        : descriptor.periodType === "quarter"
+            ? ["year"]
+            : [];
+    if (ancestorPeriodTypes.length === 0)
+        return;
+    await syncProfitLossTargets(workspaceId, getTargetsForDate(descriptor.periodStart, ancestorPeriodTypes));
+}
+export async function syncProfitLossForFinancialDates(workspaceId: string, dates: Array<string | null | undefined>): Promise<void> {
+    const targets = dates.flatMap((date) => typeof date === "string" ? getTargetsForDate(date) : []);
+    await syncProfitLossTargets(workspaceId, targets);
+}
 export async function generateProfitLossStatement(workspaceId: string, opts: {
     periodType: ProfitLossPeriodType;
     periodKey: string;
@@ -322,51 +496,72 @@ export async function generateProfitLossStatement(workspaceId: string, opts: {
 }): Promise<ProfitLossStatement> {
     await ensureIndependentWorkspace(workspaceId);
     const descriptor = getDescriptorFromKey(opts.periodType, opts.periodKey);
-    const { entries, expenses } = await loadWorkspaceFinancialData(workspaceId);
-    const entriesForPeriod = entries.filter((entry) => entry.date >= descriptor.periodStart && entry.date <= descriptor.periodEnd);
-    const expensesForPeriod = expenses.filter((expense) => expense.date >= descriptor.periodStart && expense.date <= descriptor.periodEnd);
-    const existingSnap = await db
-        .doc(`workspaces/${workspaceId}/profitLossStatements/${descriptor.id}`)
-        .get();
-    const existingParsed = existingSnap.exists
-        ? ProfitLossStatementSchema.safeParse({ id: existingSnap.id, ...existingSnap.data() })
-        : null;
-    const existing = existingParsed?.success ? existingParsed.data : null;
-    if (!opts.force && existing) {
+    const existing = await loadExistingStatement(workspaceId, descriptor);
+    if (!opts.force && existing && existing.meta.stale === false) {
         return existing;
     }
-    const statement = buildStatement(workspaceId, descriptor, entriesForPeriod, expensesForPeriod, existing?.meta.version ?? 0);
-    return upsertStatement(workspaceId, statement);
+    // Load only the entries and expenses that fall within this specific period
+    // rather than scanning the entire workspace history.
+    const data = await loadWorkspaceFinancialDataForPeriod(workspaceId, descriptor);
+    const statement = await materializeStatementForDescriptor(workspaceId, descriptor, data);
+    if (!statement) {
+        return buildStatement(workspaceId, descriptor, [], [], existing?.meta.version ?? 0);
+    }
+    await syncRollupAncestors(workspaceId, descriptor);
+    return statement;
 }
 export async function listProfitLossStatements(workspaceId: string, periodType: ProfitLossPeriodType, opts?: {
     ensureFresh?: boolean;
 }): Promise<ProfitLossStatement[]> {
     await ensureIndependentWorkspace(workspaceId);
-    const { entries, expenses } = await loadWorkspaceFinancialData(workspaceId);
-    const periods = buildCompletedPeriods(periodType, entries, expenses);
-    if (periods.length === 0)
-        return [];
-    const statements: ProfitLossStatement[] = [];
-    for (const descriptor of periods) {
-        const entriesForPeriod = entries.filter((entry) => entry.date >= descriptor.periodStart && entry.date <= descriptor.periodEnd);
-        const expensesForPeriod = expenses.filter((expense) => expense.date >= descriptor.periodStart && expense.date <= descriptor.periodEnd);
-        const existingSnap = await db
-            .doc(`workspaces/${workspaceId}/profitLossStatements/${descriptor.id}`)
-            .get();
-        const existingParsed = existingSnap.exists
-            ? ProfitLossStatementSchema.safeParse({ id: existingSnap.id, ...existingSnap.data() })
-            : null;
-        const existing = existingParsed?.success ? existingParsed.data : null;
-        if (existing) {
-            statements.push(existing);
-            continue;
-        }
-        const rebuilt = buildStatement(workspaceId, descriptor, entriesForPeriod, expensesForPeriod, 0);
-        await upsertStatement(workspaceId, rebuilt);
-        statements.push(rebuilt);
+
+    // Read the statement collection directly instead of scanning all expenses and
+    // entries to derive the period list. syncProfitLossForFinancialDates is called
+    // on every expense and entry mutation, which guarantees a statement document
+    // exists for every period that contains data. The statement collection is
+    // therefore a reliable, low-cost period index.
+    //
+    // The collection holds at most one small document per (periodType × periodKey)
+    // combination — roughly 50 documents for a 3-year user across monthly,
+    // quarterly, and annual views. In-memory filtering by periodType is cheaper
+    // than a compound Firestore index query on a bounded set this size.
+    const snap = await db
+        .collection(`workspaces/${workspaceId}/profitLossStatements`)
+        .get();
+
+    if (snap.empty) return [];
+
+    const byPeriodType: ProfitLossStatement[] = [];
+    for (const doc of snap.docs) {
+        const parsed = ProfitLossStatementSchema.safeParse({ id: doc.id, ...doc.data() });
+        if (!parsed.success) continue;
+        if (parsed.data.periodType !== periodType) continue;
+        byPeriodType.push(parsed.data);
     }
-    const parsed = ProfitLossStatementListSchema.parse(statements);
-    return parsed.sort((a, b) => b.periodStart.localeCompare(a.periodStart));
+
+    if (byPeriodType.length === 0) return [];
+
+    // Re-materialize any statements that are marked stale (a concurrent mutation
+    // set stale: true before its own re-generation completed). All others are
+    // returned as-is — their data was written correctly by syncProfitLossForFinancialDates
+    // at mutation time and has not changed since.
+    //
+    // Stale re-materializations are independent of each other, so run them in
+    // parallel. In the common case there are zero stale statements and this is
+    // just a synchronous filter + map.
+    const settled = await Promise.all(
+        byPeriodType.map(async (statement): Promise<ProfitLossStatement | null> => {
+            if (!statement.meta.stale) return statement;
+            const descriptor = getDescriptorFromKey(periodType, statement.periodKey);
+            const data = await loadWorkspaceFinancialDataForPeriod(workspaceId, descriptor);
+            return materializeStatementForDescriptor(workspaceId, descriptor, data);
+        })
+    );
+    const results = settled.filter((s): s is ProfitLossStatement => s !== null);
+
+    return ProfitLossStatementListSchema.parse(
+        results.sort((a, b) => b.periodStart.localeCompare(a.periodStart))
+    );
 }
 export async function generateDueProfitLossStatementsForWorkspace(workspaceId: string, now = DateTime.now().setZone(DEFAULT_TIME_ZONE)) {
     await ensureIndependentWorkspace(workspaceId);

@@ -182,6 +182,38 @@ export function getCurrentCalendarMonthPeriodAt(
   return formatPeriod(today.startOf("month"), today.endOf("month").startOf("day"))
 }
 
+export function getCalendarMonthBucketAt(
+  settings: SettingsType,
+  at: DateTime | string | Date = DateTime.now().setZone(getTimeZone(settings))
+): string {
+  const tz = getTimeZone(settings)
+  const today =
+    typeof at === "string"
+      ? DateTime.fromISO(at, { zone: tz }).startOf("day")
+      : at instanceof Date
+        ? DateTime.fromJSDate(at, { zone: tz }).startOf("day")
+        : at.setZone(tz).startOf("day")
+
+  return today.toFormat("yyyy-MM")
+}
+
+export function getCalendarMonthBucketFromDate(
+  date: string | Date,
+  settings?: SettingsType
+): string {
+  if (typeof date === "string" && /^\d{4}-\d{2}/.test(date)) {
+    return date.slice(0, 7)
+  }
+
+  const tz = settings ? getTimeZone(settings) : "America/Los_Angeles"
+  const dt =
+    date instanceof Date
+      ? DateTime.fromJSDate(date, { zone: tz }).startOf("day")
+      : DateTime.fromISO(date, { zone: tz }).startOf("day")
+
+  return dt.isValid ? dt.toFormat("yyyy-MM") : String(date).slice(0, 7)
+}
+
 export function getCurrentEntryPeriod(
   settings: SettingsType,
   workspaceType: WorkspaceType,

@@ -10,8 +10,8 @@ import {
   type DecodedReceiptImage,
 } from "@/lib/receipts/imagePipeline"
 
-const TEXTRACT_UPLOAD_MAX_BYTES = 4_500_000
-const TEXTRACT_UPLOAD_MAX_DIMENSION = 1600
+const TEXTRACT_UPLOAD_MAX_BYTES = 1_500_000
+const TEXTRACT_UPLOAD_MAX_DIMENSION = 1200
 const RECEIPT_PREVIEW_MAX_BYTES = 1_500_000
 const RECEIPT_PREVIEW_MAX_DIMENSION = 1400
 const RECEIPT_THUMBNAIL_MAX_BYTES = 120_000
@@ -230,6 +230,26 @@ export async function uploadReceiptAssetToStorage(
 
     throw err
   }
+}
+
+// Mirror of the backend buildStoragePath / buildDerivedStoragePath functions.
+// Keeping the formula identical means the client can compute paths without an API call.
+export function buildClientReceiptStoragePath(
+  workspaceId: string,
+  receiptAssetId: string,
+  fileName: string
+): string {
+  const ext = fileName.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? "jpg"
+  return `workspaces/${workspaceId}/receipts/${receiptAssetId}/original.${ext}`
+}
+
+export function buildClientReceiptDerivedPath(
+  workspaceId: string,
+  receiptAssetId: string,
+  kind: "preview" | "thumb"
+): string {
+  const name = kind === "preview" ? "preview.jpg" : "thumb.jpg"
+  return `workspaces/${workspaceId}/receipts/${receiptAssetId}/${name}`
 }
 
 export async function getReceiptStorageDownloadUrl(

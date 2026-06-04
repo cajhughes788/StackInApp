@@ -1,5 +1,9 @@
 import type { ReceiptAsset } from "@shared/schemas/receiptAsset"
 import type { ReceiptCaptureSource } from "@shared/schemas/receiptAsset"
+import {
+  isVehicleTransportationCategory,
+  type VehicleExpenseMode,
+} from "@shared/vehicleExpenses"
 
 import type { ReceiptImageQualityResult } from "@/lib/receipts/imageQuality"
 
@@ -72,50 +76,29 @@ function suggestExpenseCategory(text: string): string | null {
   return null
 }
 
-async function readImage(file: File): Promise<HTMLImageElement> {
-  const url = URL.createObjectURL(file)
-  try {
-    const image = new Image()
-    image.decoding = "async"
-    image.src = url
-    await image.decode()
-    return image
-  } finally {
-    URL.revokeObjectURL(url)
-  }
-}
 
-async function compressReceiptImage(file: File): Promise<string> {
-  const image = await readImage(file)
-  const maxWidth = 1280
-  const scale = Math.min(1, maxWidth / Math.max(image.naturalWidth, 1))
-  const width = Math.max(1, Math.round(image.naturalWidth * scale))
-  const height = Math.max(1, Math.round(image.naturalHeight * scale))
-
-  const canvas = document.createElement("canvas")
-  canvas.width = width
-  canvas.height = height
-  const context = canvas.getContext("2d")
-  if (!context) {
-    throw new Error("Unable to prepare receipt preview.")
-  }
-
-  context.drawImage(image, 0, 0, width, height)
-  const dataUrl = canvas.toDataURL("image/jpeg", 0.72)
-  if (dataUrl.length > 850_000) {
-    throw new Error(
-      "Receipt image is too large to store in this MVP flow. Try a clearer crop or smaller image."
-    )
-  }
-  return dataUrl
-}
-
-export function extractReceiptDraft(ocrText: string, fileName: string) {
+export function extractReceiptDraft(
+  ocrText: string,
+  fileName: string
+): {
+  occurredAt: string | null
+  amount: number | null
+  merchant: string
+  description: string
+  suggestedExpenseAccount: string | null
+  vehicleExpenseMode?: VehicleExpenseMode
+  missingFields: string[]
+} {
   const normalizedText = ocrText.trim()
   const occurredAt = extractDate(normalizedText)
   const amount = extractTotal(normalizedText)
   const merchant = extractMerchant(normalizedText, fileName)
   const suggestedExpenseAccount = suggestExpenseCategory(normalizedText)
+  const vehicleExpenseMode = isVehicleTransportationCategory(
+    suggestedExpenseAccount ?? ""
+  )
+    ? "direct_expense"
+    : undefined
 
   return {
     occurredAt,
@@ -123,6 +106,7 @@ export function extractReceiptDraft(ocrText: string, fileName: string) {
     merchant,
     description: merchant,
     suggestedExpenseAccount,
+    vehicleExpenseMode,
     missingFields: [
       ...(occurredAt ? [] : ["date"]),
       ...(amount != null ? [] : ["amount"]),
@@ -132,15 +116,14 @@ export function extractReceiptDraft(ocrText: string, fileName: string) {
   }
 }
 
-export async function createReceiptPreviewAsset(
+export function createReceiptPreviewAsset(
   file: File,
   options?: {
     captureSource?: ReceiptCaptureSource
     quality?: ReceiptImageQualityResult
     receiptAsset?: Partial<ReceiptAsset>
   }
-): Promise<ReceiptAsset> {
-  const receiptDataUrl = await compressReceiptImage(file)
+): ReceiptAsset {
   const receiptAssetId =
     options?.receiptAsset?.id ?? `receipt:${crypto.randomUUID?.() ?? Date.now()}`
   const quality = options?.quality
@@ -160,6 +143,6 @@ export async function createReceiptPreviewAsset(
     glareScore: quality?.glareScore,
     qualityStatus: quality?.qualityStatus,
     qualityWarnings: quality?.warnings ?? [],
-    dataUrl: receiptDataUrl,
+    dataUrl: URL.createObjectURL(file),
   }
 }

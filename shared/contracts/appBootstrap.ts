@@ -1,4 +1,5 @@
 import type { WorkspaceCapabilities } from "./capabilities"
+import type { SettingsDocumentMeta } from "./settingsSync"
 import type { SubscriptionCapabilities, SubscriptionDoc } from "./subscription"
 import type { WorkspaceMembership, WorkspaceSummary } from "./workspace"
 import type { SettingsType } from "../schemas/settings"
@@ -7,6 +8,7 @@ export interface AppBootstrapSnapshot {
   workspace: WorkspaceSummary
   membershipRole: WorkspaceMembership["role"]
   settings: SettingsType | null
+  settingsMeta: SettingsDocumentMeta | null
   workspaceCapabilities: WorkspaceCapabilities
   subscription: SubscriptionDoc | null
   subscriptionCapabilities: SubscriptionCapabilities | null

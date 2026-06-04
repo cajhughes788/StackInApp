@@ -13,7 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import {
-  getReceiptOriginalUrl,
+  resolveReceiptOriginalUrl,
   resolveReceiptMediaSource,
 } from "@/lib/domain/receiptAssetsService"
 import type { ReceiptAsset } from "@shared/schemas/receiptAsset"
@@ -210,7 +210,11 @@ export default function ReceiptViewerTrigger({
       setResolvedAsset(result.asset ?? asset ?? null)
       setSrc(result.src)
       if (!result.src) {
-        const fallbackUrl = getReceiptOriginalUrl(result.asset ?? asset ?? null)
+        const fallbackUrl = await resolveReceiptOriginalUrl(
+          workspaceId,
+          receiptAssetId,
+          result.asset ?? asset ?? null
+        )
         if (fallbackUrl) {
           window.open(fallbackUrl, "_blank", "noopener,noreferrer")
           resetViewer()
@@ -220,7 +224,11 @@ export default function ReceiptViewerTrigger({
         setError("Receipt preview is unavailable.")
       }
     } catch (err) {
-      const fallbackUrl = getReceiptOriginalUrl(resolvedAsset ?? asset ?? null)
+      const fallbackUrl = await resolveReceiptOriginalUrl(
+        workspaceId,
+        receiptAssetId,
+        resolvedAsset ?? asset ?? null
+      )
       if (fallbackUrl) {
         window.open(fallbackUrl, "_blank", "noopener,noreferrer")
         resetViewer()

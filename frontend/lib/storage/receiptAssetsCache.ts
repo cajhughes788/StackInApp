@@ -4,6 +4,7 @@ import { clearKeysWithMeta, getWithMeta, setWithMeta } from "./metadata"
 import { CACHE_VERSIONS } from "./cacheVersions"
 
 export type ReceiptMediaVariant = "preview" | "thumbnail"
+export type ReceiptUrlVariant = "preview" | "thumbnail" | "original"
 
 export type CachedReceiptMediaRecord = {
   workspaceId: string
@@ -41,7 +42,7 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   })
 }
 
-export async function saveReceiptMediaFromBlob(
+async function saveReceiptMediaFromBlob(
   workspaceId: string,
   receiptAssetId: string,
   variant: ReceiptMediaVariant,
@@ -89,29 +90,6 @@ export async function saveReceiptMediaFromFile(
   )
 }
 
-export async function saveReceiptMediaFromUrl(
-  workspaceId: string,
-  receiptAssetId: string,
-  variant: ReceiptMediaVariant,
-  version: number,
-  url: string
-): Promise<CachedReceiptMediaRecord> {
-  const response = await fetch(url)
-  if (!response.ok) {
-    throw new Error(`Unable to cache receipt media: HTTP ${response.status}`)
-  }
-
-  const blob = await response.blob()
-  return saveReceiptMediaFromBlob(
-    workspaceId,
-    receiptAssetId,
-    variant,
-    version,
-    blob,
-    blob.type || "image/jpeg"
-  )
-}
-
 export async function loadReceiptMedia(
   workspaceId: string,
   receiptAssetId: string,
@@ -145,6 +123,42 @@ export async function clearReceiptMediaForAsset(
   workspaceId: string,
   receiptAssetId: string
 ): Promise<void> {
-  const prefix = `${PREFIX}:${workspaceId}:${receiptAssetId}:`
-  await clearKeysWithMeta((key) => key.startsWith(prefix))
+  const binaryPrefix = `${PREFIX}:${workspaceId}:${receiptAssetId}:`
+  const urlPrefix = `${URL_PREFIX}:${workspaceId}:${receiptAssetId}:`
+  await clearKeysWithMeta((key) => key.startsWith(binaryPrefix) || key.startsWith(urlPrefix))
+}
+
+const URL_PREFIX = "receipt-url"
+
+function makeReceiptUrlKey(
+  workspaceId: string,
+  receiptAssetId: string,
+  variant: ReceiptUrlVariant
+): string {
+  return `${URL_PREFIX}:${workspaceId}:${receiptAssetId}:${variant}`
+}
+
+export async function saveReceiptMediaUrl(
+  workspaceId: string,
+  receiptAssetId: string,
+  variant: ReceiptUrlVariant,
+  url: string
+): Promise<void> {
+  await setWithMeta(
+    makeReceiptUrlKey(workspaceId, receiptAssetId, variant),
+    { url },
+    { ttlMs: Infinity, version: CACHE_VERSIONS.receiptMedia }
+  )
+}
+
+export async function loadReceiptMediaUrl(
+  workspaceId: string,
+  receiptAssetId: string,
+  variant: ReceiptUrlVariant
+): Promise<string | null> {
+  const cached = await getWithMeta<{ url: string }>(
+    makeReceiptUrlKey(workspaceId, receiptAssetId, variant),
+    { expectedVersion: CACHE_VERSIONS.receiptMedia }
+  )
+  return cached?.data?.url ?? null
 }

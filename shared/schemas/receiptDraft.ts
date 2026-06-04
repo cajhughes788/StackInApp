@@ -7,6 +7,7 @@ import {
   ReceiptFieldConfidenceSchema,
   ReceiptLineItemSchema,
 } from "./receiptAnalysis"
+import { VEHICLE_EXPENSE_MODES } from "../vehicleExpenses"
 
 export const ReceiptDraftStatusSchema = z.enum([
   "draft",
@@ -38,6 +39,7 @@ export const ReceiptDraftInputSchema = z.object({
   parseWarnings: z.array(z.string()).default([]),
   confidence: z.number().min(0).max(1).nullable().optional(),
   suggestedExpenseAccount: z.string().trim().nullable().optional(),
+  vehicleExpenseMode: z.enum(VEHICLE_EXPENSE_MODES).optional(),
   allocationMode: ReceiptDraftAllocationModeSchema.optional(),
   completion: ReceiptDraftCompletionSchema.optional(),
   notes: z.string().trim().optional(),
@@ -77,6 +79,7 @@ export const ReceiptDraftPatchSchema = z
     parseWarnings: z.array(z.string()).optional(),
     confidence: z.number().min(0).max(1).nullable().optional(),
     suggestedExpenseAccount: z.string().trim().nullable().optional(),
+    vehicleExpenseMode: z.enum(VEHICLE_EXPENSE_MODES).optional(),
     allocationMode: ReceiptDraftAllocationModeSchema.optional(),
     completion: ReceiptDraftCompletionSchema.partial().optional(),
     notes: z.string().trim().optional(),

@@ -27,13 +27,29 @@ import {
   deleteExpenseAPI,
 } from "@/lib/api"
 import { getIsOnline } from "@/lib/network/status"
+import { toast } from "@/hooks/use-toast"
 import { createProfileTrace } from "@/lib/observability/profileTrace"
+import {
+  makeTraceId,
+  trace as diagTrace,
+  traceCacheWrite,
+  traceStoreUpdate,
+  traceQueueAdd,
+  traceApiRequest,
+  traceApiResponse,
+  traceApiFailure,
+  traceReconciliation,
+} from "@/lib/diagnostics/trace"
 import { v4 as uuid } from "uuid"
 import type { WorkspaceId } from "@shared/contracts/workspace"
 
 // Store import
 import { useExpensesStore } from "@/lib/stores/useExpensesStore"
 import { useReceiptDraftsStore } from "@/lib/stores/useReceiptDraftsStore"
+import * as profitLossService from "@/lib/domain/profitLossService"
+function invalidateProfitLossView(workspaceId: WorkspaceId) {
+  void profitLossService.invalidate(workspaceId).catch(() => {})
+}
 async function reconcileOptimisticExpenseUpdate(
   workspaceId: WorkspaceId,
   expenseId: string,
@@ -58,6 +74,7 @@ async function reconcileOptimisticExpenseUpdate(
     expenseId,
     canonical
   )
+  invalidateProfitLossView(workspaceId)
 
   return canonical
 }
@@ -69,6 +86,16 @@ export async function createExpense(
   rawInput: any
 ) {
   const parsed = rawInput
+  const diagTraceId = makeTraceId("expense_create")
+  diagTrace({
+    category: "expenses",
+    layer: "store",
+    event: "EXPENSE_CREATE",
+    phase: "initiated",
+    traceId: diagTraceId,
+    data: { workspaceId, date: parsed?.date, periodId: parsed?.periodId, hasReceipt: Boolean(parsed?.receiptAssetId) },
+    level: "normal",
+  })
   const trace = createProfileTrace("expense_create", {
     workspaceId,
     periodId: typeof parsed?.periodId === "string" ? parsed.periodId : null,
@@ -100,19 +127,19 @@ export async function createExpense(
 
   // 2. IMMEDITATELY update Zustand store
   useExpensesStore.getState().addExpense(workspaceId, optimistic)
+  traceStoreUpdate("expenses", diagTraceId, "EXPENSE_CREATE", { phase: "optimistic_update", expenseId: tempId, scopedPeriodId })
   trace.mark("expense.optimistic_added", {
     tempId,
     scopedPeriodId,
   })
-  // (You'll make addExpense in your store. Easy.)
 
   // 3. Save optimistic to IndexedDB (append style)
   await domainExpenses.saveExpense(scopedPeriodId, optimistic)
+  traceCacheWrite("expenses", diagTraceId, "optimistic_write", { expenseId: tempId, scopedPeriodId })
   trace.mark("expense.cache_saved", {
     tempId,
     scopedPeriodId,
   })
-  // (You'll make saveExpense: write single expense not list)
 
   // 4. IF OFFLINE → queue + return optimistic
   if (!getIsOnline()) {
@@ -123,6 +150,7 @@ export async function createExpense(
       method: "POST",
       body: { ...parsed, clientMutationId },
     })
+    traceQueueAdd("expenses", diagTraceId, { expenseId: tempId, method: "POST", reason: "offline" })
 
     trace.mark("expense.offline_queued", {
       tempId,
@@ -134,7 +162,9 @@ export async function createExpense(
   }
 
   try {
+    invalidateProfitLossView(workspaceId)
     // 5. ONLINE → POST to backend
+    traceApiRequest("expenses", diagTraceId, { expenseId: tempId, endpoint: `/api/workspaces/${workspaceId}/expenses`, method: "POST" })
     trace.start("expense.network_create", {
       endpoint: `/api/workspaces/${workspaceId}/expenses`,
       tempId,
@@ -157,8 +187,11 @@ export async function createExpense(
       id: res.id ?? tempId,
     }
 
+    traceApiResponse("expenses", diagTraceId, { expenseId: canonical.id, optimisticId: tempId })
+
     // 7. Replace in IndexedDB
     await domainExpenses.replaceExpense(scopedPeriodId, tempId, canonical)
+    traceCacheWrite("expenses", diagTraceId, "canonical_write", { expenseId: canonical.id, optimisticId: tempId, scopedPeriodId })
     trace.mark("expense.cache_replaced_canonical", {
       tempId,
       canonicalId: canonical.id,
@@ -167,6 +200,8 @@ export async function createExpense(
 
     // 8. Update Zustand store (replace optimistic)
     useExpensesStore.getState().replaceExpense(workspaceId, tempId, canonical)
+    traceReconciliation("expenses", diagTraceId, "optimistic_replaced_canonical", { optimisticId: tempId, canonicalId: canonical.id })
+    invalidateProfitLossView(workspaceId)
     trace.mark("expense.optimistic_reconciled", {
       tempId,
       canonicalId: canonical.id,
@@ -180,11 +215,13 @@ export async function createExpense(
 
     return canonical
   } catch (error) {
+    traceApiFailure("expenses", diagTraceId, error, { expenseId: tempId, scopedPeriodId })
     trace.error("expense.create_failed", error, {
       tempId,
       scopedPeriodId,
     })
     useExpensesStore.getState().removeExpense(workspaceId, tempId)
+    traceReconciliation("expenses", diagTraceId, "rollback_applied", { expenseId: tempId, reason: "api_failure" })
     await domainExpenses.deleteExpense(scopedPeriodId, tempId)
     trace.mark("expense.optimistic_removed", {
       tempId,
@@ -201,6 +238,8 @@ export async function updateExpense(
   expenseId: string,
   patch: any
 ) {
+  const diagTraceId = makeTraceId("expense_update")
+  diagTrace({ category: "expenses", layer: "store", event: "EXPENSE_UPDATE", phase: "initiated", traceId: diagTraceId, data: { workspaceId, expenseId }, level: "normal" })
   // 1. Get the ONE expense directly from Zustand
   const existing = useExpensesStore.getState().getExpense(
     workspaceId,
@@ -225,9 +264,11 @@ export async function updateExpense(
     expenseId,
     optimistic
   )
+  traceStoreUpdate("expenses", diagTraceId, "EXPENSE_UPDATE", { phase: "optimistic_mutation", expenseId })
 
   // 4. Update IndexedDB (single expense write)
   await domainExpenses.saveExpense(scopedPeriodId, optimistic)
+  traceCacheWrite("expenses", diagTraceId, "optimistic_write", { expenseId, scopedPeriodId })
 
   // 5. If offline → queue and return optimistic
   if (!getIsOnline()) {
@@ -238,14 +279,24 @@ export async function updateExpense(
       method: "PATCH",
       body: { ...patch },
     })
+    traceQueueAdd("expenses", diagTraceId, { expenseId, method: "PATCH", reason: "offline" })
 
     return optimistic
   }
+  invalidateProfitLossView(workspaceId)
+  traceApiRequest("expenses", diagTraceId, { expenseId, method: "PATCH", endpoint: `/api/workspaces/${workspaceId}/expenses/${expenseId}` })
 
-  void reconcileOptimisticExpenseUpdate(workspaceId, expenseId, patch).catch(
-    (error) => {
-    }
-  )
+  void reconcileOptimisticExpenseUpdate(workspaceId, expenseId, patch).catch((error) => {
+    traceReconciliation("expenses", diagTraceId, "rollback_applied", { expenseId, reason: "api_failure" })
+    // Restore the pre-edit value and notify the user.
+    useExpensesStore.getState().replaceExpense(workspaceId, expenseId, existing)
+    void domainExpenses.saveExpense(`${workspaceId}::${existing.periodId}`, existing).catch(() => {})
+    toast({
+      title: "Expense update failed",
+      description: "Your change could not be saved. The previous value has been restored.",
+      variant: "destructive",
+    })
+  })
 
   return optimistic
 }
@@ -256,6 +307,8 @@ export async function deleteExpense(
   workspaceId: WorkspaceId,
   expenseId: string
 ) {
+  const diagTraceId = makeTraceId("expense_delete")
+  diagTrace({ category: "expenses", layer: "store", event: "EXPENSE_DELETE", phase: "initiated", traceId: diagTraceId, data: { workspaceId, expenseId }, level: "normal" })
   // 1. Get the expense directly from Zustand
   const existing = useExpensesStore.getState().getExpense(
     workspaceId,
@@ -264,8 +317,6 @@ export async function deleteExpense(
   if (!existing) throw new Error("Expense not found locally")
 
   const scopedPeriodId = `${workspaceId}::${existing.periodId}`
-  const previousExpenses =
-    useExpensesStore.getState().byWorkspaceId[workspaceId]?.expenses ?? []
   const relatedReceiptDrafts = existing.receiptAssetId
     ? (
         useReceiptDraftsStore.getState().byWorkspaceId[workspaceId]?.drafts ?? []
@@ -274,6 +325,7 @@ export async function deleteExpense(
 
   // 2. Remove from Zustand immediately (instant UI)
   useExpensesStore.getState().removeExpense(workspaceId, expenseId)
+  traceStoreUpdate("expenses", diagTraceId, "EXPENSE_DELETE", { phase: "optimistic_removal", expenseId })
 
   // 3. Remove from IndexedDB immediately
   await domainExpenses.deleteExpense(scopedPeriodId, expenseId)
@@ -287,6 +339,19 @@ export async function deleteExpense(
 
   // 4. If offline — queue delete + return
   if (!getIsOnline()) {
+    // Phase 6: if the expense was never synced (still has a tempId), cancel the
+    // pending create and any pending edits instead of queueing a delete that
+    // will 404 on replay. Removing POST + PATCH ensures no stale mutation for
+    // this tempId reaches the backend, which would otherwise trigger a
+    // misleading "Expense update failed" toast from the 404 PATCH rollback.
+    if (typeof expenseId === "string" && expenseId.startsWith("tmp-")) {
+      await offlineQueue.removeMatching(
+        (m) => m.id === expenseId && (m.method === "POST" || m.method === "PATCH")
+      )
+      // Create and all edits cancel out — nothing to sync.
+      return
+    }
+
     await offlineQueue.enqueue({
       id: expenseId,
       ts: Date.now(),
@@ -300,18 +365,17 @@ export async function deleteExpense(
 
   // 5. Online — call backend delete
   try {
+    invalidateProfitLossView(workspaceId)
     const res = await deleteExpenseAPI(workspaceId, expenseId)
 
     if (!res.ok) {
       throw new Error("Delete failed: " + (res.error || "unknown error"))
     }
   } catch (error) {
-    useExpensesStore.getState().setExpenses(
-      workspaceId,
-      previousExpenses,
-      existing.periodId
-    )
-    await domainExpenses.setExpensesForPeriod(scopedPeriodId, previousExpenses)
+    // Phase 4: restore only the deleted expense — do not overwrite the full array,
+    // which would clobber any expenses added concurrently during the network call.
+    useExpensesStore.getState().addExpense(workspaceId, existing)
+    await domainExpenses.saveExpense(scopedPeriodId, existing)
 
     for (const draft of relatedReceiptDrafts) {
       useReceiptDraftsStore.getState().applyDraft(workspaceId, draft)
@@ -320,19 +384,10 @@ export async function deleteExpense(
     throw error
   }
 
-  if (typeof existing.periodId === "string" && existing.periodId.length > 0) {
-    void expenseRepository
-      .fetchBackend(workspaceId, existing.periodId)
-      .then((result) => {
-        const sanitizedExpenses = result.data.filter(
-          (expense) => expense.id !== expenseId && expense.tempId !== expenseId
-        )
-        useExpensesStore
-          .getState()
-          .setExpenses(workspaceId, sanitizedExpenses, existing.periodId)
-      })
-      .catch(() => {
-        // Keep the successful optimistic delete if background revalidation fails.
-      })
-  }
+  // The optimistic delete already removed the expense from the Zustand store
+  // (removeExpense) and from IndexedDB (domainExpenses.deleteExpense) before
+  // the network call. The backend confirmed the delete. Both layers are in the
+  // correct state — no post-delete refresh is needed. The TTL-based
+  // revalidation (EXPENSES_BACKEND_TTL_MS) handles any concurrent changes from
+  // other devices in the normal background cycle.
 }

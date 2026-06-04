@@ -284,7 +284,7 @@ export default function IndependentSettingsSection({
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <div className="flex items-center gap-2">
-                <Label>Track Business Mileage</Label>
+                <Label>Enable Vehicle Tracking</Label>
                 <Popover>
                   <PopoverTrigger asChild>
                     <button
@@ -296,29 +296,33 @@ export default function IndependentSettingsSection({
                     </button>
                   </PopoverTrigger>
                   <PopoverContent align="start" className="w-72 text-sm">
-                    Track miles for business driving like client visits, supply runs,
-                    and trips between work locations. Your normal commute from home
-                    to your regular workplace does not count. In the expense form,
-                    selecting `Vehicle & Transportation` will open the mileage helper.
+                    Turn on the Vehicle & Transportation category for this workspace.
+                    You can log mileage-based trips or ordinary vehicle expenses like
+                    gas, repairs, and parking. Regular commuting from home to your
+                    main workplace does not count as business mileage.
                   </PopoverContent>
                 </Popover>
               </div>
               <p className="text-sm text-muted-foreground">
-                Adds a mileage helper when you log Vehicle & Transportation expenses.
+                Enables both mileage tracking and direct vehicle expense tracking.
               </p>
             </div>
 
             <Switch
-              checked={local.trackBusinessMileage ?? false}
+              checked={
+                local.trackVehicleExpenses ??
+                local.trackBusinessMileage ??
+                false
+              }
               onCheckedChange={(v) =>
-                update("trackBusinessMileage", v, "immediate")
+                update("trackVehicleExpenses", v, "immediate")
               }
             />
           </div>
 
           <p className="text-xs text-muted-foreground">
-            Recommended for mobile appointments, supply runs, and trips between work locations.
-            Regular commuting from home to your main workplace does not count.
+            Recommended for mobile appointments, supply runs, trips between work locations,
+            and vehicle-related business purchases.
           </p>
         </CardContent>
       </Card>

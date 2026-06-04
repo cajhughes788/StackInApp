@@ -17,6 +17,7 @@ const webStore = localforage.createInstance({ name: "stackin-cache" });
 const sqlite = new SQLiteConnection(CapacitorSQLite);
 let db: SQLiteDBConnection | null = null;
 let dbInitPromise: Promise<SQLiteDBConnection> | null = null;
+let dbReady = false;
 let encryptionReadyPromise: Promise<void> | null = null;
 // ------------------------------------------------------------
 // Logging Helper
@@ -128,20 +129,19 @@ async function ensureDb(): Promise<SQLiteDBConnection> {
     if (!isNative) {
         throw new Error("ensureDb() should not be called on web");
     }
-    if (await isDbOpen(db))
-        return db!;
+    if (dbReady && db) return db;
     if (!dbInitPromise) {
         dbInitPromise = openConnection()
             .then((conn) => {
             db = conn;
+            dbReady = true;
             return conn;
         })
             .finally(() => {
             dbInitPromise = null;
         });
     }
-    db = await dbInitPromise;
-    return db;
+    return dbInitPromise;
 }
 // ------------------------------------------------------------
 // Compression Helpers
@@ -217,7 +217,8 @@ export async function writeRaw(key: string, value: string): Promise<void> {
         }
     }
     catch (err) {
-        ;
+        trace("writeRaw:FAILED", key, err instanceof Error ? err.message : String(err));
+        throw err;
     }
 }
 export async function removeRaw(key: string): Promise<void> {

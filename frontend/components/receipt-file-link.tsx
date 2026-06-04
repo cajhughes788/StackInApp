@@ -3,7 +3,7 @@
 import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
-import { getReceiptAsset } from "@/lib/api/receiptAssetsApi"
+import { resolveReceiptOriginalUrl } from "@/lib/domain/receiptAssetsService"
 
 type ReceiptFileLinkProps = {
   workspaceId: string
@@ -33,8 +33,7 @@ export default function ReceiptFileLink({
 
     setLoading(true)
     try {
-      const asset = await getReceiptAsset(workspaceId, receiptAssetId)
-      const nextUrl = asset.originalDownloadUrl ?? asset.downloadUrl ?? null
+      const nextUrl = await resolveReceiptOriginalUrl(workspaceId, receiptAssetId, null)
       setResolvedUrl(nextUrl)
       if (nextUrl) {
         window.open(nextUrl, "_blank", "noopener,noreferrer")

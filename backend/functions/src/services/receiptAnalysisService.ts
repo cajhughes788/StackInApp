@@ -3,9 +3,9 @@ import { z } from "zod"
 import { db } from "../admin"
 import {
   BadRequestError,
-  ForbiddenError,
   NotFoundError,
 } from "../lib/httpErrors"
+import { assertWorkspaceMembership } from "../lib/workspaceMembership"
 import type { BackendProfileTrace } from "../lib/profileTrace"
 import { withBackendProfileStep } from "../lib/profileTrace"
 import {
@@ -13,13 +13,12 @@ import {
   type ReceiptAnalysis,
 } from "@shared/schemas/receiptAnalysis"
 import {
-  ReceiptDraftSchema,
   type ReceiptDraft,
   type ReceiptDraftInput,
 } from "@shared/schemas/receiptDraft"
 
 import { normalizeTextractExpense } from "../utils/normalizeTextractExpense"
-import { analyzeReceiptWithTextract } from "./textractService"
+import { analyzeReceiptBytesWithTextract, analyzeReceiptWithTextract } from "./textractService"
 import { getReceiptAsset } from "./receiptAssetsService"
 import { upsertReceiptDraftForAsset } from "./receiptDraftsService"
 
@@ -34,17 +33,11 @@ const noopTrace: BackendProfileTrace = {
 
 const AnalyzeReceiptInputSchema = z.object({
   receiptAssetId: z.string().trim().min(1),
+  imageBase64: z.string().optional(),
+  mimeType: z.string().optional(),
+  sizeBytes: z.number().optional(),
 })
 
-async function assertWorkspaceMembership(
-  workspaceId: string,
-  uid: string
-): Promise<void> {
-  const memberSnap = await db.doc(`users/${uid}/memberships/${workspaceId}`).get()
-  if (!memberSnap.exists) {
-    throw new ForbiddenError("Forbidden")
-  }
-}
 
 function stripUndefinedDeep<T>(value: T): T {
   if (Array.isArray(value)) {
@@ -62,25 +55,27 @@ function stripUndefinedDeep<T>(value: T): T {
   return value
 }
 
-async function createQueuedAnalysis(
+// Builds the analysis record in memory and reserves a Firestore ID.
+// No write happens here — the first and only write is after Textract completes,
+// at which point status is set to "succeeded" or "failed" before saving.
+// "analyzing" is never written to Firestore.
+function buildAnalysisRecord(
   workspaceId: string,
   receiptAssetId: string
-): Promise<ReceiptAnalysis> {
+): ReceiptAnalysis {
   const nowIso = new Date().toISOString()
   const ref = db.collection(`workspaces/${workspaceId}/receiptAnalyses`).doc()
-  const analysis = ReceiptAnalysisSchema.parse({
+  return ReceiptAnalysisSchema.parse({
     id: ref.id,
     workspaceId,
     receiptAssetId,
     provider: "aws_textract",
     providerVersion: "analyze-expense-2018-06-27",
-    status: "queued",
+    status: "succeeded", // placeholder — overwritten to "succeeded" or "failed" before the first write
     lineItems: [],
     createdAt: nowIso,
     updatedAt: nowIso,
   })
-  await ref.set(stripUndefinedDeep(analysis))
-  return analysis
 }
 
 async function saveAnalysis(analysis: ReceiptAnalysis): Promise<ReceiptAnalysis> {
@@ -108,6 +103,7 @@ function buildReceiptDraftInputFromAnalysis(
   overrides: Partial<ReceiptDraftInput> = {}
 ): ReceiptDraftInput {
   const merchant = analysis.merchant?.trim() || null
+  const description = analysis.description?.trim() || null
   const amount = analysis.total ?? analysis.subtotal ?? null
   const occurredAt = analysis.receiptDate ?? null
   const missingFields = [
@@ -124,7 +120,7 @@ function buildReceiptDraftInputFromAnalysis(
     tax: analysis.tax ?? null,
     tip: analysis.tip ?? null,
     currency: analysis.currency ?? "USD",
-    description: merchant,
+    description,
     counterparty: merchant,
     parseWarnings: analysis.status === "failed" ? [analysis.error ?? "Receipt analysis failed"] : [],
     confidence: analysis.confidence ?? null,
@@ -145,28 +141,13 @@ function buildReceiptDraftInputFromAnalysis(
   }
 }
 
-function buildProvisionalReceiptDraft(
-  workspaceId: string,
-  analysis: ReceiptAnalysis
-): ReceiptDraft {
-  const nowIso = new Date().toISOString()
-  return ReceiptDraftSchema.parse({
-    id: `pending:${analysis.id}`,
-    workspaceId,
-    createdAt: nowIso,
-    updatedAt: nowIso,
-    version: 1,
-    ...buildReceiptDraftInputFromAnalysis(analysis, {
-      analysisStatus: "analysis_complete_draft_pending",
-    }),
-  })
-}
 
 export async function analyzeReceipt(
   workspaceId: string,
   uid: string,
   input: unknown,
-  trace?: BackendProfileTrace
+  trace?: BackendProfileTrace,
+  imageBytes?: Buffer
 ): Promise<{ analysis: ReceiptAnalysis; draft: ReceiptDraft }> {
   const activeTrace = trace ?? noopTrace
   await withBackendProfileStep(activeTrace, "receipt.analysis.membership_check", () =>
@@ -177,71 +158,64 @@ export async function analyzeReceipt(
   if (!parsed.success) {
     throw new BadRequestError("Invalid receipt analysis payload", parsed.error.format())
   }
+  const receiptAssetId = parsed.data.receiptAssetId
   activeTrace.mark("receipt.analysis.payload_validated", {
-    receiptAssetId: parsed.data.receiptAssetId,
+    receiptAssetId,
+    hasBytesInRequest: Boolean(imageBytes),
   })
 
-  const asset = await withBackendProfileStep(
-    activeTrace,
-    "receipt.asset.load",
-    () => getReceiptAsset(workspaceId, uid, parsed.data.receiptAssetId),
-    { receiptAssetId: parsed.data.receiptAssetId }
-  )
-  activeTrace.mark("receipt.asset.loaded", {
-    receiptAssetId: asset.id,
-    mimeType: asset.mimeType,
-    sizeBytes: asset.sizeBytes,
-    version: asset.version,
-    hasOriginalDownloadUrl: Boolean(asset.originalDownloadUrl ?? asset.downloadUrl),
-    hasOriginalStoragePath: Boolean(asset.originalStoragePath ?? asset.storagePath),
-    hasPreviewDownloadUrl: Boolean(asset.previewDownloadUrl),
-    hasThumbnailDownloadUrl: Boolean(asset.thumbnailDownloadUrl),
-    qualityStatus: asset.qualityStatus ?? null,
-  })
+  // Only fetch the asset from Firestore when we don't have bytes in the request.
+  // When bytes are provided directly the GCS round-trip is skipped entirely.
+  let assetForFallback: Awaited<ReturnType<typeof getReceiptAsset>> | null = null
+  if (!imageBytes) {
+    assetForFallback = await withBackendProfileStep(
+      activeTrace,
+      "receipt.asset.load",
+      () => getReceiptAsset(workspaceId, uid, receiptAssetId),
+      { receiptAssetId }
+    )
+    activeTrace.mark("receipt.asset.loaded", {
+      receiptAssetId: assetForFallback.id,
+      mimeType: assetForFallback.mimeType,
+      sizeBytes: assetForFallback.sizeBytes,
+      hasOriginalStoragePath: Boolean(
+        assetForFallback.originalStoragePath ?? assetForFallback.storagePath
+      ),
+    })
+  }
 
-  let analysis = await withBackendProfileStep(
-    activeTrace,
-    "receipt.analysis.create",
-    () => createQueuedAnalysis(workspaceId, asset.id),
-    { receiptAssetId: asset.id }
-  )
-  activeTrace.mark("receipt.analysis.record_created", {
+  // Reserve a Firestore ID but write nothing yet — first write is after Textract.
+  let analysis = buildAnalysisRecord(workspaceId, receiptAssetId)
+  activeTrace.mark("receipt.analysis.record_initialized", {
     analysisId: analysis.id,
-    receiptAssetId: asset.id,
-    status: analysis.status,
+    receiptAssetId,
   })
 
   try {
-    analysis = await saveAnalysis({
-      ...analysis,
-      status: "analyzing",
-      updatedAt: new Date().toISOString(),
-    })
-
-    const raw = await withBackendProfileStep(
-      activeTrace,
-      "receipt.textract.request",
-      () => analyzeReceiptWithTextract(asset, activeTrace),
-      {
-        receiptAssetId: asset.id,
-        analysisId: analysis.id,
-        provider: "aws_textract",
-      }
-    )
+    const raw = imageBytes
+      ? await withBackendProfileStep(
+          activeTrace,
+          "receipt.textract.request",
+          () => analyzeReceiptBytesWithTextract(imageBytes, activeTrace),
+          { receiptAssetId, analysisId: analysis.id, provider: "aws_textract", source: "request_bytes" }
+        )
+      : await withBackendProfileStep(
+          activeTrace,
+          "receipt.textract.request",
+          () => analyzeReceiptWithTextract(assetForFallback!, activeTrace),
+          { receiptAssetId, analysisId: analysis.id, provider: "aws_textract", source: "gcs_fetch" }
+        )
 
     const normalized = await withBackendProfileStep(
       activeTrace,
       "receipt.analysis.normalize",
       async () => normalizeTextractExpense(raw),
-      {
-        analysisId: analysis.id,
-      }
+      { analysisId: analysis.id }
     )
     activeTrace.mark("receipt.analysis.normalized", {
       analysisId: analysis.id,
       merchant: normalized.merchant ?? null,
       total: normalized.total ?? null,
-      currency: normalized.currency ?? null,
       lineItemCount: normalized.lineItems.length,
       hasReceiptDate: Boolean(normalized.receiptDate),
     })
@@ -253,11 +227,12 @@ export async function analyzeReceipt(
         saveAnalysis(
           ReceiptAnalysisSchema.parse({
             ...analysis,
-            status: "analysis_complete_draft_pending",
+            status: "succeeded",
             summaryFieldsRaw: normalized.summaryFieldsRaw,
             lineItemsRaw: normalized.lineItemsRaw,
             normalized: normalized.normalized,
             merchant: normalized.merchant,
+            description: normalized.description,
             receiptDate: normalized.receiptDate,
             subtotal: normalized.subtotal,
             tax: normalized.tax,
@@ -270,9 +245,7 @@ export async function analyzeReceipt(
             updatedAt: new Date().toISOString(),
           })
         ),
-      {
-        analysisId: analysis.id,
-      }
+      { analysisId: analysis.id }
     )
   } catch (error) {
     analysis = await saveAnalysis({
@@ -284,99 +257,21 @@ export async function analyzeReceipt(
     throw error
   }
 
-  const draft = buildProvisionalReceiptDraft(workspaceId, analysis)
-  activeTrace.mark("receipt.draft.provisional_ready", {
+  // Write the draft to Firestore immediately — the response is a real persisted draft.
+  const draft = await withBackendProfileStep(
+    activeTrace,
+    "receipt.draft.upsert",
+    () => upsertReceiptDraftFromAnalysis(workspaceId, uid, receiptAssetId, analysis),
+    { analysisId: analysis.id, receiptAssetId }
+  )
+  activeTrace.mark("receipt.draft.persisted", {
     receiptDraftId: draft.id,
     receiptAssetId: draft.receiptAssetId,
     receiptAnalysisId: draft.receiptAnalysisId ?? null,
     status: draft.status,
     analysisStatus: draft.analysisStatus ?? null,
     lineItemCount: draft.lineItems?.length ?? 0,
-    committedExpenseId: draft.committedExpenseId ?? null,
   })
 
-  return {
-    analysis,
-    draft,
-  }
-}
-
-export async function finalizeReceiptDraftForAnalysis(
-  workspaceId: string,
-  uid: string,
-  query: unknown
-): Promise<{ analysis: ReceiptAnalysis; draft: ReceiptDraft }> {
-  const analysis = await getReceiptAnalysis(workspaceId, uid, query)
-  const finalizedAnalysis =
-    analysis.status === "analysis_complete_draft_pending"
-      ? await saveAnalysis({
-          ...analysis,
-          status: "succeeded",
-          updatedAt: new Date().toISOString(),
-        })
-      : analysis
-
-  const draft = await upsertReceiptDraftFromAnalysis(
-    workspaceId,
-    uid,
-    finalizedAnalysis.receiptAssetId,
-    finalizedAnalysis
-  )
-
-  return {
-    analysis: finalizedAnalysis,
-    draft,
-  }
-}
-
-export async function getReceiptAnalysis(
-  workspaceId: string,
-  uid: string,
-  query: unknown
-): Promise<ReceiptAnalysis> {
-  await assertWorkspaceMembership(workspaceId, uid)
-
-  const QuerySchema = z
-    .object({
-      analysisId: z.string().trim().min(1).optional(),
-      receiptAssetId: z.string().trim().min(1).optional(),
-    })
-    .refine((value) => Boolean(value.analysisId || value.receiptAssetId), {
-      message: "analysisId or receiptAssetId is required",
-    })
-
-  const parsed = QuerySchema.safeParse(query)
-  if (!parsed.success) {
-    throw new BadRequestError("Invalid receipt analysis query", parsed.error.format())
-  }
-
-  if (parsed.data.analysisId) {
-    const snap = await db
-      .doc(`workspaces/${workspaceId}/receiptAnalyses/${parsed.data.analysisId}`)
-      .get()
-    if (!snap.exists) {
-      throw new NotFoundError("Receipt analysis not found")
-    }
-    return ReceiptAnalysisSchema.parse({
-      id: snap.id,
-      ...snap.data(),
-    })
-  }
-
-  const snap = await db
-    .collection(`workspaces/${workspaceId}/receiptAnalyses`)
-    .where("receiptAssetId", "==", parsed.data.receiptAssetId)
-    .orderBy("createdAt", "desc")
-    .limit(1)
-    .get()
-
-  if (snap.empty) {
-    throw new NotFoundError("Receipt analysis not found")
-  }
-
-  const doc = snap.docs[0]
-  return ReceiptAnalysisSchema.parse({
-    id: doc.id,
-    ...doc.data(),
-  })
+  return { analysis, draft }
 }

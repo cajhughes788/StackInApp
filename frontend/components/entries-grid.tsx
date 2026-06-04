@@ -11,13 +11,21 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { thBase, tdBase } from "@/lib/tableStyles";
 import { cn } from "@/lib/utils";
-import { useEntriesStore } from "@/lib/stores/useEntriesStore";
-import { useSettingsStore } from "@/lib/stores/useSettingsStore";
+import {
+    useEntriesData,
+    useEntriesRenderState,
+} from "@/lib/stores/useEntriesStore";
+import {
+    useSettingsData,
+    useSettingsRenderState,
+} from "@/lib/stores/useSettingsStore";
 import * as entriesService from "@/lib/domain/entriesService";
 import { computeIncomeGaugeForEntry } from "@shared/computeIncomeGauge";
 import { debugRender } from "@/lib/debugLoop";
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore";
 import { aggregateIncomeBreakdowns, getIncomeBreakdownTotalForPaymentMethod, getIncomeBreakdownTotalForPaymentMethodAndCategory, getIndependentCashSalesTotal, } from "@shared/independentIncome";
+import SyncStatusIndicator from "@/components/sync-status-indicator";
+import { toast } from "@/hooks/use-toast";
 // Short date formatter
 const formatShortDate = (iso: string) => parseLocalDate(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 const paymentFieldConfig = {
@@ -100,25 +108,26 @@ export default function EntriesGrid() {
     const activeWorkspaceId = workspaceState.status === "ready"
         ? workspaceState.activeWorkspaceId
         : null;
-    const entriesEntry = useEntriesStore((s) => activeWorkspaceId ? s.byWorkspaceId?.[activeWorkspaceId] : undefined);
-    const settingsEntry = useSettingsStore((s) => activeWorkspaceId ? s.byWorkspaceId[activeWorkspaceId] : undefined);
-    const entries = entriesEntry?.entries ?? [];
-    const entriesLoading = activeWorkspaceId != null
-        ? (entriesEntry?.status ?? "idle") === "loading"
-        : true;
-    const entriesRefreshing = entriesEntry?.isRefreshing ?? false;
-    const settings = settingsEntry?.data ?? null;
-    const settingsLoading = activeWorkspaceId != null
-        ? (settingsEntry?.status ?? "idle") === "loading"
-        : true;
+    const entries = useEntriesData(activeWorkspaceId);
+    const {
+        status: entriesStatus,
+        isHydrating: entriesHydrating,
+        isRevalidating: entriesRevalidating,
+        lastSuccessfulSyncAt: entriesLastSuccessfulSyncAt,
+    } = useEntriesRenderState(activeWorkspaceId);
+    const settings = useSettingsData(activeWorkspaceId);
+    const {
+        status: settingsStatus,
+        isHydrating: settingsHydrating,
+    } = useSettingsRenderState(activeWorkspaceId);
     const isWorkspaceReady = workspaceState.status === "ready" && !!activeWorkspaceId && !!activeWorkspace;
-    const hasRenderableEntries = entries.length > 0 || (entriesEntry?.lastBackendSync ?? null) !== null;
+    const hasRenderableEntries = entries.length > 0 || entriesLastSuccessfulSyncAt !== null;
     const hasRenderableSettings = settings !== null;
     debugRender("entries-grid", {
         workspaceId: activeWorkspaceId,
         workspaceType: activeWorkspace?.type ?? null,
-        entriesStatus: entriesEntry?.status ?? "idle",
-        settingsStatus: settingsEntry?.status ?? "idle",
+        entriesStatus,
+        settingsStatus,
         entriesCount: entries.length,
         hasSettings: settings !== null,
     });
@@ -301,12 +310,23 @@ export default function EntriesGrid() {
             return;
         if (!activeWorkspaceId)
             return;
-        await entriesService.removeEntry(activeWorkspaceId, entryId);
+        try {
+            await entriesService.removeEntry(activeWorkspaceId, entryId);
+        } catch (error) {
+            const isAuthError = error instanceof Error && error.message.includes("401");
+            toast({
+                title: "Entry not deleted",
+                description: isAuthError
+                    ? "Your session expired. Please sign in again."
+                    : "We could not delete this entry. Please try again.",
+                variant: "destructive",
+            });
+        }
     }, [activeWorkspaceId]);
     if (!isWorkspaceReady) {
         return <div className="p-4 text-gray-400 text-sm">Loading workspace…</div>;
     }
-    if ((entriesLoading && !hasRenderableEntries) || (settingsLoading && !hasRenderableSettings)) {
+    if ((entriesHydrating && !hasRenderableEntries) || (settingsHydrating && !hasRenderableSettings)) {
         return <div className="p-4 text-gray-400 text-sm">Loading your entries…</div>;
     }
     if (!settings) {
@@ -324,23 +344,34 @@ export default function EntriesGrid() {
         const cellId = entry.id ?? `${entry.date ?? "entry"}-${field}`;
         const isOpen = openEditorCell?.id === cellId && openEditorCell.field === field;
         const isArmed = armedCell?.id === cellId && armedCell.field === field;
+        // Always track the latest entry so save closures never use stale data.
+        const entryRef = useRef(entry);
+        useEffect(() => { entryRef.current = entry; }, [entry]);
         // ------------------------------------------------------------
         // Resolve nested fields like "w2.tips" or "independent.venmo"
         // ------------------------------------------------------------
         const resolvedValue: any = field.includes(".")
             ? field.split(".").reduce((acc: any, key) => (acc == null ? undefined : acc[key]), entry)
             : (entry as any)[field];
-        // Initial value for editing
         const initial = typeof resolvedValue === "number"
             ? resolvedValue.toFixed(decimals)
             : "";
         const [val, setVal] = useState(initial);
         const [saving, setSaving] = useState(false);
+        // Reset input when the entry changes while the editor is closed.
+        useEffect(() => {
+            if (isOpen) return;
+            const live: any = field.includes(".")
+                ? field.split(".").reduce((acc: any, k) => (acc == null ? undefined : acc[k]), entryRef.current)
+                : (entryRef.current as any)[field];
+            setVal(typeof live === "number" ? live.toFixed(decimals) : "");
+        }, [entry]);
         // ------------------------------------------------------------
-        // Save handler (supports nested and flat fields)
+        // Save handler — sends only the changed field; updateEntry merges
+        // the patch against live store state internally (HR-2).
         // ------------------------------------------------------------
         const save = async () => {
-            if (!entry.id)
+            if (!entryRef.current.id)
                 return;
             const schema = FieldSchemas[field as keyof typeof FieldSchemas];
             const parsed = schema.safeParse(val);
@@ -350,26 +381,25 @@ export default function EntriesGrid() {
             }
             setSaving(true);
             try {
-                // Nested update: e.g. w2.tips or independent.venmo
                 if (field.includes(".")) {
                     const [root, key] = field.split(".");
-                    await entriesService.updateEntry(activeWorkspaceId, entry.id, {
-                        [root]: {
-                            ...(entry as any)[root],
-                            [key]: parsed.data,
-                        },
+                    await entriesService.updateEntry(activeWorkspaceId, entryRef.current.id, {
+                        [root]: { [key]: parsed.data },
                     });
-                }
-                else {
-                    // Flat update
-                    await entriesService.updateEntry(activeWorkspaceId, entry.id, {
+                } else {
+                    await entriesService.updateEntry(activeWorkspaceId, entryRef.current.id, {
                         [field]: parsed.data,
                     });
                 }
                 setOpenEditorCell(null);
                 setArmedCell(null);
-            }
-            finally {
+            } catch (err) {
+                toast({
+                    title: "Save failed",
+                    description: "We could not save this change. Please try again.",
+                    variant: "destructive",
+                });
+            } finally {
                 setSaving(false);
             }
         };
@@ -414,6 +444,9 @@ export default function EntriesGrid() {
         const isOpen = openEditorCell?.id === cellId && openEditorCell.field === cellField;
         const isArmed = armedCell?.id === cellId && armedCell.field === cellField;
         const config = paymentFieldConfig[field];
+        // Always track the latest entry so the save closure reads live breakdowns.
+        const entryRef = useRef(entry);
+        useEffect(() => { entryRef.current = entry; }, [entry]);
         const independent = entry.independent;
         const existingBreakdowns = independent?.incomeBreakdowns ?? [];
         const matching = existingBreakdowns.filter((item) => {
@@ -440,12 +473,33 @@ export default function EntriesGrid() {
             ? aggregated.other.toFixed(2)
             : "");
         const [saving, setSaving] = useState(false);
+        // Reset inputs when entry changes while editor is closed.
+        useEffect(() => {
+            if (isOpen) return;
+            const liveIndependent = entryRef.current.independent;
+            const liveBreakdowns = liveIndependent?.incomeBreakdowns ?? [];
+            const liveMatching = liveBreakdowns.filter((item) => {
+                if (item.paymentMethod !== config.paymentMethod) return false;
+                if (field === "cashSales") {
+                    return Number(item.services ?? 0) > 0 ||
+                        Number(item.products ?? 0) > 0 ||
+                        Number(item.other ?? 0) > 0;
+                }
+                return true;
+            });
+            const liveAgg = aggregateIncomeBreakdowns(liveMatching);
+            setServices(liveAgg.services > 0 ? liveAgg.services.toFixed(2) : "");
+            setTips(liveAgg.tips > 0 ? liveAgg.tips.toFixed(2) : "");
+            setProducts(liveAgg.products > 0 ? liveAgg.products.toFixed(2) : "");
+            setOther(liveAgg.other > 0 ? liveAgg.other.toFixed(2) : "");
+        }, [entry]);
         const total = Number(services || 0) +
             Number(tips || 0) +
             Number(products || 0) +
             Number(other || 0);
         const save = async () => {
-            if (!entry.id || !independent)
+            const latestEntry = entryRef.current;
+            if (!latestEntry.id || !latestEntry.independent)
                 return;
             const breakdownCandidate = {
                 paymentMethod: config.paymentMethod,
@@ -471,7 +525,9 @@ export default function EntriesGrid() {
             }
             setSaving(true);
             try {
-                const nextBreakdowns = existingBreakdowns.filter((item) => {
+                // Use live entry breakdowns to avoid overwriting concurrent edits.
+                const liveBreakdowns = latestEntry.independent.incomeBreakdowns ?? [];
+                const nextBreakdowns = liveBreakdowns.filter((item) => {
                     if (item.paymentMethod !== config.paymentMethod)
                         return true;
                     if (field === "cashSales") {
@@ -485,16 +541,18 @@ export default function EntriesGrid() {
                 if (parsed.data) {
                     nextBreakdowns.push(parsed.data);
                 }
-                await entriesService.updateEntry(activeWorkspaceId, entry.id, {
-                    independent: {
-                        ...independent,
-                        incomeBreakdowns: nextBreakdowns,
-                    },
+                await entriesService.updateEntry(activeWorkspaceId, latestEntry.id, {
+                    independent: { incomeBreakdowns: nextBreakdowns },
                 });
                 setOpenEditorCell(null);
                 setArmedCell(null);
-            }
-            finally {
+            } catch (err) {
+                toast({
+                    title: "Save failed",
+                    description: "We could not save this change. Please try again.",
+                    variant: "destructive",
+                });
+            } finally {
                 setSaving(false);
             }
         };
@@ -549,13 +607,23 @@ export default function EntriesGrid() {
         const cellId = entry.id ?? `${entry.date ?? "entry"}-${cellField}`;
         const isOpen = openEditorCell?.id === cellId && openEditorCell.field === cellField;
         const isArmed = armedCell?.id === cellId && armedCell.field === cellField;
+        const entryRef = useRef(entry);
+        useEffect(() => { entryRef.current = entry; }, [entry]);
         const independent = entry.independent;
-        const existingBreakdowns = independent?.incomeBreakdowns ?? [];
         const currentValue = getIncomeBreakdownTotalForPaymentMethodAndCategory(independent, paymentMethod, "tips");
         const [value, setValue] = useState(currentValue > 0 ? currentValue.toFixed(2) : "");
         const [saving, setSaving] = useState(false);
+        // Reset when entry changes while editor is closed.
+        useEffect(() => {
+            if (isOpen) return;
+            const liveValue = getIncomeBreakdownTotalForPaymentMethodAndCategory(
+                entryRef.current.independent, paymentMethod, "tips"
+            );
+            setValue(liveValue > 0 ? liveValue.toFixed(2) : "");
+        }, [entry]);
         const save = async () => {
-            if (!entry.id || !independent)
+            const latestEntry = entryRef.current;
+            if (!latestEntry.id || !latestEntry.independent)
                 return;
             const numericValue = Number(value || 0);
             if (Number.isNaN(numericValue) || numericValue < 0) {
@@ -564,23 +632,26 @@ export default function EntriesGrid() {
             }
             setSaving(true);
             try {
-                const nextBreakdowns = existingBreakdowns.filter((item) => !(item.paymentMethod === paymentMethod && Number(item.tips ?? 0) > 0));
+                // Use live breakdowns to preserve concurrent edits.
+                const liveBreakdowns = latestEntry.independent.incomeBreakdowns ?? [];
+                const nextBreakdowns = liveBreakdowns.filter(
+                    (item) => !(item.paymentMethod === paymentMethod && Number(item.tips ?? 0) > 0)
+                );
                 if (numericValue > 0) {
-                    nextBreakdowns.push({
-                        paymentMethod,
-                        tips: numericValue,
-                    });
+                    nextBreakdowns.push({ paymentMethod, tips: numericValue });
                 }
-                await entriesService.updateEntry(activeWorkspaceId, entry.id, {
-                    independent: {
-                        ...independent,
-                        incomeBreakdowns: nextBreakdowns,
-                    },
+                await entriesService.updateEntry(activeWorkspaceId, latestEntry.id, {
+                    independent: { incomeBreakdowns: nextBreakdowns },
                 });
                 setOpenEditorCell(null);
                 setArmedCell(null);
-            }
-            finally {
+            } catch (err) {
+                toast({
+                    title: "Save failed",
+                    description: "We could not save this change. Please try again.",
+                    variant: "destructive",
+                });
+            } finally {
                 setSaving(false);
             }
         };
@@ -616,6 +687,8 @@ export default function EntriesGrid() {
         const cellId = entry.id ?? `${entry.date ?? "entry"}-${cellField}`;
         const isOpen = openEditorCell?.id === cellId && openEditorCell.field === cellField;
         const isArmed = armedCell?.id === cellId && armedCell.field === cellField;
+        const entryRef = useRef(entry);
+        useEffect(() => { entryRef.current = entry; }, [entry]);
         // ----- W2 STATE -----
         const [hoursW2, setHoursW2] = useState(entry.totals?.paidHours != null ? entry.totals.paidHours.toFixed(2) : "");
         const [inVal, setInVal] = useState(entry.w2?.inTime ?? "");
@@ -625,12 +698,21 @@ export default function EntriesGrid() {
             ? entry.independent.hours.toFixed(2)
             : "");
         const [saving, setSaving] = useState(false);
+        // Reset inputs when entry changes while editor is closed.
+        useEffect(() => {
+            if (isOpen) return;
+            const e = entryRef.current;
+            setHoursW2(e.totals?.paidHours != null ? e.totals.paidHours.toFixed(2) : "");
+            setInVal(e.w2?.inTime ?? "");
+            setOutVal(e.w2?.outTime ?? "");
+            setHoursInd(e.independent?.hours != null ? e.independent.hours.toFixed(2) : "");
+        }, [entry]);
         /* ============================================================
          *  W2 — SAVE MANUAL HOURS
          * ============================================================ */
         const saveManualW2 = async () => {
-            if (!entry.id)
-                return;
+            const id = entryRef.current.id;
+            if (!id) return;
             const parsed = Number(hoursW2);
             const result = FieldSchemas["w2.hours"].safeParse(parsed);
             if (!result.success) {
@@ -639,15 +721,18 @@ export default function EntriesGrid() {
             }
             setSaving(true);
             try {
-                await entriesService.updateEntry(activeWorkspaceId, entry.id, {
-                    w2: { hours: result.data }
+                await entriesService.updateEntry(activeWorkspaceId, id, {
+                    w2: { hours: result.data },
                 });
                 setOpenEditorCell(null);
                 setArmedCell(null);
-            }
-            catch (err) {
-            }
-            finally {
+            } catch (err) {
+                toast({
+                    title: "Save failed",
+                    description: "We could not save hours. Please try again.",
+                    variant: "destructive",
+                });
+            } finally {
                 setSaving(false);
             }
         };
@@ -655,22 +740,22 @@ export default function EntriesGrid() {
          *  W2 — SAVE IN/OUT TIMES
          * ============================================================ */
         const saveTimesW2 = async () => {
-            if (!entry.id)
-                return;
+            const id = entryRef.current.id;
+            if (!id) return;
             setSaving(true);
             try {
-                await entriesService.updateEntry(activeWorkspaceId, entry.id, {
-                    w2: {
-                        inTime: inVal,
-                        outTime: outVal
-                    }
+                await entriesService.updateEntry(activeWorkspaceId, id, {
+                    w2: { inTime: inVal, outTime: outVal },
                 });
                 setOpenEditorCell(null);
                 setArmedCell(null);
-            }
-            catch (err) {
-            }
-            finally {
+            } catch (err) {
+                toast({
+                    title: "Save failed",
+                    description: "We could not save times. Please try again.",
+                    variant: "destructive",
+                });
+            } finally {
                 setSaving(false);
             }
         };
@@ -678,8 +763,8 @@ export default function EntriesGrid() {
          *  INDEPENDENT — SAVE MANUAL HOURS
          * ============================================================ */
         const saveManualInd = async () => {
-            if (!entry.id)
-                return;
+            const id = entryRef.current.id;
+            if (!id) return;
             const parsed = Number(hoursInd);
             const result = FieldSchemas["independent.hours"].safeParse(parsed);
             if (!result.success) {
@@ -688,15 +773,18 @@ export default function EntriesGrid() {
             }
             setSaving(true);
             try {
-                await entriesService.updateEntry(activeWorkspaceId, entry.id, {
-                    independent: { hours: result.data }
+                await entriesService.updateEntry(activeWorkspaceId, id, {
+                    independent: { hours: result.data },
                 });
                 setOpenEditorCell(null);
                 setArmedCell(null);
-            }
-            catch (err) {
-            }
-            finally {
+            } catch (err) {
+                toast({
+                    title: "Save failed",
+                    description: "We could not save hours. Please try again.",
+                    variant: "destructive",
+                });
+            } finally {
                 setSaving(false);
             }
         };
@@ -816,10 +904,8 @@ export default function EntriesGrid() {
         </Button>
       </PopoverContent>
     </Popover>);
-    return (<div ref={gridRootRef} data-entries-grid-root="true" className="overflow-hidden rounded-lg border bg-card shadow-sm">
-      {entriesRefreshing ? (<div className="border-b border-border px-4 py-2 text-xs text-muted-foreground">
-          Refreshing entries…
-        </div>) : null}
+    return (<div ref={gridRootRef} data-entries-grid-root="true" className="relative overflow-hidden rounded-lg border bg-card shadow-sm">
+      <SyncStatusIndicator visible={entriesRevalidating} label="Syncing entries"/>
 
       <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: "touch" }}>
         {/* border-separate for true column dividers */}

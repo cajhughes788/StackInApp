@@ -18,15 +18,16 @@ export async function getSettingsHandler(req: Request, res: Response): Promise<v
         return;
     }
     try {
-        const settingsData = await settingsSvc.getSettings(workspaceId, uid);
-        if (!settingsData) {
-            res.status(200).json({ ok: true, settings: null });
+        const snapshot = await settingsSvc.getSettings(workspaceId, uid);
+        if (!snapshot.settings) {
+            res.status(200).json({ ok: true, settings: null, meta: snapshot.meta });
             return;
         }
         res.setHeader("Cache-Control", "private, max-age=300");
         res.status(200).json({
             ok: true,
-            settings: settingsData,
+            settings: snapshot.settings,
+            meta: snapshot.meta,
         });
     }
     catch (err: any) {

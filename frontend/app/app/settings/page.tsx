@@ -17,7 +17,9 @@ import { debugError, debugLog } from "@/lib/debugLoop";
 import { useToast } from "@/components/ui/use-toast";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, } from "@/components/ui/dialog";
-import { useNavigationGuardStore } from "@/lib/stores/useNavigationGuardStore";
+import { getSettingsSaveStatusCopy } from "@/lib/domain/settingsSync";
+import { NavigationGuardMode, useNavigationGuardStore } from "@/lib/stores/useNavigationGuardStore";
+import { useSettingsSaveStore } from "@/lib/stores/useSettingsSaveStore";
 import StackInHeader from "@/components/stackin-header";
 import AppLoader from "@/components/app-loader";
 import { cn } from "@/lib/utils";
@@ -101,6 +103,7 @@ function mergeSettings(base: SettingsType | null, patch: SettingsPatchType): Set
         },
     };
 }
+
 // ------------------------------------------------------------------------------------
 // Settings Page
 // ------------------------------------------------------------------------------------
@@ -134,37 +137,38 @@ export default function SettingsPage() {
     const activeWorkspaceId = workspaceState.status === "ready"
         ? workspaceState.activeWorkspaceId
         : null;
+    const saveState = useSettingsSaveStore((s) => activeWorkspaceId ? s.getSaveState(activeWorkspaceId) : { status: "idle" as const });
+    const isSaving = saveState.status === "saving";
     const settingsEntry = useSettingsStore((s) => activeWorkspaceId ? s.byWorkspaceId[activeWorkspaceId] : undefined);
     const settings = settingsEntry?.data ?? null;
-    const settingsLoading = activeWorkspaceId != null
-        ? (settingsEntry?.status ?? "idle") === "loading"
-        : true;
-    const isInitialSettingsSetup = settings === null;
+    const settingsStatus = activeWorkspaceId != null
+        ? (settingsEntry?.status ?? "idle")
+        : "idle";
+    const hasResolvedSettings = activeWorkspaceId != null &&
+        (settingsStatus === "ready" || settingsStatus === "error");
+    const settingsPendingResolution = activeWorkspaceId != null &&
+        !hasResolvedSettings &&
+        settings === null;
+    const isInitialSettingsSetup = hasResolvedSettings && settings === null;
     // ----------------------------------------------------------------------------------
     // Local component state
     // ----------------------------------------------------------------------------------
     const [showWelcome, setShowWelcome] = useState(isNewUser);
-    const [isSaving, setIsSaving] = useState(false);
     const [isTransitioningToHome, setIsTransitioningToHome] = useState(false);
     const [showInitialValidationFeedback, setShowInitialValidationFeedback] = useState(false);
-    const [saveStatus, setSaveStatus] = useState<"idle" | "dirty" | "saving" | "saved" | "error">("idle");
-    const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
+    const [saveStatus, setSaveStatus] = useState<"idle" | "dirty">("idle");
     const [hydratedWorkspaceId, setHydratedWorkspaceId] = useState<string | null>(null);
     const saveTraceRef = useRef<ReturnType<typeof createProfileTrace> | null>(null);
     const persistPromiseRef = useRef<Promise<boolean> | null>(null);
     const debounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const saveRequestIdRef = useRef(0);
-    const activeSaveRequestRef = useRef(0);
     const latestPatchRef = useRef<SettingsPatchType | null>(null);
     const latestWorkspaceIdRef = useRef<string | null>(null);
-    const latestSettingsRef = useRef<SettingsType | null>(null);
-    const latestUserRef = useRef<typeof user | null>(null);
     const latestFormDataRef = useRef<SettingsFormData>({});
     const isInitialSettingsSetupRef = useRef(true);
-    const saveStatusRef = useRef<"idle" | "dirty" | "saving" | "saved" | "error">("idle");
     const hasHydratedWorkspaceRef = useRef(false);
     const lastChangeBehaviorRef = useRef<SettingsChangeBehavior>("deferred");
     const typedInputFocusedRef = useRef(false);
+    const pendingRetryRef = useRef(false);
     // FIX #1:
     // Use sparse SettingsFormData instead of SettingsInputType
     const [formData, setFormData] = useState<SettingsFormData>(() => {
@@ -200,23 +204,28 @@ export default function SettingsPage() {
     // ----------------------------------------------------------------------------------
     // FIX #2: Remove SettingsInput entirely; hydrate directly
     useEffect(() => {
-        latestSettingsRef.current = settings;
-        latestUserRef.current = user;
         const workspaceChanged = latestWorkspaceIdRef.current !== activeWorkspaceId;
         if (workspaceChanged) {
             latestWorkspaceIdRef.current = activeWorkspaceId ?? null;
             hasHydratedWorkspaceRef.current = false;
             latestPatchRef.current = null;
             setSaveStatus("idle");
-            setLastSavedAt(null);
+            setHydratedWorkspaceId(null);
+        }
+        if (!activeWorkspaceId) {
             const seeded = withDetectedTimeZone({});
             latestFormDataRef.current = seeded;
             setFormData(seeded);
-            setHydratedWorkspaceId(null);
             return;
         }
         if (!settings) {
-            if (activeWorkspaceId && hydratedWorkspaceId !== activeWorkspaceId) {
+            if (!hasResolvedSettings) {
+                const seeded = withDetectedTimeZone({});
+                latestFormDataRef.current = seeded;
+                setFormData(seeded);
+                return;
+            }
+            if (workspaceChanged || hydratedWorkspaceId !== activeWorkspaceId) {
                 const seeded = withDetectedTimeZone({});
                 latestFormDataRef.current = seeded;
                 setFormData(seeded);
@@ -225,26 +234,16 @@ export default function SettingsPage() {
             }
             return;
         }
-        if (!hasHydratedWorkspaceRef.current) {
+        if (workspaceChanged || !hasHydratedWorkspaceRef.current) {
             setFormData(settings);
             latestFormDataRef.current = settings;
             hasHydratedWorkspaceRef.current = true;
-            setLastSavedAt(Date.now());
             setHydratedWorkspaceId(activeWorkspaceId);
         }
-    }, [settings, activeWorkspaceId, user, hydratedWorkspaceId]);
+    }, [settings, activeWorkspaceId, user, hydratedWorkspaceId, hasResolvedSettings]);
     useEffect(() => {
         latestFormDataRef.current = formData;
     }, [formData]);
-    useEffect(() => {
-        latestUserRef.current = user;
-    }, [user]);
-    useEffect(() => {
-        latestSettingsRef.current = settings;
-    }, [settings]);
-    useEffect(() => {
-        saveStatusRef.current = saveStatus;
-    }, [saveStatus]);
     useEffect(() => {
         isInitialSettingsSetupRef.current = isInitialSettingsSetup;
     }, [isInitialSettingsSetup]);
@@ -312,7 +311,7 @@ export default function SettingsPage() {
         if (isInitialSettingsSetupRef.current) {
             return;
         }
-        if (saveStatusRef.current === "dirty" || saveStatusRef.current === "saving") {
+        if (saveStatus === "dirty" || isSaving) {
             void persistSettings(latestFormDataRef.current, "autosave");
         }
     }
@@ -373,7 +372,11 @@ export default function SettingsPage() {
             : [];
     }
     function validateRequiredSettings(nextFormData: SettingsFormData): string[] {
-        if (activeWorkspace?.type !== "w2") {
+        // Only enforce W2-specific required fields during initial setup, when
+        // the user is actively filling in the W2 section. After setup, autosave
+        // must not be blocked — common settings and incremental W2 changes
+        // should save freely regardless of whether pay schedule is set.
+        if (activeWorkspace?.type !== "w2" || !isInitialSettingsSetup) {
             return [];
         }
         const errors: string[] = [];
@@ -431,7 +434,28 @@ export default function SettingsPage() {
         currentValidationErrors.length === 0;
     const isPrimarySaveDisabled = isInitialSettingsSetup
         ? isSaving
-        : isSaving || saveStatus === "saved" || saveStatus === "idle";
+        : false;
+    const saveStatusMeta: {
+        label: string;
+        tone: "neutral" | "saving" | "success" | "error";
+    } = isInitialSettingsSetup
+        ? { label: "Setup needs to be saved", tone: "neutral" }
+        : getSettingsSaveStatusCopy(saveState);
+    const settingsStatusMessage = isInitialSettingsSetup
+        ? "Finish your initial settings before leaving this setup flow."
+        : saveState.status === "pending"
+            ? (saveState.message ?? "Will sync when online")
+            : saveState.status === "error"
+                ? saveState.message
+                : saveState.status === "synced"
+                    ? `Last synced ${new Date(saveState.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
+                    : "";
+    const navigationGuardMode: NavigationGuardMode =
+        isInitialSettingsSetup ? "block" :
+        saveState.status === "pending" ? "background" :
+        saveState.status === "saving" ? "background" :
+        (saveState.status === "error" && saveState.preservedPatch) ? "background" :
+        "none";
     function computeSavePayload(nextFormData: SettingsFormData): {
         patch: SettingsPatchType;
         optimisticSettings: SettingsType | null;
@@ -465,8 +489,14 @@ export default function SettingsPage() {
             if (source === "flush") {
                 return await persistPromiseRef.current;
             }
+            // Mark that a save was requested while one was in-flight so the
+            // finally block can retry with the latest form data once it settles.
+            pendingRetryRef.current = true;
             return false;
         }
+        // We are about to capture latestFormDataRef into this save, so any
+        // previously queued retry is no longer needed.
+        pendingRetryRef.current = false;
         const run = async (): Promise<boolean> => {
             if (!user) {
                 if (isAndroidPlatform()) {
@@ -476,7 +506,6 @@ export default function SettingsPage() {
                         authLoading,
                     });
                 }
-                setSaveStatus("error");
                 if (source === "manual") {
                     toast({
                         title: "Not signed in",
@@ -493,7 +522,6 @@ export default function SettingsPage() {
                         authLoading,
                     });
                 }
-                setSaveStatus("error");
                 if (source === "manual") {
                     toast({
                         title: "Save failed",
@@ -505,6 +533,7 @@ export default function SettingsPage() {
             }
             const validationError = validateSettingsForm(nextFormData);
             if (validationError) {
+                latestPatchRef.current = null;
                 if (isAndroidPlatform()) {
                     debugError("android-settings-save", "persist_blocked_validation", {
                         source,
@@ -512,7 +541,6 @@ export default function SettingsPage() {
                         validationError,
                     });
                 }
-                setSaveStatus("error");
                 if (source === "manual") {
                     toast({
                         title: "Cannot save settings",
@@ -522,13 +550,9 @@ export default function SettingsPage() {
                 }
                 return false;
             }
-            const requestId = saveRequestIdRef.current + 1;
-            saveRequestIdRef.current = requestId;
-            activeSaveRequestRef.current = requestId;
             if (isAndroidPlatform()) {
                 debugLog("android-settings-save", "persist_started", {
                     source,
-                    requestId,
                     activeWorkspaceId,
                     hasUser: !!user,
                     authLoading,
@@ -546,8 +570,6 @@ export default function SettingsPage() {
             saveTraceRef.current.mark("settings_save.tap", {
                 source,
             });
-            setIsSaving(true);
-            setSaveStatus("saving");
             try {
                 saveTraceRef.current.start("settings_save.patch_compute");
                 const { patch, optimisticSettings } = computeSavePayload(nextFormData);
@@ -557,16 +579,10 @@ export default function SettingsPage() {
                     if (isAndroidPlatform()) {
                         debugLog("android-settings-save", "persist_noop", {
                             source,
-                            requestId,
                             activeWorkspaceId,
                         });
                     }
-                    if (activeSaveRequestRef.current !== requestId) {
-                        return false;
-                    }
-                    setIsSaving(false);
-                    setSaveStatus("saved");
-                    setLastSavedAt(Date.now());
+                    setSaveStatus("idle");
                     return true;
                 }
                 saveTraceRef.current.mark("settings_save.local_ui_pending", {
@@ -575,7 +591,10 @@ export default function SettingsPage() {
                 });
                 if (optimisticSettings) {
                     saveTraceRef.current.start("settings_save.store_update");
-                    updateSettingsStore(activeWorkspaceId, optimisticSettings);
+                    updateSettingsStore(activeWorkspaceId, optimisticSettings, {
+                        source: "optimistic",
+                        localUpdatedAt: Date.now(),
+                    });
                     saveTraceRef.current.end("settings_save.store_update", {
                         source: "optimistic",
                     });
@@ -588,46 +607,35 @@ export default function SettingsPage() {
                         }
                         : null,
                 }), { workspaceId: activeWorkspaceId });
-                if (activeSaveRequestRef.current !== requestId) {
-                    return false;
-                }
-                if (saved) {
+                if (saved.source === "backend" && saved.data) {
                     saveTraceRef.current.start("settings_save.store_update");
-                    updateSettingsStore(activeWorkspaceId, saved);
+                    updateSettingsStore(activeWorkspaceId, saved.data, {
+                        source: "backend",
+                        remoteMeta: saved.remoteMeta,
+                        lastSuccessfulSyncAt: saved.lastSuccessfulSyncAt,
+                        localUpdatedAt: saved.localUpdatedAt,
+                    });
                     saveTraceRef.current.end("settings_save.store_update", {
                         source: "canonical",
                     });
                     if (isAndroidPlatform()) {
-                        setFormData(saved);
-                        latestFormDataRef.current = saved;
+                        setFormData(saved.data);
+                        latestFormDataRef.current = saved.data;
                     }
                 }
-                if (saved && activeWorkspace) {
+                if (saved.data && activeWorkspace) {
                     void (async () => {
                         try {
-                            await syncWorkspaceTimeEntryReminders(activeWorkspace, saved);
+                            await syncWorkspaceTimeEntryReminders(activeWorkspace, saved.data);
                         }
                         catch (error) {
                         }
                     })();
-                    void syncWorkspaceGeofenceReminders(activeWorkspace, saved).catch(() => {
+                    void syncWorkspaceGeofenceReminders(activeWorkspace, saved.data).catch(() => {
                     });
                 }
                 latestPatchRef.current = null;
-                if (isAndroidPlatform()) {
-                    debugLog("android-settings-save", "persist_succeeded", {
-                        source,
-                        requestId,
-                        activeWorkspaceId,
-                        savedSections: {
-                            common: Object.keys(saved?.common ?? {}),
-                            w2: Object.keys(saved?.w2 ?? {}),
-                            independent: Object.keys(saved?.independent ?? {}),
-                        },
-                    });
-                }
-                setSaveStatus("saved");
-                setLastSavedAt(Date.now());
+                setSaveStatus("idle");
                 saveTraceRef.current.mark("settings_save.ui_success", {
                     workspaceId: activeWorkspaceId,
                     source,
@@ -639,17 +647,13 @@ export default function SettingsPage() {
             }
             catch (err: any) {
                 if (isAndroidPlatform()) {
-                    debugError("android-settings-save", "persist_failed", {
+                    debugError("android-settings-save", "persist_failed_page", {
                         source,
-                        requestId,
                         activeWorkspaceId,
                         message: err instanceof Error ? err.message : String(err),
                         stack: err instanceof Error ? err.stack ?? null : null,
                         status: typeof err?.status === "number" ? err.status : null,
                     });
-                }
-                if (activeSaveRequestRef.current === requestId) {
-                    setSaveStatus("error");
                 }
                 saveTraceRef.current?.error("settings_save.failed", err);
                 if (source !== "autosave" && source !== "flush") {
@@ -661,11 +665,6 @@ export default function SettingsPage() {
                 }
                 return false;
             }
-            finally {
-                if (activeSaveRequestRef.current === requestId) {
-                    setIsSaving(false);
-                }
-            }
         };
         const promise = run();
         persistPromiseRef.current = promise;
@@ -675,6 +674,12 @@ export default function SettingsPage() {
         finally {
             if (persistPromiseRef.current === promise) {
                 persistPromiseRef.current = null;
+                // If a save was blocked while this one was running, retry now
+                // with the latest form data so no change is silently dropped.
+                if (pendingRetryRef.current) {
+                    pendingRetryRef.current = false;
+                    setTimeout(() => void persistSettings(latestFormDataRef.current, "autosave"), 0);
+                }
             }
         }
     }
@@ -765,12 +770,13 @@ export default function SettingsPage() {
                 }
                 return;
             }
-            setSaveStatus((current) => current === "saving" ? current : "dirty");
+            setSaveStatus("dirty");
             return;
         }
         const validationError = validateSettingsForm(formData);
         if (validationError) {
-            setSaveStatus("error");
+            latestPatchRef.current = null;
+            setSaveStatus("idle");
             return;
         }
         let patch: SettingsPatchType;
@@ -784,7 +790,8 @@ export default function SettingsPage() {
                 message: error instanceof Error ? error.message : String(error),
                 stack: error instanceof Error ? error.stack : null,
             });
-            setSaveStatus("error");
+            latestPatchRef.current = null;
+            setSaveStatus("idle");
             return;
         }
         latestPatchRef.current = patch;
@@ -800,9 +807,7 @@ export default function SettingsPage() {
             isSaving,
         });
         if (Object.keys(patch).length === 0) {
-            if (!isSaving) {
-                setSaveStatus((current) => current === "error" ? "error" : "saved");
-            }
+            setSaveStatus("idle");
             return;
         }
         if (!isSaving) {
@@ -838,12 +843,16 @@ export default function SettingsPage() {
         authLoading,
         workspaceState.status,
         hydratedWorkspaceId,
-        isSaving,
         isInitialSettingsSetup,
     ]);
     useEffect(() => {
         const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-            if (saveStatusRef.current === "dirty" || saveStatusRef.current === "saving") {
+            if (!isInitialSettingsSetupRef.current) return;
+            const wsId = latestWorkspaceIdRef.current;
+            const state = wsId
+                ? useSettingsSaveStore.getState().getSaveState(wsId)
+                : { status: "idle" as const };
+            if (state.status === "saving" || persistPromiseRef.current !== null) {
                 event.preventDefault();
                 event.returnValue = "";
             }
@@ -855,39 +864,17 @@ export default function SettingsPage() {
                 clearTimeout(debounceTimeoutRef.current);
                 debounceTimeoutRef.current = null;
             }
-            if (!latestPatchRef.current || Object.keys(latestPatchRef.current).length === 0) {
-                return;
-            }
-            if (isInitialSettingsSetupRef.current) {
-                return;
-            }
-            if (!latestWorkspaceIdRef.current || !latestUserRef.current) {
-                return;
-            }
-            const optimisticSettings = mergeSettings(latestSettingsRef.current, latestPatchRef.current);
-            if (optimisticSettings) {
-                updateSettingsStore(latestWorkspaceIdRef.current, optimisticSettings);
-            }
-            void settingsService
-                .save(latestWorkspaceIdRef.current, latestPatchRef.current)
-                .then((saved) => {
-                if (saved) {
-                    updateSettingsStore(latestWorkspaceIdRef.current!, saved);
-                }
-            })
-                .catch(() => {
-            });
         };
-    }, [updateSettingsStore]);
+    }, []);
     useEffect(() => {
         setNavigationGuard({
-            shouldBlock: isInitialSettingsSetup || saveStatus === "dirty" || isSaving,
+            mode: navigationGuardMode,
+            reason: settingsStatusMessage,
             flush: async () => {
                 debugLog("settings-page", "navigation_flush_requested", {
                     activeWorkspaceId,
                     isInitialSettingsSetup,
-                    saveStatus,
-                    isSaving,
+                    saveStatus: saveState.status,
                     hasPendingPatch: latestPatchRef.current != null &&
                         Object.keys(latestPatchRef.current).length > 0,
                 });
@@ -898,13 +885,36 @@ export default function SettingsPage() {
                     clearTimeout(debounceTimeoutRef.current);
                     debounceTimeoutRef.current = null;
                 }
-                return persistSettings(latestFormDataRef.current, "flush");
+                // If currently saving, await the in-flight save then navigate
+                if (saveState.status === "saving" && persistPromiseRef.current) {
+                    await persistPromiseRef.current;
+                    return true;
+                }
+                // If pending (in IDB), fire sync without blocking navigation
+                if (saveState.status === "pending" && activeWorkspaceId) {
+                    void settingsService.syncPendingIfNeeded(activeWorkspaceId);
+                    return true;
+                }
+                // Otherwise flush any debounced local change
+                if (saveStatus === "dirty") {
+                    return persistSettings(latestFormDataRef.current, "flush");
+                }
+                return true;
             },
         });
         return () => {
             clearNavigationGuard();
         };
-    }, [saveStatus, isSaving, isInitialSettingsSetup, setNavigationGuard, clearNavigationGuard]);
+    }, [
+        activeWorkspaceId,
+        clearNavigationGuard,
+        isInitialSettingsSetup,
+        navigationGuardMode,
+        saveState,
+        saveStatus,
+        settingsStatusMessage,
+        setNavigationGuard,
+    ]);
     useEffect(() => {
         debugLog("settings-page", "primary_save_button_state", {
             activeWorkspaceId,
@@ -914,7 +924,7 @@ export default function SettingsPage() {
             isDisabled: isPrimarySaveDisabled,
             disableReasons: {
                 isSaving,
-                saved: !isInitialSettingsSetup && saveStatus === "saved",
+                saved: !isInitialSettingsSetup && saveState.status === "synced",
                 idle: !isInitialSettingsSetup && saveStatus === "idle",
                 noInput: isInitialSettingsSetup && !hasInitialSettingsInput,
                 validationError: isInitialSettingsSetup && initialSetupValidationError != null,
@@ -945,15 +955,15 @@ export default function SettingsPage() {
     // ----------------------------------------------------------------------------------
     const hasRenderableSettingsScreen = activeWorkspaceId != null &&
         (settings !== null ||
-            hydratedWorkspaceId === activeWorkspaceId ||
-            hasAnySettingsInput(formData));
+            isInitialSettingsSetup ||
+            hydratedWorkspaceId === activeWorkspaceId);
     const isSetupWorkspaceReady = Boolean(isSetupMode &&
         setupWorkspaceId &&
         workspaceState.status === "ready" &&
         activeWorkspaceId === setupWorkspaceId);
     if (authLoading ||
         workspaceState.status !== "ready" ||
-        (!isSetupWorkspaceReady && settingsLoading && !hasRenderableSettingsScreen) ||
+        (!isSetupWorkspaceReady && settingsPendingResolution && !hasRenderableSettingsScreen) ||
         !user) {
         return <AppLoader label="Loading settings..."/>;
     }
@@ -977,6 +987,20 @@ export default function SettingsPage() {
           </span>
         </div>
 
+        {!isInitialSettingsSetup && saveStatusMeta ? (<div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2 text-sm">
+            <div className="flex items-center gap-2">
+              <span className={cn("inline-flex size-2 rounded-full", saveStatusMeta.tone === "saving"
+                    ? "bg-amber-500"
+                    : saveStatusMeta.tone === "error"
+                        ? "bg-destructive"
+                        : saveStatusMeta.tone === "success"
+                            ? "bg-emerald-500"
+                            : "bg-muted-foreground")}/>
+              <span className="font-medium text-foreground">{saveStatusMeta.label}</span>
+            </div>
+            <span className="text-xs text-muted-foreground">{settingsStatusMessage}</span>
+          </div>) : null}
+
         {activeWorkspace?.type === "w2" && (<W2SettingsSection data={formData.w2} isInitialSetup={isInitialSettingsSetup} onChange={(patch, behavior) => updateSection("w2", patch, behavior)}/>)}
 
         {activeWorkspace?.type === "independent" && (<IndependentSettingsSection data={formData.independent} onChange={(patch, behavior) => updateSection("independent", patch, behavior)}/>)}
@@ -986,46 +1010,26 @@ export default function SettingsPage() {
         <div className="pt-4">
           {isInitialSettingsSetup &&
               showInitialValidationFeedback &&
-              currentValidationErrors.length > 0 ? (<div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              currentValidationErrors.length > 0 ? (<div className="stackin-safe-page-message mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
               <p className="font-medium">Finish these before continuing:</p>
               <ul className="mt-2 list-disc pl-5">
                 {currentValidationErrors.map((error) => (<li key={error}>{error}</li>))}
               </ul>
             </div>) : null}
-          <Button className={cn("w-full", isInitialSettingsSetup
-                ? isInitialSetupReadyToSave
-                    ? "bg-emerald-600 text-white hover:bg-emerald-600 focus-visible:ring-emerald-300 disabled:bg-emerald-600/75 disabled:text-white"
-                    : "bg-slate-200 text-slate-700 hover:bg-slate-200 focus-visible:ring-slate-300 disabled:bg-slate-200 disabled:text-slate-700"
-                : undefined)} onClick={isInitialSettingsSetup ? handleSaveAndContinue : handleSave} disabled={isPrimarySaveDisabled} variant={isInitialSettingsSetup
-                ? "default"
-                : saveStatus === "error"
-                ? "destructive"
-                : saveStatus === "dirty"
-                    ? "default"
-                    : "outline"}>
-            {saveStatus === "error" && !isInitialSettingsSetup
-                ? (isInitialSettingsSetup ? "Retry Save and Continue" : "Retry Save")
-                : isSaving
-                    ? "Saving..."
-                    : isInitialSettingsSetup
-                        ? "Save and Continue to Home"
-                        : saveStatus === "dirty"
-                    ? "Save Now"
-                    : "Changes Saved Successfully"}
-          </Button>
-          {saveStatus === "dirty" || isSaving ? (<p className="mt-3 text-sm text-muted-foreground">
-              {isInitialSettingsSetup
-                    ? "Create your initial settings record before entering the app."
-                    : "Changes save automatically."}
+          {isInitialSettingsSetup ? (<Button className={cn("w-full", isInitialSetupReadyToSave
+                ? "bg-emerald-600 text-white hover:bg-emerald-600 focus-visible:ring-emerald-300 disabled:bg-emerald-600/75 disabled:text-white"
+                : "bg-slate-200 text-slate-700 hover:bg-slate-200 focus-visible:ring-slate-300 disabled:bg-slate-200 disabled:text-slate-700")} onClick={handleSaveAndContinue} disabled={isPrimarySaveDisabled} variant="default">
+              {saveState.status === "error"
+                    ? "Retry Save and Continue"
+                    : isSaving
+                        ? "Saving..."
+                        : "Save and Continue to Home"}
+            </Button>) : null}
+          {isInitialSettingsSetup ? (<p className="mt-3 text-sm text-muted-foreground">
+              Create your initial settings record before entering the app.
             </p>) : null}
-          {saveStatus === "saved" && lastSavedAt ? (<p className="mt-3 text-sm text-muted-foreground">
-              Last saved at {new Date(lastSavedAt).toLocaleTimeString([], {
-                    hour: "numeric",
-                    minute: "2-digit",
-                })}.
-            </p>) : null}
-          {saveStatus === "error" && !isInitialSettingsSetup ? (<p className="mt-3 text-sm text-destructive">
-              {currentValidationError ?? "We could not save your latest changes. Retry when you are ready."}
+          {!isInitialSettingsSetup && saveState.status === "error" ? (<p className="mt-3 text-sm text-destructive">
+              {currentValidationError ?? saveState.message ?? "We could not finish syncing your latest settings change."}
             </p>) : null}
         </div>
       </div>

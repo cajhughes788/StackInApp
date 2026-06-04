@@ -155,9 +155,12 @@ export async function syncAllWorkspaceGeofenceReminders(workspaces: WorkspaceSum
     const geofences: NativeGeofenceRecord[] = [];
     let shouldRequestPermissions = false;
     try {
-        for (const workspace of workspaces) {
-            ;
-            const settings = await settingsService.loadForWorkspace(workspace.id);
+        const allSettings = await Promise.all(
+            workspaces.map((workspace) => settingsService.loadForWorkspace(workspace.id))
+        );
+        for (let i = 0; i < workspaces.length; i++) {
+            const workspace = workspaces[i];
+            const settings = allSettings[i];
             if (hasEnabledGeofenceReminder(settings)) {
                 shouldRequestPermissions = true;
             }
@@ -261,12 +264,14 @@ export async function syncAllWorkspaceGeofenceEntryStatus(workspaces: WorkspaceS
         workspaceCount: workspaces.length,
         workspaceIds: workspaces.map((workspace) => workspace.id),
     });
-    const statuses: NativeGeofenceWorkspaceEntryStatus[] = [];
+    let statuses: NativeGeofenceWorkspaceEntryStatus[];
     try {
-        for (const workspace of workspaces) {
-            const settings = await settingsService.loadForWorkspace(workspace.id);
-            statuses.push(await buildWorkspaceEntryStatus(workspace, settings));
-        }
+        statuses = await Promise.all(
+            workspaces.map(async (workspace) => {
+                const settings = await settingsService.loadForWorkspace(workspace.id);
+                return buildWorkspaceEntryStatus(workspace, settings);
+            })
+        );
     }
     catch (error) {
         logGeofenceSyncError("entry_status_prepare_failed", {

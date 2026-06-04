@@ -18,10 +18,10 @@ export default function LoadingLogoPhoto({
   size = 260,
 }: LoadingLogoPhotoProps) {
   const assets = [
-    "/images/aligned-hole-logo-mobile.png",
-    "/images/aligned-dollar-mobile.png",
-    "/images/aligned-coin-stack-mobile.png",
-    "/images/aligned-coin-mobile.png",
+    "/images/aligned-hole-logo-mobile.webp",
+    "/images/aligned-dollar-mobile.webp",
+    "/images/aligned-coin-stack-mobile.webp",
+    "/images/aligned-coin-mobile.webp",
   ]
   const height = (size * 650) / 1125.79
   const alignedArtX = -10

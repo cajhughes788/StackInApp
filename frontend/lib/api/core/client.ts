@@ -4,7 +4,11 @@ import { getAuthSafe } from "@/lib/firebase";
 import * as offlineQueue from "@/lib/storage/offlineQueue";
 import type { ProfileTraceEvent } from "@/lib/observability/profileTrace";
 import { createProfileTrace } from "@/lib/observability/profileTrace";
-import { ApiError, shouldQueueOfflineMutation } from "@/lib/api/core/errors";
+import {
+    ApiError,
+    isAbortError,
+    shouldQueueOfflineMutation,
+} from "@/lib/api/core/errors";
 import { debugError, debugLog } from "@/lib/debugLoop";
 const TOKEN_TTL_MS = 45 * 60 * 1000; // 45 minutes
 let cachedToken: {
@@ -36,6 +40,9 @@ async function withRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
             return await fn();
         }
         catch (err) {
+            if (isAbortError(err)) {
+                throw err;
+            }
             if (++attempt >= tries)
                 throw err;
             await wait(delay + Math.random() * 120);
@@ -97,9 +104,16 @@ export async function apiFetch<T = any>(endpoint: string, opts: RequestInit & {
     timeout?: number;
     profile?: ApiProfileContext;
 } = {}, auth: boolean = true): Promise<T> {
-    const { timeout = 12000, profile, ...fetchOpts } = opts;
+    const { timeout = 12000, profile, signal: externalSignal, ...fetchOpts } = opts;
     const controller = new AbortController();
     const abortTimeout = setTimeout(() => controller.abort(), timeout);
+    const forwardAbort = () => controller.abort();
+    if (externalSignal?.aborted) {
+        forwardAbort();
+    }
+    else {
+        externalSignal?.addEventListener("abort", forwardAbort, { once: true });
+    }
     const trace = profile?.traceId && profile?.flow
         ? createProfileTrace(profile.flow, profile.metadata ?? {}, profile.traceId)
         : null;
@@ -124,6 +138,9 @@ export async function apiFetch<T = any>(endpoint: string, opts: RequestInit & {
                     method: fetchOpts.method ?? "GET",
                 });
             }
+        }
+        if (controller.signal.aborted) {
+            throw new DOMException("Request aborted", "AbortError");
         }
         if (profile?.traceId)
             headers["X-StackIn-Trace-Id"] = profile.traceId;
@@ -187,16 +204,27 @@ export async function apiFetch<T = any>(endpoint: string, opts: RequestInit & {
         });
         return data as T;
     }
+    catch (err) {
+        if (isAbortError(err)) {
+            trace?.mark(`${requestStep}.aborted`, {
+                endpoint,
+                method: fetchOpts.method ?? "GET",
+            });
+        }
+        throw err;
+    }
     finally {
         clearTimeout(abortTimeout);
+        externalSignal?.removeEventListener("abort", forwardAbort);
     }
 }
-export async function tryWrite<T>(endpoint: string, method: "POST" | "PATCH" | "DELETE", body: any, profile?: ApiProfileContext): Promise<T> {
+export async function tryWrite<T>(endpoint: string, method: "POST" | "PATCH" | "DELETE", body: any, profile?: ApiProfileContext, signal?: AbortSignal): Promise<T> {
     try {
         return await apiFetch<T>(endpoint, {
             method,
             body: JSON.stringify(body),
             profile,
+            signal,
         }, true);
     }
     catch (err) {

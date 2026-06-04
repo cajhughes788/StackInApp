@@ -15,9 +15,21 @@ import {
   clearKeysWithMeta,
 } from "./metadata"
 import { CACHE_VERSIONS } from "./cacheVersions"
+import {
+  type PersistedCachePayload,
+  isPersistedCachePayload,
+} from "./cachePayload"
 
 const KEY_PREFIX = "taxProfile"
 const HASH_KEY_PREFIX = "taxProfile.hash"
+type PersistedTaxProfilePayload = PersistedCachePayload<TaxProfile.Type, "taxProfile">
+
+export type TaxProfileCacheRecord = {
+  data: TaxProfile.Type
+  lastSuccessfulSyncAt: number | null
+  localUpdatedAt: number | null
+  cachedAt: number
+}
 
 // By architecture: TTL is effectively infinite unless future rules change.
 // Using `undefined` retains forever; can be swapped later in shared constants.
@@ -39,13 +51,47 @@ function getTaxProfileHashKey(workspaceId: WorkspaceId): string {
 export async function loadTaxProfileCache(
   workspaceId: WorkspaceId
 ): Promise<TaxProfile.Type | null> {
-  const record = await getWithMeta<TaxProfile.Type>(getTaxProfileKey(workspaceId), {
-    expectedVersion: CACHE_VERSIONS.taxProfile,
-  })
+  const record = await readTaxProfileCacheRecord(workspaceId)
+  return record?.data ?? null
+}
+
+export async function readTaxProfileCacheRecord(
+  workspaceId: WorkspaceId
+): Promise<TaxProfileCacheRecord | null> {
+  const record = await getWithMeta<TaxProfile.Type | PersistedTaxProfilePayload>(
+    getTaxProfileKey(workspaceId),
+    {
+      expectedVersion: CACHE_VERSIONS.taxProfile,
+    }
+  )
   if (!record?.data) return null
 
-  const parsed = safeSchemaParse(TaxProfile.Schema, record.data)
-  return parsed.success ? parsed.data : null
+  const payload = isPersistedCachePayload<TaxProfile.Type, "taxProfile">(
+    record.data,
+    "taxProfile"
+  )
+    ? record.data
+    : {
+        taxProfile: record.data,
+        lastSuccessfulSyncAt: null,
+        localUpdatedAt: record.ts,
+      }
+
+  const parsed = safeSchemaParse(TaxProfile.Schema, payload.taxProfile)
+  if (!parsed.success) {
+    return null
+  }
+
+  return {
+    data: parsed.data,
+    lastSuccessfulSyncAt:
+      typeof payload.lastSuccessfulSyncAt === "number"
+        ? payload.lastSuccessfulSyncAt
+        : null,
+    localUpdatedAt:
+      typeof payload.localUpdatedAt === "number" ? payload.localUpdatedAt : record.ts,
+    cachedAt: record.ts,
+  }
 }
 
 /**
@@ -54,12 +100,24 @@ export async function loadTaxProfileCache(
  */
 export async function saveTaxProfileCache(
   workspaceId: WorkspaceId,
-  profile: TaxProfile.Type
+  profile: TaxProfile.Type,
+  options: {
+    lastSuccessfulSyncAt?: number | null
+    localUpdatedAt?: number | null
+  } = {}
 ): Promise<void> {
-  await setWithMeta(getTaxProfileKey(workspaceId), profile, {
-    ttlMs: TTL_MS,
-    version: CACHE_VERSIONS.taxProfile,
-  })
+  await setWithMeta<PersistedTaxProfilePayload>(
+    getTaxProfileKey(workspaceId),
+    {
+      taxProfile: profile,
+      lastSuccessfulSyncAt: options.lastSuccessfulSyncAt ?? null,
+      localUpdatedAt: options.localUpdatedAt ?? Date.now(),
+    },
+    {
+      ttlMs: TTL_MS,
+      version: CACHE_VERSIONS.taxProfile,
+    }
+  )
 }
 
 /**
@@ -108,4 +166,10 @@ export async function saveTaxProfileHash(
     ttlMs: TTL_MS,
     version: CACHE_VERSIONS.taxProfileHash,
   })
+}
+
+export async function clearTaxProfileHash(
+  workspaceId: WorkspaceId
+): Promise<void> {
+  await clearWithMeta(getTaxProfileHashKey(workspaceId))
 }
