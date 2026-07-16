@@ -10,7 +10,14 @@
     "lint": "next lint",
     "clean": "rimraf .next out",
     "sync": "npm run build && npx cap sync",
-    "test:sync": "node ../scripts/test-sync.cjs"
+    "test:sync": "node ../scripts/test-sync.cjs",
+    "plan:ads": "node scripts/record-ads/plan-ad.mjs",
+    "record:ads": "node scripts/record-ads/record.mjs",
+    "cut:ads": "node scripts/record-ads/cut-clips.mjs",
+    "assemble:ads": "node scripts/record-ads/assemble-ads.mjs",
+    "make:cta": "node scripts/record-ads/make-cta.mjs",
+    "caption:ads": "node scripts/record-ads/caption-clips.mjs",
+    "narrate:ads": "node scripts/record-ads/narrate-clips.mjs"
   },
   "dependencies": {
     "@capacitor-community/sqlite": "^7.0.2",
@@ -99,6 +106,7 @@
   },
   "devDependencies": {
     "@capacitor/cli": "^7.4.4",
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "^4.1.9",
     "@types/luxon": "^3.7.1",
     "@types/lz-string": "^1.3.34",
@@ -107,6 +115,7 @@
     "@types/react-dom": "^18.3.7",
     "@types/uuid": "^9.0.7",
     "autoprefixer": "^10.4.21",
+    "dotenv": "^17.4.2",
     "postcss": "^8.5.6",
     "rimraf": "^6.1.0",
     "tailwindcss": "^4.1.16",
