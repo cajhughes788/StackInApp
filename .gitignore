@@ -34,9 +34,6 @@ build/
 .cache/
 .next/
 
-# Recorded ad footage (raw video output, not source)
-ad-footage/
-
 # Dependency directories
 node_modules/
 bower_components/
@@ -65,7 +62,6 @@ build/Release/
 .env
 .env.*
 !.env.example
-!.env.recording.example
 
 # Capacitor generated web output (use next export instead)
 android/app/src/main/assets/public/
