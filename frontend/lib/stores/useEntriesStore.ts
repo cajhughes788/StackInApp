@@ -266,6 +266,11 @@ export const useEntriesStore = create<EntriesStoreState>((set, get) => ({
 
       set((state) => {
         const currentStateEntry = getWorkspaceEntry(state.byWorkspaceId, workspaceId);
+        // A newer hydrate/refresh call for a different period has since
+        // superseded this one — don't let this late resolution clobber it.
+        if (currentStateEntry.periodId !== periodId) {
+          return state;
+        }
 
         return {
           byWorkspaceId: {
@@ -308,6 +313,9 @@ export const useEntriesStore = create<EntriesStoreState>((set, get) => ({
 
       set((state) => {
         const currentStateEntry = getWorkspaceEntry(state.byWorkspaceId, workspaceId);
+        if (currentStateEntry.periodId !== periodId) {
+          return state;
+        }
 
         return {
           byWorkspaceId: {
@@ -405,6 +413,9 @@ export const useEntriesStore = create<EntriesStoreState>((set, get) => ({
 
       set((state) => {
         const currentStateEntry = getWorkspaceEntry(state.byWorkspaceId, workspaceId);
+        if (currentStateEntry.periodId !== periodId) {
+          return state;
+        }
         const nextEntries = preserveStableReference(
           currentStateEntry.entries,
           mergedEntries
@@ -456,6 +467,9 @@ export const useEntriesStore = create<EntriesStoreState>((set, get) => ({
 
       set((state) => {
         const currentStateEntry = getWorkspaceEntry(state.byWorkspaceId, workspaceId);
+        if (currentStateEntry.periodId !== periodId) {
+          return state;
+        }
 
         return {
           byWorkspaceId: {

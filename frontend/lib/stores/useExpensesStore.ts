@@ -319,6 +319,11 @@ export const useExpensesStore = create<ExpensesStoreState>((set, get) => ({
 
       set((state) => {
         const currentStateEntry = getWorkspaceEntry(state.byWorkspaceId, workspaceId);
+        // A newer hydrate/refresh call for a different period has since
+        // superseded this one — don't let this late resolution clobber it.
+        if (currentStateEntry.periodId !== periodId) {
+          return state;
+        }
         return {
           byWorkspaceId: {
             ...state.byWorkspaceId,
@@ -359,6 +364,9 @@ export const useExpensesStore = create<ExpensesStoreState>((set, get) => ({
 
       set((state) => {
         const currentStateEntry = getWorkspaceEntry(state.byWorkspaceId, workspaceId);
+        if (currentStateEntry.periodId !== periodId) {
+          return state;
+        }
         return {
           byWorkspaceId: {
             ...state.byWorkspaceId,
@@ -449,6 +457,9 @@ export const useExpensesStore = create<ExpensesStoreState>((set, get) => ({
 
       set((state) => {
         const currentStateEntry = getWorkspaceEntry(state.byWorkspaceId, workspaceId);
+        if (currentStateEntry.periodId !== periodId) {
+          return state;
+        }
         const nextExpenses = preserveStableReference(
           currentStateEntry.expenses,
           mergedResolvedExpenses
@@ -499,6 +510,9 @@ export const useExpensesStore = create<ExpensesStoreState>((set, get) => ({
 
       set((state) => {
         const currentStateEntry = getWorkspaceEntry(state.byWorkspaceId, workspaceId);
+        if (currentStateEntry.periodId !== periodId) {
+          return state;
+        }
         return {
           byWorkspaceId: {
             ...state.byWorkspaceId,
