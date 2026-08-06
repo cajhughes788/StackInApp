@@ -14,6 +14,7 @@ import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import { debugRender } from "@/lib/debugLoop"
 import { computeIncomeGaugeForEntries } from "@shared/computeIncomeGauge"
 import SyncStatusIndicator from "@/components/sync-status-indicator"
+import PeriodSelector from "@/components/period-selector"
 import {
   getIncomeBreakdownTotalForPaymentMethod,
   getIncomeBreakdownTotalForPaymentMethodAndCategory,
@@ -115,10 +116,6 @@ export default function IndependentIncomeGauge() {
       : null
   const gaugeScale = targetIncome ?? maxAmount
   const fillPercentage = Math.min((totals.incomeGauge / gaugeScale) * 100, 100)
-  const monthLabel = useMemo(
-    () => new Intl.DateTimeFormat("en-US", { month: "long" }).format(new Date()),
-    []
-  )
   debugRender("independent-income-gauge", {
     workspaceId: activeWorkspaceId,
     workspaceType: activeWorkspace?.type ?? null,
@@ -142,7 +139,7 @@ export default function IndependentIncomeGauge() {
     <div className="relative bg-card rounded-lg border p-4 shadow-sm sm:p-6">
       <SyncStatusIndicator visible={showSyncIndicator} label="Syncing income" />
 
-      <h2 className="mb-4 text-lg font-semibold">Current Month: {monthLabel}</h2>
+      <PeriodSelector />
 
       <div className="relative mb-5 h-28 sm:mb-6 sm:h-32">
         <div className="app-soft-surface absolute inset-0 rounded-lg overflow-hidden">

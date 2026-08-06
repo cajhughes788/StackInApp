@@ -5,7 +5,7 @@ import { EntrySchema, type EntryType } from "@shared/schemas/entry";
 import { SettingsDocSchema, type SettingsType, } from "@shared/schemas/settings";
 import { calculateNetPay } from "@shared/tax/engine";
 import { buildTaxProfileInput } from "@shared/tax/buildTaxProfileInput";
-import { getCurrentPayPeriodAt, getMostRecentlyClosedPayPeriod } from "@shared/payPeriods";
+import { getCurrentPayPeriodAt, getMostRecentlyClosedPayPeriod, getEarliestEligiblePeriodEnd } from "@shared/payPeriods";
 const DEFAULT_TIME_ZONE = "America/Los_Angeles";
 function round2(value: number) {
     return Math.round((Number(value) || 0) * 100) / 100;
@@ -71,17 +71,6 @@ async function getWorkspaceCreatedAt(workspaceId: string): Promise<number | null
     return Number.isFinite(millis) ? millis : null;
   }
   return null;
-}
-function getEarliestEligiblePayStubPeriodEnd(settings: SettingsType, workspaceCreatedAt: number | null): string | null {
-    if (workspaceCreatedAt == null) {
-        return null;
-    }
-    const tz = settings.common?.timeZone || DEFAULT_TIME_ZONE;
-    const workspaceCreatedAtDt = DateTime.fromMillis(workspaceCreatedAt, { zone: tz });
-    if (!workspaceCreatedAtDt.isValid) {
-        return null;
-    }
-    return getCurrentPayPeriodAt(settings, workspaceCreatedAtDt).end;
 }
 function isEligiblePayStubPeriod(periodEnd: string, earliestEligiblePeriodEnd: string | null): boolean {
     if (!earliestEligiblePeriodEnd) {
@@ -317,7 +306,7 @@ export async function listPayStubs(workspaceId: string, uid: string, opts?: {
         getWorkspaceSettings(workspaceId),
         getWorkspaceCreatedAt(workspaceId),
     ]);
-    const earliestEligiblePeriodEnd = getEarliestEligiblePayStubPeriodEnd(settings, workspaceCreatedAt);
+    const earliestEligiblePeriodEnd = getEarliestEligiblePeriodEnd(settings, "w2", workspaceCreatedAt);
     const limit = Math.min(Math.max(opts?.limit ?? 100, 1), 500);
     const col = db
         .collection(`workspaces/${workspaceId}/payStubs`)
@@ -376,7 +365,7 @@ export async function generatePayStub(workspaceId: string, uid: string, opts: {
         getWorkspaceCreatedAt(workspaceId),
         getPreviousPayStub(workspaceId, opts.start),
     ]);
-    const earliestEligiblePeriodEnd = getEarliestEligiblePayStubPeriodEnd(settings, workspaceCreatedAt);
+    const earliestEligiblePeriodEnd = getEarliestEligiblePeriodEnd(settings, "w2", workspaceCreatedAt);
     if (!isEligiblePayStubPeriod(opts.end, earliestEligiblePeriodEnd)) {
         console.log("[payStubsService.generatePayStub] skipped_ineligible", JSON.stringify({
             workspaceId,
@@ -437,7 +426,7 @@ export async function generateMostRecentlyClosedPayStub(workspaceId: string, uid
         getWorkspaceCreatedAt(workspaceId),
     ]);
     const period = getMostRecentlyClosedPayPeriod(settings);
-    const earliestEligiblePeriodEnd = getEarliestEligiblePayStubPeriodEnd(settings, workspaceCreatedAt);
+    const earliestEligiblePeriodEnd = getEarliestEligiblePeriodEnd(settings, "w2", workspaceCreatedAt);
     if (!isEligiblePayStubPeriod(period.end, earliestEligiblePeriodEnd)) {
         return { id: period.periodId, ok: true, skipped: true };
     }
@@ -447,4 +436,24 @@ export async function generateMostRecentlyClosedPayStub(workspaceId: string, uid
         periodId: period.periodId,
         force,
     });
+}
+export async function syncPayStubForDates(workspaceId: string, uid: string, dates: Array<string | null | undefined>): Promise<void> {
+    const normalizedDates = dates.filter((date): date is string => typeof date === "string" && date.length > 0);
+    if (normalizedDates.length === 0) {
+        return;
+    }
+    const settings = await getWorkspaceSettings(workspaceId);
+    const targetsByPeriodId = new Map<string, { start: string; end: string; periodId: string }>();
+    for (const date of normalizedDates) {
+        const period = getCurrentPayPeriodAt(settings, date);
+        targetsByPeriodId.set(period.periodId, period);
+    }
+    for (const period of targetsByPeriodId.values()) {
+        await generatePayStub(workspaceId, uid, {
+            start: period.start,
+            end: period.end,
+            periodId: period.periodId,
+            force: false,
+        });
+    }
 }

@@ -11,6 +11,7 @@ import { ForbiddenError, NotFoundError, BadRequestError } from "../lib/httpError
 import type { BackendProfileTrace } from "../lib/profileTrace";
 import { withBackendProfileStep } from "../lib/profileTrace";
 import { syncProfitLossForFinancialDates } from "./profitLossService";
+import { syncPayStubForDates } from "./payStubsService";
 const noopTrace: BackendProfileTrace = {
     traceId: "entry-create-no-trace",
     flow: "entry_create",
@@ -29,6 +30,22 @@ async function syncIndependentProfitLossDates(workspaceId: string, dates: Array<
     }
     catch (error) {
         console.warn("profit loss sync failed after entry mutation", {
+            workspaceId,
+            dates: normalizedDates,
+            reason: error instanceof Error ? error.message : String(error),
+        });
+    }
+}
+async function syncW2PayStubDates(workspaceId: string, uid: string, dates: Array<string | null | undefined>) {
+    const normalizedDates = dates.filter((date): date is string => typeof date === "string" && date.length > 0);
+    if (normalizedDates.length === 0) {
+        return;
+    }
+    try {
+        await syncPayStubForDates(workspaceId, uid, normalizedDates);
+    }
+    catch (error) {
+        console.warn("pay stub sync failed after entry mutation", {
             workspaceId,
             dates: normalizedDates,
             reason: error instanceof Error ? error.message : String(error),
@@ -232,6 +249,9 @@ export async function createEntry(workspaceId: string, uid: string, input: unkno
     if (canonical.workspace === "independent") {
         await syncIndependentProfitLossDates(workspaceId, [canonical.date]);
     }
+    else if (canonical.workspace === "w2") {
+        await syncW2PayStubDates(workspaceId, uid, [canonical.date]);
+    }
     return {
         ok: true,
         id: docRef.id,
@@ -336,6 +356,9 @@ export async function updateEntry(workspaceId: string, uid: string, entryId: str
     if (priorEntry?.workspace === "independent" || updatedEntry.workspace === "independent") {
         await syncIndependentProfitLossDates(workspaceId, [priorEntry?.date, updatedEntry.date]);
     }
+    else if (priorEntry?.workspace === "w2" || updatedEntry.workspace === "w2") {
+        await syncW2PayStubDates(workspaceId, uid, [priorEntry?.date, updatedEntry.date]);
+    }
     // ---------------------------
     // 7. Return canonical entry
     // ---------------------------
@@ -379,6 +402,9 @@ export async function deleteEntry(workspaceId: string, uid: string, entryId: str
     const removedEntry = deletedEntry as EntryType | null;
     if (removedEntry?.workspace === "independent") {
         await syncIndependentProfitLossDates(workspaceId, [removedEntry.date]);
+    }
+    else if (removedEntry?.workspace === "w2") {
+        await syncW2PayStubDates(workspaceId, uid, [removedEntry.date]);
     }
     return {
         ok: true,

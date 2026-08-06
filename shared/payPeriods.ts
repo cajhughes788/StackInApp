@@ -252,6 +252,61 @@ export function getMostRecentlyClosedPayPeriod(
   return resolveRelativePeriod(settings, current, -1)
 }
 
+export function getEarliestEligiblePeriodEnd(
+  settings: SettingsType,
+  workspaceType: WorkspaceType,
+  workspaceCreatedAt: number | null
+): string | null {
+  if (workspaceCreatedAt == null) {
+    return null
+  }
+  const tz = getTimeZone(settings)
+  const workspaceCreatedAtDt = DateTime.fromMillis(workspaceCreatedAt, { zone: tz })
+  if (!workspaceCreatedAtDt.isValid) {
+    return null
+  }
+  return getCurrentEntryPeriod(settings, workspaceType, workspaceCreatedAtDt).end
+}
+
+export type PeriodListItem = ResolvedPayPeriod & { label: string }
+
+export function listPeriodsBack(
+  settings: SettingsType,
+  workspaceType: WorkspaceType,
+  workspaceCreatedAt: number | null,
+  options: { limit?: number; now?: DateTime | string | Date } = {}
+): PeriodListItem[] {
+  const tz = getTimeZone(settings)
+  const limit = options.limit ?? 60
+  const earliestEligiblePeriodEnd = getEarliestEligiblePeriodEnd(settings, workspaceType, workspaceCreatedAt)
+  const current = getCurrentEntryPeriod(settings, workspaceType, options.now)
+  const results: PeriodListItem[] = []
+
+  if (workspaceType === "independent") {
+    let cursor = DateTime.fromISO(current.start, { zone: tz })
+    for (let i = 0; i < limit; i += 1) {
+      const period = getCurrentCalendarMonthPeriodAt(settings, cursor)
+      if (earliestEligiblePeriodEnd && period.end < earliestEligiblePeriodEnd) {
+        break
+      }
+      results.push({ ...period, label: cursor.toFormat("LLLL yyyy") })
+      cursor = cursor.minus({ months: 1 })
+    }
+    return results
+  }
+
+  for (let index = 0; index > -limit; index -= 1) {
+    const period = getPayPeriodByIndex(settings, index)
+    if (earliestEligiblePeriodEnd && period.end < earliestEligiblePeriodEnd) {
+      break
+    }
+    const startLabel = DateTime.fromISO(period.start, { zone: tz }).toFormat("LLL d")
+    const endLabel = DateTime.fromISO(period.end, { zone: tz }).toFormat("LLL d, yyyy")
+    results.push({ ...period, label: `${startLabel} – ${endLabel}` })
+  }
+  return results
+}
+
 export function getStartOfYear(
   at: DateTime | string | Date = DateTime.now()
 ): string {

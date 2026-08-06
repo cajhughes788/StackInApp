@@ -13,6 +13,7 @@ import {
 } from "@/lib/stores/useSettingsStore"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import SyncStatusIndicator from "@/components/sync-status-indicator"
+import PeriodSelector from "@/components/period-selector"
 
 export default function IndependentExpenseGauge() {
   const workspaceState = useWorkspaceStore((s) => s.state)
@@ -71,10 +72,6 @@ export default function IndependentExpenseGauge() {
       : null
   const gaugeScale = targetExpenses ?? maxAmount
   const fillPercentage = Math.min((totalExpenses / gaugeScale) * 100, 100)
-  const monthLabel = useMemo(
-    () => new Intl.DateTimeFormat("en-US", { month: "long" }).format(new Date()),
-    []
-  )
 
   if (
     workspaceState.status !== "ready" ||
@@ -90,7 +87,7 @@ export default function IndependentExpenseGauge() {
     <div className="relative bg-card rounded-lg border p-4 shadow-sm sm:p-6">
       <SyncStatusIndicator visible={showSyncIndicator} label="Syncing expenses" />
 
-      <h2 className="mb-4 text-lg font-semibold">Current Month: {monthLabel}</h2>
+      <PeriodSelector />
 
       <div className="relative mb-5 h-28 sm:mb-6 sm:h-32">
         <div className="app-soft-surface absolute inset-0 rounded-lg overflow-hidden">

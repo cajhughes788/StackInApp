@@ -33,6 +33,7 @@ import * as expensesService from "@/lib/domain/expenseService"
 import { useExpenseMemoryStore } from "@/lib/stores/useExpenseMemoryStore"
 import { useSettingsStore } from "@/lib/stores/useSettingsStore"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
+import { useSelectedPeriod } from "@/lib/stores/usePeriodSelectionStore"
 import { createReceiptAsset, deleteReceiptAsset } from "@/lib/api/receiptAssetsApi"
 import { analyzeReceiptImageQuality } from "@/lib/receipts/imageQuality"
 import {
@@ -198,6 +199,7 @@ export default function ExpenseForm() {
     workspaceState.status === "ready" ? workspaceState.activeWorkspaceId : null
   const activeWorkspaceType =
     workspaceState.status === "ready" ? workspaceState.activeWorkspace.type : null
+  const selectedPeriod = useSelectedPeriod(activeWorkspaceId)
 
   const [form, setForm] = useState<FormState>(() =>
     createEmptyFormState("direct_expense")
@@ -379,6 +381,16 @@ export default function ExpenseForm() {
       date: value,
     }))
   }, [])
+
+  // Keep the expense date inside the viewed (possibly past) month's bounds.
+  useEffect(() => {
+    if (!selectedPeriod) return
+    setForm((prev) =>
+      prev.date < selectedPeriod.start || prev.date > selectedPeriod.end
+        ? { ...prev, date: selectedPeriod.end }
+        : prev
+    )
+  }, [selectedPeriod])
 
   const updateAccount = useCallback(
     (value: string) => {
@@ -990,6 +1002,8 @@ export default function ExpenseForm() {
                 data-stackin-date-input="true"
                 value={form.date}
                 onChange={(event) => updateDate(event.target.value)}
+                min={selectedPeriod?.start}
+                max={selectedPeriod?.end}
                 required
               />
             </div>

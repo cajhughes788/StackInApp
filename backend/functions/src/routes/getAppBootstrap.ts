@@ -122,6 +122,7 @@ export async function getAppBootstrapHandler(
       name: workspaceData.name,
       type: workspaceData.type,
       status: workspaceData.status,
+      createdAt: workspaceData.createdAt,
     }
 
     let settings: SettingsType | null = null

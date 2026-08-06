@@ -28,6 +28,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { SettingsDocSchema } from "@shared/schemas/settings";
 import { debugLog, debugRender } from "@/lib/debugLoop";
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore";
+import { useSelectedPeriod } from "@/lib/stores/usePeriodSelectionStore";
 function enforceHHMM(raw: string): string {
     const digits = raw.replace(/\D/g, "");
     if (digits.length === 1)
@@ -48,6 +49,7 @@ export default function EntryForm() {
     const activeWorkspaceId = workspaceState.status === "ready"
         ? workspaceState.activeWorkspaceId
         : null;
+    const selectedPeriod = useSelectedPeriod(activeWorkspaceId);
     const settingsEntry = useSettingsStore((s) => activeWorkspaceId ? s.byWorkspaceId[activeWorkspaceId] : undefined);
     const settings = settingsEntry?.data ?? null;
     const visibility = useMemo<EntryFormVisibility | null>(() => {
@@ -125,6 +127,17 @@ export default function EntryForm() {
             breakMinutes: settings.w2?.breakMinutesDefault ?? prev.breakMinutes,
         }));
     }, [settings]);
+    /** keep the entry date inside the viewed (possibly past) period's bounds */
+    useEffect(() => {
+        if (!selectedPeriod)
+            return;
+        setForm((prev) => ({
+            ...prev,
+            date: prev.date < selectedPeriod.start || prev.date > selectedPeriod.end
+                ? selectedPeriod.end
+                : prev.date,
+        }));
+    }, [selectedPeriod]);
     /** UI-only total — allowed */
     const total = useMemo(() => {
         const t = Number(form.tips || 0);
@@ -536,6 +549,8 @@ export default function EntryForm() {
               className="w-full min-w-0"
               value={form.date}
               onChange={(e) => setForm({ ...form, date: e.target.value })}
+              min={selectedPeriod?.start}
+              max={selectedPeriod?.end}
               required
             />
           </div>

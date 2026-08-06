@@ -19,6 +19,7 @@ import {
 import { computeIncomeGaugeForEntries } from "@shared/computeIncomeGauge";
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore";
 import SyncStatusIndicator from "@/components/sync-status-indicator";
+import PeriodSelector from "@/components/period-selector";
 export default function IncomeGauge() {
     const workspaceState = useWorkspaceStore((s) => s.state);
     const activeWorkspace = workspaceState.status === "ready"
@@ -161,7 +162,7 @@ export default function IncomeGauge() {
     return (<div ref={previewRef} className="relative bg-card rounded-lg border p-4 shadow-sm sm:p-6">
       <SyncStatusIndicator visible={showSyncIndicator} label="Syncing pay summary"/>
 
-      <h2 className="mb-4 text-lg font-semibold">Current Pay Period</h2>
+      <PeriodSelector />
 
       {/* --- Gauge Bar --- */}
       <div className="relative mb-5 h-28 sm:mb-6 sm:h-32">

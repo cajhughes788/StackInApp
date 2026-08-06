@@ -370,6 +370,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
           name: ws.name as string,
           type: ws.type as WorkspaceSummary["type"],
           status: ws.status as WorkspaceSummary["status"],
+          createdAt: ws.createdAt as number,
         }
       })
       .filter((workspace) => workspace.status === "active")

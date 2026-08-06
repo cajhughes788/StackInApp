@@ -23,7 +23,8 @@ import {
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore";
 import { useTaxProfileStore } from "@/lib/stores/useTaxProfileStore";
 import { usePayStubsStore } from "@/lib/stores/usePaystubsStore";
-import { getCalendarMonthBucketAt, getCurrentCalendarMonthPeriodAt, getCurrentEntryPeriod } from "@shared/payPeriods";
+import { getCalendarMonthBucketAt, getCalendarMonthBucketFromDate, getCurrentCalendarMonthPeriodAt, getCurrentEntryPeriod } from "@shared/payPeriods";
+import { useSelectedPeriod } from "@/lib/stores/usePeriodSelectionStore";
 import ExpenseForm from "@/components/expense-form";
 import ExpensesGrid from "@/components/expenses-grid";
 import VenmoImportPanel from "@/components/venmo-import-panel";
@@ -51,6 +52,7 @@ export default function HomePage() {
         ? workspaceState.activeWorkspaceId
         : null;
     const supportsExpenses = activeWorkspace?.type === "independent";
+    const selectedPeriod = useSelectedPeriod(activeWorkspaceId);
     const settings = useSettingsData(activeWorkspaceId);
     const settingsState = useSettingsRenderState(activeWorkspaceId);
     const showVenmoImportPanel = settings?.independent?.enableVenmo === true;
@@ -194,10 +196,12 @@ export default function HomePage() {
         if (!user || !settings || !activeWorkspaceId || !activeWorkspace) {
             return;
         }
-        const entryPeriod = getCurrentEntryPeriod(settings, activeWorkspace.type);
+        const entryPeriod = selectedPeriod ?? getCurrentEntryPeriod(settings, activeWorkspace.type);
         const entriesPeriodId = entryPeriod.periodId;
         const calendarMonthPeriodId = getCurrentCalendarMonthPeriodAt(settings).periodId;
-        const expensesMonthBucket = getCalendarMonthBucketAt(settings);
+        const expensesMonthBucket = selectedPeriod
+            ? getCalendarMonthBucketFromDate(selectedPeriod.start, settings)
+            : getCalendarMonthBucketAt(settings);
         const hydrationKey = `${activeWorkspaceId}::${entriesPeriodId}::${supportsExpenses ? expensesMonthBucket : "no-expenses"}`;
         if (didHydrateKeyRef.current === hydrationKey) {
             return;
@@ -243,6 +247,7 @@ export default function HomePage() {
         hydrateEntries,
         hydrateExpensesOnce,
         supportsExpenses,
+        selectedPeriod,
     ]);
     // Layout already gates on workspace ready; this is a safety net for direct navigation.
     const showBlockingLoader = workspaceState.status !== "ready";

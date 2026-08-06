@@ -237,6 +237,7 @@ export default function WelcomePage() {
           name: res.workspace.name,
           type: res.workspace.type,
           status: res.workspace.status ?? "active",
+          createdAt: res.workspace.createdAt,
         },
         true
       )

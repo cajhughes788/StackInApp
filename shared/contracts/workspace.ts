@@ -67,6 +67,7 @@ export interface WorkspaceSummary {
   type: WorkspaceType
   name: string
   status: WorkspaceStatus
+  createdAt: number
 }
 
 /**
