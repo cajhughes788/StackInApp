@@ -14,9 +14,17 @@ import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import { usePeriodSelectionStore, useSelectedPeriod } from "@/lib/stores/usePeriodSelectionStore"
 import { listPeriodsBack } from "@shared/payPeriods"
 
+function CurrentBadge() {
+  return (
+    <span className="ml-2 inline-flex items-center rounded-full bg-emerald-500 px-2 py-0.5 text-[11px] font-semibold leading-none text-white">
+      Current
+    </span>
+  )
+}
+
 // Shared by the Independent income/expense gauges (calendar months) and the
 // W2 income gauge (pay periods) so the "which period am I looking at"
-// dropdown and closed-period banner only exist in one place.
+// dropdown only exists in one place.
 export default function PeriodSelector() {
   const workspaceState = useWorkspaceStore((s) => s.state)
   const activeWorkspace =
@@ -38,9 +46,6 @@ export default function PeriodSelector() {
 
   const currentPeriod = periods[0]
   const activePeriodId = selectedPeriod?.periodId ?? currentPeriod.periodId
-  const periodNoun = activeWorkspace.type === "independent" ? "month" : "pay period"
-  const statementNoun =
-    activeWorkspace.type === "independent" ? "profit & loss statement" : "estimated earnings"
 
   return (
     <div className="mb-4">
@@ -59,17 +64,14 @@ export default function PeriodSelector() {
         <SelectContent>
           {periods.map((period) => (
             <SelectItem key={period.periodId} value={period.periodId}>
-              {period.label}
-              {period.periodId === currentPeriod.periodId ? " (current)" : ""}
+              <span className="inline-flex items-center">
+                {period.label}
+                {period.periodId === currentPeriod.periodId ? <CurrentBadge /> : null}
+              </span>
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
-      {selectedPeriod ? (
-        <p className="mt-1 text-xs text-amber-600">
-          You&rsquo;re viewing a closed {periodNoun} — changes here will update its {statementNoun}.
-        </p>
-      ) : null}
     </div>
   )
 }

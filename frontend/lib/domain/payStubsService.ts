@@ -186,10 +186,23 @@ export async function clear(workspaceId?: WorkspaceId): Promise<void> {
 }
 /**
  * ------------------------------------------------------------
- * invalidate — only calls new clear() + load(true)
+ * invalidate — zeroes the TTL timestamp (both in-memory + IndexedDB)
+ * without discarding cached data or eagerly refetching. The next
+ * ensureLoaded call will skip the freshness check and fetch fresh
+ * data, but cached stubs stay visible in the UI until that completes.
+ *
+ * Deliberately lazy (mirrors profitLossService.invalidate): an eager
+ * fetch here would race the reconcile-time invalidate call from the
+ * same mutation, and an earlier (pre-confirm) fetch resolving after
+ * the later (post-confirm) one would clobber fresh data with stale.
  * ------------------------------------------------------------
  */
-export async function invalidate(workspaceId: WorkspaceId): Promise<PayStub.Type[]> {
-    await clear(workspaceId);
-    return load(workspaceId, true);
+export async function invalidate(workspaceId: WorkspaceId): Promise<void> {
+    clearSyncMetadata(workspaceId);
+    const record = await readPayStubsCacheRecord(workspaceId);
+    if (!record) return;
+    await savePayStubsCache(workspaceId, record.data, {
+        lastSuccessfulSyncAt: null,
+        localUpdatedAt: record.localUpdatedAt,
+    });
 }

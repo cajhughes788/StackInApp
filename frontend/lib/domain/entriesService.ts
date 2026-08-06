@@ -30,6 +30,7 @@ import { toast } from "@/hooks/use-toast";
 // Store import
 import { useEntriesStore } from "@/lib/stores/useEntriesStore";
 import * as profitLossService from "@/lib/domain/profitLossService";
+import * as payStubsService from "@/lib/domain/payStubsService";
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore";
 import { syncWorkspaceGeofenceEntryStatus } from "@/lib/mobile/geofenceReminderSync";
 import { syncWorkspaceTimeEntryReminderForDate } from "@/lib/mobile/timeEntryReminderSync";
@@ -165,6 +166,9 @@ function showPermanentEntryFailureToast(error: unknown) {
 }
 function invalidateProfitLossView(workspaceId: string) {
     void profitLossService.invalidate(workspaceId).catch(() => {});
+}
+function invalidatePayStubsView(workspaceId: string) {
+    void payStubsService.invalidate(workspaceId).catch(() => {});
 }
 // CHANGE: Replaced flat-field optimistic computation with workspace-aware, nested-schema-compatible logic.
 // - Workspace type is derived from authoritative settings (not raw input)
@@ -337,6 +341,9 @@ async function reconcileOptimisticEntry(workspaceId: string, settings: SettingsT
         if (canonical.workspace === "independent") {
             invalidateProfitLossView(workspaceId);
         }
+        else if (canonical.workspace === "w2") {
+            invalidatePayStubsView(workspaceId);
+        }
         const postWriteEntries =
             useEntriesStore.getState().byWorkspaceId[workspaceId]?.entries ?? [];
         scheduleTimeReminderDateSync(workspaceId, settings, postWriteEntries, [canonical.date]);
@@ -422,6 +429,9 @@ async function reconcileOptimisticEntryUpdate(
     }
     if (canonical.workspace === "independent") {
         invalidateProfitLossView(workspaceId);
+    }
+    else if (canonical.workspace === "w2") {
+        invalidatePayStubsView(workspaceId);
     }
     const postWriteEntries =
         useEntriesStore.getState().byWorkspaceId[workspaceId]?.entries ?? [];
@@ -578,6 +588,9 @@ export async function createEntry(workspaceId: string, rawInput: any, options: {
     }
     if (parsed.workspace === "independent") {
         invalidateProfitLossView(workspaceId);
+    }
+    else if (parsed.workspace === "w2") {
+        invalidatePayStubsView(workspaceId);
     }
     traceApiRequest("entries", diagTraceId, {
         endpoint: `/api/workspaces/${workspaceId}/entries`,
@@ -744,6 +757,9 @@ export async function updateEntry(workspaceId: string, entryId: string, patch: a
     if ((existing as any).workspace === "independent") {
         invalidateProfitLossView(workspaceId);
     }
+    else if ((existing as any).workspace === "w2") {
+        invalidatePayStubsView(workspaceId);
+    }
     const payload = {
         date: snapshotMerged.date,
         notes: snapshotMerged.notes,
@@ -889,6 +905,9 @@ export async function removeEntry(workspaceId: string, entryId: string): Promise
         }
         if (removedEntry.workspace === "independent") {
             invalidateProfitLossView(workspaceId);
+        }
+        else if (removedEntry.workspace === "w2") {
+            invalidatePayStubsView(workspaceId);
         }
         void useEntriesStore.getState().refreshFromBackend(workspaceId, visiblePeriodId, { force: true });
     }
