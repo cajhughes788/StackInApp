@@ -3,11 +3,12 @@
 import { useEffect, useRef } from "react";
 import type React from "react";
 
-import { getCalendarMonthBucketAt, getCurrentCalendarMonthPeriodAt, getCurrentEntryPeriod } from "@shared/payPeriods";
+import { getCalendarMonthBucketAt, getCalendarMonthBucketFromDate, getCurrentCalendarMonthPeriodAt, getCurrentEntryPeriod } from "@shared/payPeriods";
 
 import { useAuth } from "@/contexts/auth-context";
 import { useEntriesStore } from "@/lib/stores/useEntriesStore";
 import { useExpensesStore } from "@/lib/stores/useExpensesStore";
+import { usePeriodSelectionStore } from "@/lib/stores/usePeriodSelectionStore";
 import { useSettingsStore } from "@/lib/stores/useSettingsStore";
 import { useTaxProfileStore } from "@/lib/stores/useTaxProfileStore";
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore";
@@ -68,7 +69,8 @@ export function useAppOpenRefresh({
       }
 
       const workspaceType = workspaceState.activeWorkspace.type;
-      const entryPeriodId = getCurrentEntryPeriod(settings, workspaceType).periodId;
+      const selectedPeriod = usePeriodSelectionStore.getState().byWorkspaceId[activeWorkspaceId] ?? null;
+      const entryPeriodId = selectedPeriod?.periodId ?? getCurrentEntryPeriod(settings, workspaceType).periodId;
       const entriesEntry = useEntriesStore.getState().byWorkspaceId[activeWorkspaceId];
       const taxEntry = useTaxProfileStore.getState().byWorkspaceId[activeWorkspaceId];
 
@@ -80,7 +82,9 @@ export function useAppOpenRefresh({
       ];
 
       if (workspaceType === "independent") {
-        const expensesPeriodId = getCalendarMonthBucketAt(settings);
+        const expensesPeriodId = selectedPeriod
+          ? getCalendarMonthBucketFromDate(selectedPeriod.start, settings)
+          : getCalendarMonthBucketAt(settings);
         const expensesEntry = useExpensesStore.getState().byWorkspaceId[activeWorkspaceId];
         resources.push(
           expensesEntry?.periodId === expensesPeriodId
@@ -132,7 +136,8 @@ export function useAppOpenRefresh({
         }
 
         const workspaceType = workspaceState.activeWorkspace.type;
-        const period = getCurrentEntryPeriod(settings, workspaceType);
+        const selectedPeriod = usePeriodSelectionStore.getState().byWorkspaceId[activeWorkspaceId] ?? null;
+        const period = selectedPeriod ?? getCurrentEntryPeriod(settings, workspaceType);
 
         logPerf("app_open_refresh.entries_period_selected", {
           workspaceId: activeWorkspaceId,
@@ -156,7 +161,9 @@ export function useAppOpenRefresh({
         );
 
         if (workspaceType === "independent") {
-          const expensesPeriodId = getCalendarMonthBucketAt(settings);
+          const expensesPeriodId = selectedPeriod
+            ? getCalendarMonthBucketFromDate(selectedPeriod.start, settings)
+            : getCalendarMonthBucketAt(settings);
           await measureAsync(
             "app_open_refresh.expenses",
             () =>

@@ -2,7 +2,7 @@
 
 import { useEffect } from "react"
 
-import { getCalendarMonthBucketAt, getCurrentEntryPeriod } from "@shared/payPeriods"
+import { getCalendarMonthBucketAt, getCalendarMonthBucketFromDate, getCurrentEntryPeriod } from "@shared/payPeriods"
 
 import {
   syncAllWorkspaceGeofenceEntryStatus,
@@ -12,6 +12,7 @@ import { syncAllWorkspaceTimeEntryReminders } from "@/lib/mobile/timeEntryRemind
 import { measureAsync } from "@/lib/observability/perf"
 import { useEntriesStore } from "@/lib/stores/useEntriesStore"
 import { useExpensesStore } from "@/lib/stores/useExpensesStore"
+import { usePeriodSelectionStore } from "@/lib/stores/usePeriodSelectionStore"
 import { useReceiptDraftsStore } from "@/lib/stores/useReceiptDraftsStore"
 import { useSettingsStore } from "@/lib/stores/useSettingsStore"
 import { useTaxProfileStore } from "@/lib/stores/useTaxProfileStore"
@@ -76,7 +77,8 @@ export function useAuxiliaryWorkspaceRefresh({ enabled }: { enabled: boolean }) 
                 continue
               }
 
-              const period = getCurrentEntryPeriod(settings, workspace.type)
+              const selectedPeriod = usePeriodSelectionStore.getState().byWorkspaceId[workspace.id] ?? null
+              const period = selectedPeriod ?? getCurrentEntryPeriod(settings, workspace.type)
               await useEntriesStore
                 .getState()
                 .hydrateFromCacheOnce(workspace.id, period.periodId)
@@ -86,7 +88,9 @@ export function useAuxiliaryWorkspaceRefresh({ enabled }: { enabled: boolean }) 
                 .refreshFromBackend(workspace.id, period.periodId, { force: false })
 
               if (workspace.type === "independent") {
-                const expensesPeriodId = getCalendarMonthBucketAt(settings)
+                const expensesPeriodId = selectedPeriod
+                  ? getCalendarMonthBucketFromDate(selectedPeriod.start, settings)
+                  : getCalendarMonthBucketAt(settings)
 
                 await useExpensesStore
                   .getState()
