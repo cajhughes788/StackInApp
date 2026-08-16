@@ -107,15 +107,9 @@ export async function analyzeReceiptImageQuality(
   if (edgeDensity <= 0.12) warnings.push("The receipt edges are faint or tightly cropped.")
   if (width < 900 || height < 900) warnings.push("A higher-resolution image would improve extraction.")
 
+  // Photos are informational only — never block upload with "bad" status.
   let qualityStatus: ReceiptQualityStatus = "good"
-  if (
-    blurScore >= 0.93 ||
-    glareScore >= 0.92 ||
-    contrastScore <= 0.04 ||
-    (edgeDensity <= 0.02 && blurScore >= 0.82)
-  ) {
-    qualityStatus = "bad"
-  } else if (warnings.length > 0) {
+  if (warnings.length > 0) {
     qualityStatus = "warning"
   }
 

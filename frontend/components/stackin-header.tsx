@@ -107,12 +107,6 @@ export default function StackInHeader() {
 
       if (navigationGuard?.mode === "background") {
         void navigationGuard.flush()
-        toast({
-          title: "Saving settings in background",
-          description:
-            navigationGuard.reason ??
-            "Your latest settings changes will keep saving after you leave this page.",
-        })
       }
 
       startTransition(() => {

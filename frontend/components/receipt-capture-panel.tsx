@@ -360,6 +360,11 @@ export default function ReceiptCapturePanel() {
   const [pendingHistoricalCommit, setPendingHistoricalCommit] = useState<ReceiptDraft | null>(
     null
   )
+  // Upload failure tracking: maps receiptAssetId → source File so the user can
+  // retry the GCS upload without re-capturing the photo.
+  const pendingUploadFilesRef = useRef<Record<string, File>>({})
+  const [uploadFailedReceiptAssetIds, setUploadFailedReceiptAssetIds] = useState<Set<string>>(new Set())
+
   const cameraInputRef = useRef<HTMLInputElement | null>(null)
   const libraryInputRef = useRef<HTMLInputElement | null>(null)
   const draftSyncTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
@@ -619,6 +624,13 @@ export default function ReceiptCapturePanel() {
       delete next[receiptAssetId]
       return next
     })
+    delete pendingUploadFilesRef.current[receiptAssetId]
+    setUploadFailedReceiptAssetIds((current) => {
+      if (!current.has(receiptAssetId)) return current
+      const next = new Set(current)
+      next.delete(receiptAssetId)
+      return next
+    })
     if (options.clearTrace !== false) {
       clearCaptureTraceForReceiptAsset(receiptAssetId)
     }
@@ -757,17 +769,6 @@ export default function ReceiptCapturePanel() {
         { sizeBytes: file.size }
       )
       throwIfCaptureProcessAborted(captureAbortController)
-
-      if (quality.qualityStatus === "bad") {
-        trace.mark("receipt.quality_blocked", {
-          blurScore: Number(quality.blurScore.toFixed(3)),
-          glareScore: Number(quality.glareScore.toFixed(3)),
-        })
-        throw new Error(
-          quality.warnings[0] ||
-            "This receipt image is too hard to read. Please retake the photo before continuing."
-        )
-      }
 
       const clientReceiptAssetId = createClientReceiptAssetId()
       trace.mark("receipt.preview_prepare_local", { receiptAssetId: clientReceiptAssetId })
@@ -932,6 +933,8 @@ export default function ReceiptCapturePanel() {
 
         // Storage upload, preview and thumbnail all happen in the background.
         // The user is already looking at the pre-filled form by this point.
+        // Store the source file so the user can retry the upload if it fails.
+        pendingUploadFilesRef.current[storedReceiptAsset.id] = file
         const backgroundDecodedReceiptImage = decodedReceiptImage
         decodedReceiptImage = null
         void (async (
@@ -1001,17 +1004,21 @@ export default function ReceiptCapturePanel() {
             }
             await Promise.all(cacheWrites)
 
+            delete pendingUploadFilesRef.current[originalAsset.id]
             trace.mark("receipt.cache_ready", {
               receiptAssetId: originalAsset.id,
               version,
             })
           } catch (backgroundError) {
             if (isAbortError(backgroundError)) {
+              delete pendingUploadFilesRef.current[originalAsset.id]
               return
             }
             trace.error("receipt.media_background_failed", backgroundError, {
               receiptAssetId: originalAsset.id,
             })
+            // Surface a non-blocking warning so the user can retry the upload.
+            setUploadFailedReceiptAssetIds((current) => new Set([...current, originalAsset.id]))
           } finally {
             backgroundDecodedReceiptImage?.close()
           }
@@ -1146,11 +1153,15 @@ export default function ReceiptCapturePanel() {
       })
       decodedReceiptImage?.close()
       decodedReceiptImage = null
+      // Only clear uploading state if no newer upload has already taken over the
+      // controller slot. Without this guard, a fast re-upload that starts while
+      // this one is still winding down would have its loading indicator cleared
+      // prematurely by this finally block.
       if (activeProcessAbortControllerRef.current === captureAbortController) {
         activeProcessAbortControllerRef.current = null
+        setOcrStatus(null)
+        setUploading(false)
       }
-      setOcrStatus(null)
-      setUploading(false)
     }
   }
 
@@ -1411,6 +1422,75 @@ export default function ReceiptCapturePanel() {
     }
 
     setExpanded(true)
+  }
+
+  // Retries the GCS upload for a draft whose background upload previously failed.
+  // Uses the stored source File (kept in pendingUploadFilesRef) so the user does
+  // not need to re-capture the photo. Clears the failure badge on success.
+  async function retryReceiptUpload(item: ReceiptDraft) {
+    if (!activeWorkspaceId) return
+
+    const sourceFile = pendingUploadFilesRef.current[item.receiptAssetId]
+    const asset = item.receiptAsset
+    if (!sourceFile || !asset) return
+
+    setUploadFailedReceiptAssetIds((current) => {
+      const next = new Set(current)
+      next.delete(item.receiptAssetId)
+      return next
+    })
+    setWorkingItemId(item.id)
+
+    void (async () => {
+      try {
+        throwIfReceiptSessionInactive(item.receiptAssetId)
+
+        const [uploadFile, previewFile, thumbnailFile] = await Promise.all([
+          prepareReceiptUploadFile(sourceFile),
+          prepareReceiptPreviewFile(sourceFile),
+          prepareReceiptThumbnailFile(sourceFile),
+        ])
+        throwIfReceiptSessionInactive(item.receiptAssetId)
+
+        await uploadReceiptAssetToStorage(
+          uploadFile,
+          asset.originalStoragePath ?? asset.storagePath ?? "",
+          { resolveDownloadUrl: false }
+        )
+        throwIfReceiptSessionInactive(item.receiptAssetId)
+
+        const [previewResult, thumbnailResult] = await Promise.allSettled([
+          uploadReceiptAssetToStorage(previewFile, asset.previewStoragePath ?? ""),
+          uploadReceiptAssetToStorage(thumbnailFile, asset.thumbnailStoragePath ?? ""),
+        ])
+        throwIfReceiptSessionInactive(item.receiptAssetId)
+
+        const version = asset.version ?? 1
+        const cacheWrites: Promise<unknown>[] = []
+        if (previewResult.status === "fulfilled") {
+          cacheWrites.push(
+            saveReceiptMediaFromFile(activeWorkspaceId, asset.id, "preview", version, previewFile)
+          )
+        }
+        if (thumbnailResult.status === "fulfilled") {
+          cacheWrites.push(
+            saveReceiptMediaFromFile(activeWorkspaceId, asset.id, "thumbnail", version, thumbnailFile)
+          )
+        }
+        await Promise.all(cacheWrites)
+
+        delete pendingUploadFilesRef.current[item.receiptAssetId]
+      } catch (err) {
+        if (isAbortError(err)) {
+          delete pendingUploadFilesRef.current[item.receiptAssetId]
+          return
+        }
+        setUploadFailedReceiptAssetIds((current) => new Set([...current, item.receiptAssetId]))
+        setError("Receipt image upload failed. Check your connection and try again.")
+      } finally {
+        setWorkingItemId(null)
+      }
+    })()
   }
 
   function persistReceiptItemPatch(item: ReceiptDraft, patch: ReceiptDraftPatch) {
@@ -2004,6 +2084,22 @@ export default function ReceiptCapturePanel() {
                         <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                           Receipt analysis didn&apos;t complete — the app was likely closed before it finished.
                           Dismiss this draft or retake the photo to try again.
+                        </div>
+                      ) : null}
+
+                      {!isStuck && uploadFailedReceiptAssetIds.has(editableItem.receiptAssetId) ? (
+                        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                          <span>Receipt image failed to upload — the photo may not be viewable.</span>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-6 px-2 text-xs"
+                            disabled={workingItemId === editableItem.id}
+                            onClick={() => void retryReceiptUpload(editableItem)}
+                          >
+                            Retry Upload
+                          </Button>
                         </div>
                       ) : null}
 

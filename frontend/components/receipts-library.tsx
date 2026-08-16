@@ -1,12 +1,13 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { ReceiptText } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import ReceiptThumbnail from "@/components/receipt-thumbnail"
 import ReceiptViewerTrigger from "@/components/receipt-viewer-trigger"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
+import { useExpensesStore } from "@/lib/stores/useExpensesStore"
 import { useReceiptDraftsStore } from "@/lib/stores/useReceiptDraftsStore"
 import * as expenseRepository from "@/lib/domain/expenseRepository"
 import { getCalendarMonthBucketFromDate } from "@shared/payPeriods"
@@ -60,6 +61,10 @@ export default function ReceiptsLibrary() {
   const activeWorkspaceId =
     workspaceState.status === "ready" ? workspaceState.activeWorkspaceId : null
 
+  const storeEntry = useExpensesStore((state) =>
+    activeWorkspaceId ? state.byWorkspaceId[activeWorkspaceId] : undefined
+  )
+
   const receiptDraftsEntry = useReceiptDraftsStore((state) =>
     activeWorkspaceId ? state.byWorkspaceId[activeWorkspaceId] : undefined
   )
@@ -78,8 +83,23 @@ export default function ReceiptsLibrary() {
     void refreshDrafts(activeWorkspaceId, { force: false })
   }, [activeWorkspaceId, activeWorkspace?.type, refreshDrafts])
 
+  // True when the store already has expenses loaded for the selected month.
+  // When this is the case effectiveExpenses reads from the store directly,
+  // so neither an IndexedDB read nor a backend fetch is needed.
+  const storeHasSelectedMonth =
+    storeEntry !== undefined &&
+    storeEntry.periodId === selectedMonth &&
+    storeEntry.expenses.length > 0
+
   useEffect(() => {
     if (!activeWorkspaceId || activeWorkspace?.type !== "independent") return
+
+    // Store already has live data for this month — skip the fetch entirely.
+    if (storeHasSelectedMonth) {
+      setExpensesLoading(false)
+      return
+    }
+
     let canceled = false
     setExpensesLoading(true)
 
@@ -119,7 +139,41 @@ export default function ReceiptsLibrary() {
     return () => {
       canceled = true
     }
-  }, [activeWorkspaceId, activeWorkspace?.type, selectedMonth])
+  }, [activeWorkspaceId, activeWorkspace?.type, selectedMonth, storeHasSelectedMonth])
+
+  // Fallback path: when the fast path is inactive (storeHasSelectedMonth is
+  // false), keep monthExpenses in sync with any store mutation — both
+  // deletions (count drops) and additions (count rises). deleteExpense and
+  // createExpense both write to IndexedDB before any network call, so a cache
+  // read here is always correct and costs no round-trip.
+  const prevStoreCountRef = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    const count = storeEntry?.expenses.length
+    const prev = prevStoreCountRef.current
+    prevStoreCountRef.current = count
+
+    if (
+      typeof count === "number" &&
+      typeof prev === "number" &&
+      count !== prev &&
+      !storeHasSelectedMonth &&
+      activeWorkspaceId &&
+      activeWorkspace?.type === "independent"
+    ) {
+      void expenseRepository
+        .readCachedSnapshot(activeWorkspaceId, selectedMonth)
+        .then((cached) => setMonthExpenses(cached.data))
+    }
+  }, [storeEntry?.expenses.length, activeWorkspaceId, activeWorkspace?.type, selectedMonth, storeHasSelectedMonth])
+
+  // Fast path: when the store has the selected month loaded, use it directly
+  // so deletions are reflected in a single render with no I/O.
+  const effectiveExpenses = useMemo(() => {
+    if (storeEntry && storeEntry.periodId === selectedMonth && storeEntry.expenses.length > 0) {
+      return storeEntry.expenses
+    }
+    return monthExpenses
+  }, [storeEntry, selectedMonth, monthExpenses])
 
   const draftsByReceiptAssetId = useMemo(() => {
     return new Map(
@@ -142,7 +196,7 @@ export default function ReceiptsLibrary() {
   }, [receiptDraftsEntry?.drafts])
 
   const visibleReceipts = useMemo(() => {
-    return [...monthExpenses]
+    return [...effectiveExpenses]
       .filter(
         (expense) =>
           typeof expense.receiptAssetId === "string" &&

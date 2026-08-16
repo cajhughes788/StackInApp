@@ -47,8 +47,22 @@ import type { WorkspaceId } from "@shared/contracts/workspace"
 import { useExpensesStore } from "@/lib/stores/useExpensesStore"
 import { useReceiptDraftsStore } from "@/lib/stores/useReceiptDraftsStore"
 import * as profitLossService from "@/lib/domain/profitLossService"
+
 function invalidateProfitLossView(workspaceId: WorkspaceId) {
   void profitLossService.invalidate(workspaceId).catch(() => {})
+}
+
+// Derives the YYYY-MM period bucket from an expense object. Prefers the stored
+// periodId field; falls back to slicing the date string so that old cached
+// records without a periodId still resolve to the correct IndexedDB key.
+function resolvePeriodId(expense: any): string | null {
+  if (typeof expense?.periodId === "string" && expense.periodId.length > 0) {
+    return expense.periodId
+  }
+  if (typeof expense?.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(expense.date)) {
+    return expense.date.slice(0, 7)
+  }
+  return null
 }
 async function reconcileOptimisticExpenseUpdate(
   workspaceId: WorkspaceId,
@@ -256,7 +270,9 @@ export async function updateExpense(
     workspaceId,
     updatedAtLocal: patch.updatedAtLocal ?? nowIso,
   }
-  const scopedPeriodId = `${workspaceId}::${optimistic.periodId}`
+  const periodId = resolvePeriodId(optimistic)
+  if (!periodId) throw new Error("Expense has no period — cannot update.")
+  const scopedPeriodId = `${workspaceId}::${periodId}`
 
   // 3. Update Zustand (instant UI)
   useExpensesStore.getState().replaceExpense(
@@ -290,7 +306,7 @@ export async function updateExpense(
     traceReconciliation("expenses", diagTraceId, "rollback_applied", { expenseId, reason: "api_failure" })
     // Restore the pre-edit value and notify the user.
     useExpensesStore.getState().replaceExpense(workspaceId, expenseId, existing)
-    void domainExpenses.saveExpense(`${workspaceId}::${existing.periodId}`, existing).catch(() => {})
+    void domainExpenses.saveExpense(`${workspaceId}::${resolvePeriodId(existing) ?? ""}`, existing).catch(() => {})
     toast({
       title: "Expense update failed",
       description: "Your change could not be saved. The previous value has been restored.",
@@ -316,7 +332,10 @@ export async function deleteExpense(
   )
   if (!existing) throw new Error("Expense not found locally")
 
-  const scopedPeriodId = `${workspaceId}::${existing.periodId}`
+  const expensePeriodId = resolvePeriodId(existing)
+  if (!expensePeriodId) throw new Error("Expense has no period — cannot delete.")
+  const scopedPeriodId = `${workspaceId}::${expensePeriodId}`
+
   const relatedReceiptDrafts = existing.receiptAssetId
     ? (
         useReceiptDraftsStore.getState().byWorkspaceId[workspaceId]?.drafts ?? []
@@ -330,11 +349,14 @@ export async function deleteExpense(
   // 3. Remove from IndexedDB immediately
   await domainExpenses.deleteExpense(scopedPeriodId, expenseId)
 
+  // Remove the receipt draft from the store optimistically so the UI updates
+  // immediately. The media cache is NOT cleared here — we wait for the backend
+  // to confirm before wiping local cache so a rollback on network failure
+  // leaves the thumbnail intact and visible.
   if (existing.receiptAssetId) {
     useReceiptDraftsStore
       .getState()
       .removeDraftsForReceiptAsset(workspaceId, existing.receiptAssetId)
-    await clearReceiptMediaForAsset(workspaceId, existing.receiptAssetId)
   }
 
   // 4. If offline — queue delete + return
@@ -348,7 +370,11 @@ export async function deleteExpense(
       await offlineQueue.removeMatching(
         (m) => m.id === expenseId && (m.method === "POST" || m.method === "PATCH")
       )
-      // Create and all edits cancel out — nothing to sync.
+      // Create and all edits cancel out — clear cache now since there is no
+      // backend call to confirm and the user's intent is clear.
+      if (existing.receiptAssetId) {
+        void clearReceiptMediaForAsset(workspaceId, existing.receiptAssetId).catch(() => {})
+      }
       return
     }
 
@@ -360,6 +386,11 @@ export async function deleteExpense(
       body: null,
     })
 
+    // Clear the local media cache for offline deletes — the delete is queued
+    // and will replay when connectivity returns. User intent is unambiguous.
+    if (existing.receiptAssetId) {
+      void clearReceiptMediaForAsset(workspaceId, existing.receiptAssetId).catch(() => {})
+    }
     return
   }
 
@@ -372,7 +403,7 @@ export async function deleteExpense(
       throw new Error("Delete failed: " + (res.error || "unknown error"))
     }
   } catch (error) {
-    // Phase 4: restore only the deleted expense — do not overwrite the full array,
+    // Restore only the deleted expense — do not overwrite the full array,
     // which would clobber any expenses added concurrently during the network call.
     useExpensesStore.getState().addExpense(workspaceId, existing)
     await domainExpenses.saveExpense(scopedPeriodId, existing)
@@ -381,13 +412,14 @@ export async function deleteExpense(
       useReceiptDraftsStore.getState().applyDraft(workspaceId, draft)
     }
 
+    // Media cache was never cleared so the thumbnail is still intact — no
+    // restoration needed.
     throw error
   }
 
-  // The optimistic delete already removed the expense from the Zustand store
-  // (removeExpense) and from IndexedDB (domainExpenses.deleteExpense) before
-  // the network call. The backend confirmed the delete. Both layers are in the
-  // correct state — no post-delete refresh is needed. The TTL-based
-  // revalidation (EXPENSES_BACKEND_TTL_MS) handles any concurrent changes from
-  // other devices in the normal background cycle.
+  // Backend confirmed the delete. Now safe to wipe the local media cache —
+  // the expense is gone server-side and a rollback is no longer possible.
+  if (existing.receiptAssetId) {
+    void clearReceiptMediaForAsset(workspaceId, existing.receiptAssetId).catch(() => {})
+  }
 }

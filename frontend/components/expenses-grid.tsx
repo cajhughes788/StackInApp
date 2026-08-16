@@ -24,6 +24,7 @@ import {
 import { formatCurrency, parseLocalDate } from "@/lib/helpers"
 import { thBase, tdBase } from "@/lib/tableStyles"
 import { cn } from "@/lib/utils"
+import { useToast } from "@/hooks/use-toast"
 import ReceiptViewerTrigger from "@/components/receipt-viewer-trigger"
 import SyncStatusIndicator from "@/components/sync-status-indicator"
 
@@ -44,6 +45,7 @@ function getEditableCellClasses(armed: boolean, alignment: "center" | "right" = 
 
 export default function ExpensesGrid() {
   const gridRootRef = useRef<HTMLDivElement>(null)
+  const { toast } = useToast()
   const workspaceState = useWorkspaceStore((s) => s.state)
   const activeWorkspaceId =
     workspaceState.status === "ready"
@@ -174,7 +176,7 @@ export default function ExpensesGrid() {
     if (field === "amount") {
       const num = Number(value)
       if (isNaN(num)) {
-        alert("Invalid amount")
+        toast({ title: "Invalid amount", description: "Enter a valid number.", variant: "destructive" })
         return
       }
       patch.amount = num
@@ -186,7 +188,7 @@ export default function ExpensesGrid() {
         customExpenseCategories
       )
       if (!normalizedAccount) {
-        alert("Please choose a valid expense category.")
+        toast({ title: "Invalid category", description: "Please choose a valid expense category.", variant: "destructive" })
         return
       }
       patch.account = normalizedAccount
@@ -196,8 +198,16 @@ export default function ExpensesGrid() {
       patch.vendor = value.trim()
     }
 
-    await expensesService.updateExpense(activeWorkspaceId, id, patch)
-    closeEditor()
+    try {
+      await expensesService.updateExpense(activeWorkspaceId, id, patch)
+      closeEditor()
+    } catch (error) {
+      toast({
+        title: "Save failed",
+        description: error instanceof Error ? error.message : "Could not save your change. Please try again.",
+        variant: "destructive",
+      })
+    }
   }
 
   const handleDelete = async (id: string) => {
@@ -206,11 +216,13 @@ export default function ExpensesGrid() {
     try {
       await expensesService.deleteExpense(activeWorkspaceId, id)
     } catch (error) {
-      alert(
-        error instanceof Error
+      toast({
+        title: "Delete failed",
+        description: error instanceof Error
           ? error.message
-          : "Failed to delete expense. Nothing was removed from the backend."
-      )
+          : "Failed to delete expense. Nothing was removed from the backend.",
+        variant: "destructive",
+      })
     }
   }
 

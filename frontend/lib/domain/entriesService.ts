@@ -86,7 +86,7 @@ async function getCurrentEntriesForPeriod(workspaceId: string, periodId: string,
     }
     return (await domainEntries.loadEntries(scopedKey)) ?? [];
 }
-async function persistEntriesForPeriod(
+export async function persistEntriesForPeriod(
     workspaceId: string,
     periodId: string,
     scopedKey: string,

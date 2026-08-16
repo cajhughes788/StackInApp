@@ -36,6 +36,14 @@ export async function analyzeReceipt(
 ): Promise<{ analysis: ReceiptAnalysis; draft: ReceiptDraft }> {
   const imageBase64 = imageFile ? await fileToBase64(imageFile) : undefined
 
+  // fileToBase64 uses FileReader and has no abort signal awareness. If the
+  // signal fired during encoding, throw a proper AbortError now so the caller
+  // handles it silently rather than letting apiFetch surface a browser-specific
+  // "fetch is aborted" string that may not be recognized as an abort.
+  if (signal?.aborted) {
+    throw new DOMException("Request aborted", "AbortError")
+  }
+
   const res = await apiFetch<{
     ok: boolean
     analysis: ReceiptAnalysis
