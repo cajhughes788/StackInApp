@@ -124,6 +124,30 @@ export const getExpenses = withCorsAuth(async (req, res) => {
 })
 
 // ---------------------------------------------------------------------------
+// Recurring Rules
+// ---------------------------------------------------------------------------
+
+export const createRecurringRule = withCorsAuth(async (req, res) => {
+  const { createRecurringRuleHandler } = await import("./routes/createRecurringRule.js")
+  await createRecurringRuleHandler(req, res)
+})
+
+export const editRecurringRule = withCorsAuth(async (req, res) => {
+  const { editRecurringRuleHandler } = await import("./routes/editRecurringRule.js")
+  await editRecurringRuleHandler(req, res)
+})
+
+export const deleteRecurringRule = withCorsAuth(async (req, res) => {
+  const { deleteRecurringRuleHandler } = await import("./routes/deleteRecurringRule.js")
+  await deleteRecurringRuleHandler(req, res)
+})
+
+export const getRecurringRules = withCorsAuth(async (req, res) => {
+  const { getRecurringRulesHandler } = await import("./routes/getRecurringRules.js")
+  await getRecurringRulesHandler(req, res)
+})
+
+// ---------------------------------------------------------------------------
 // Import batches
 // ---------------------------------------------------------------------------
 

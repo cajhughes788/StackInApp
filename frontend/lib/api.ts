@@ -19,6 +19,7 @@ export { getAppBootstrap } from "@/lib/api/bootstrapApi";
 export { getSettings, patchSettings } from "@/lib/api/settingsApi";
 export { type CanonicalEntryResponse, postEntry, editEntry, getEntries, getEntriesForPeriod, deleteEntry, } from "@/lib/api/entriesApi";
 export { postExpense, editExpense, deleteExpenseAPI, getExpensesForPeriod, } from "@/lib/api/expensesApi";
+export { postRecurringRule, patchRecurringRule, deleteRecurringRuleAPI, getRecurringRulesForWorkspace, } from "@/lib/api/recurringRulesApi";
 export { createImportBatch, getImportBatches, getImportItems, updateImportItem, } from "@/lib/api/importsApi";
 export { getTaxProfile, saveTaxProfile } from "@/lib/api/taxProfileApi";
 export { getPayStubs, generatePayStub, generateCurrentPayStub } from "@/lib/api/payStubsApi";

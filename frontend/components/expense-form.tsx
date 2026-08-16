@@ -30,6 +30,9 @@ import {
 } from "@/lib/expenseCategories"
 import { getLocalDateInputValue } from "@/lib/helpers"
 import * as expensesService from "@/lib/domain/expenseService"
+import * as recurringRulesService from "@/lib/domain/recurringRulesService"
+import RecurringCadencePicker from "@/components/recurring-cadence-picker"
+import type { RecurringCadence } from "@shared/schemas/recurringRule"
 import { useExpenseMemoryStore } from "@/lib/stores/useExpenseMemoryStore"
 import { useSettingsStore } from "@/lib/stores/useSettingsStore"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
@@ -53,6 +56,12 @@ import type { ReceiptAsset } from "@shared/schemas/receiptAsset"
 
 const ExpenseInputSchema = ExpenseInput
 const VEHICLE_MODE_STORAGE_KEY = "stackin.vehicleExpenseMode"
+
+function generateClientMutationId(): string {
+  return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.round(Math.random() * 1_000_000)}`
+}
 
 type GenericExpenseFields = {
   amount: string
@@ -208,7 +217,14 @@ export default function ExpenseForm() {
   const [expanded, setExpanded] = useState(false)
   const [vendorFocused, setVendorFocused] = useState(false)
   const [descriptionFocused, setDescriptionFocused] = useState(false)
+  const [repeatEnabled, setRepeatEnabled] = useState(false)
+  const [repeatCadence, setRepeatCadence] = useState<RecurringCadence>({ freq: "monthly" })
+  const [repeatEndDate, setRepeatEndDate] = useState("")
   const lastWorkspaceIdRef = useRef<string | null>(null)
+  // Stable per-submission idempotency key. Generated once per form open and
+  // refreshed after each successful submit so that a retry of the same form
+  // state reuses the same key, but a new submission gets a fresh one.
+  const clientMutationIdRef = useRef<string>(generateClientMutationId())
 
   // Receipt attachment state
   const [attachedReceiptAsset, setAttachedReceiptAsset] = useState<ReceiptAsset | null>(null)
@@ -255,10 +271,14 @@ export default function ExpenseForm() {
   useEffect(() => {
     if (lastWorkspaceIdRef.current !== activeWorkspaceId) {
       lastWorkspaceIdRef.current = activeWorkspaceId
+      clientMutationIdRef.current = generateClientMutationId()
       setForm(createEmptyFormState(preferredVehicleMode))
       setVendorFocused(false)
       setDescriptionFocused(false)
       setExpanded(false)
+      setRepeatEnabled(false)
+      setRepeatCadence({ freq: "monthly" })
+      setRepeatEndDate("")
       clearAttachedReceipt()
       return
     }
@@ -293,6 +313,15 @@ export default function ExpenseForm() {
     isVehicleCategorySelected && form.vehicle.mode === "mileage"
   const isVehicleDirectMode =
     isVehicleCategorySelected && form.vehicle.mode === "direct_expense"
+
+  // Mileage-calculated amounts vary by period, so they can't be a fixed
+  // recurring template — turn "Repeats" off if the category switches into
+  // mileage mode while it was on.
+  useEffect(() => {
+    if (isVehicleMileageMode && repeatEnabled) {
+      setRepeatEnabled(false)
+    }
+  }, [isVehicleMileageMode, repeatEnabled])
 
   const mileageRate = useMemo(
     () => getBusinessMileageRate(form.date || new Date()),
@@ -383,8 +412,16 @@ export default function ExpenseForm() {
   }, [])
 
   // Keep the expense date inside the viewed (possibly past) month's bounds.
+  // selectedPeriod is null when the period selector is back on "current" —
+  // that's not "no period", it means today's period, so the date should
+  // reset to today rather than being left at whatever past period's date
+  // was still sitting in the form.
   useEffect(() => {
-    if (!selectedPeriod) return
+    if (!selectedPeriod) {
+      const today = getLocalDateInputValue()
+      setForm((prev) => (prev.date === today ? prev : { ...prev, date: today }))
+      return
+    }
     setForm((prev) =>
       prev.date < selectedPeriod.start || prev.date > selectedPeriod.end
         ? { ...prev, date: selectedPeriod.end }
@@ -613,6 +650,19 @@ export default function ExpenseForm() {
     setReceiptError(null)
   }, [])
 
+  // Resets the form to a blank state without submitting — same fields a
+  // successful submit clears, plus the attached receipt (which a submit
+  // leaves for the created expense but a manual clear should discard).
+  const handleClearForm = useCallback(() => {
+    setForm(createEmptyFormState(preferredVehicleMode))
+    setVendorFocused(false)
+    setDescriptionFocused(false)
+    setRepeatEnabled(false)
+    setRepeatCadence({ freq: "monthly" })
+    setRepeatEndDate("")
+    clearAttachedReceipt()
+  }, [preferredVehicleMode, clearAttachedReceipt])
+
   const dismissKeyboard = useCallback(() => {
     if (typeof document === "undefined") return
 
@@ -796,6 +846,7 @@ export default function ExpenseForm() {
         parkingAndTolls:
           parkingAndTollsAmount > 0 ? parkingAndTollsAmount : undefined,
         receiptAssetId: attachedReceiptAsset?.id,
+        clientMutationId: clientMutationIdRef.current,
       }
     }
 
@@ -830,6 +881,7 @@ export default function ExpenseForm() {
         ? ("direct_expense" as const)
         : undefined,
       receiptAssetId: attachedReceiptAsset?.id,
+      clientMutationId: clientMutationIdRef.current,
     }
   }, [
     attachedReceiptAsset,
@@ -870,31 +922,53 @@ export default function ExpenseForm() {
 
         const validated = parsed.data
         const submittedForm = form
-        const createExpensePromise = expensesService.createExpense(
-          activeWorkspaceId,
-          validated
-        )
+        const submittedRepeatEnabled = repeatEnabled
+        const createPromise = submittedRepeatEnabled
+          ? recurringRulesService.createRecurringRule(activeWorkspaceId, {
+              type: "expense" as const,
+              cadence: repeatCadence,
+              anchorDate: validated.date,
+              endDate: repeatEndDate || null,
+              expenseTemplate: {
+                amount: validated.amount,
+                vendor: validated.vendor,
+                description: validated.description,
+                account: validated.account,
+              },
+            })
+          : expensesService.createExpense(activeWorkspaceId, validated)
 
         setForm(createEmptyFormState(form.vehicle.mode))
         setVendorFocused(false)
         setDescriptionFocused(false)
         setExpanded(false)
+        setRepeatEnabled(false)
+        setRepeatCadence({ freq: "monthly" })
+        setRepeatEndDate("")
         dismissKeyboard()
         clearAttachedReceipt()
         setSubmitting(false)
 
-        void createExpensePromise
+        void createPromise
           .then(() => {
+            clientMutationIdRef.current = generateClientMutationId()
             updateFromExpense({
               vendor: validated.vendor,
               description: validated.description,
               account: validated.account,
             })
           })
-          .catch(() => {
+          .catch((error) => {
             setExpanded(true)
             setForm((current) => (isFreshFormState(current) ? submittedForm : current))
-            alert("Failed to save expense. Please try again.")
+            setRepeatEnabled(submittedRepeatEnabled)
+            // Offline already surfaced its own toast — avoid a redundant alert.
+            if (error instanceof Error && error.message.startsWith("Offline —")) return
+            alert(
+              submittedRepeatEnabled
+                ? "Failed to save recurring expense. Please try again."
+                : "Failed to save expense. Please try again."
+            )
           })
 
         return
@@ -910,6 +984,9 @@ export default function ExpenseForm() {
       clearAttachedReceipt,
       dismissKeyboard,
       form,
+      repeatCadence,
+      repeatEnabled,
+      repeatEndDate,
       submitting,
       updateFromExpense,
     ]
@@ -994,6 +1071,88 @@ export default function ExpenseForm() {
       ) : (
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Receipt attachment — placed first so the user can kick off the
+                upload immediately while filling in the rest of the form. */}
+            <div className="space-y-2 rounded-xl border border-dashed border-border px-4 py-3">
+              <div className="flex items-center gap-2">
+                <Paperclip className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-medium text-foreground">
+                  Attach Receipt
+                  <span className="ml-1 text-xs font-normal text-muted-foreground">(Optional)</span>
+                </span>
+              </div>
+
+              {attachedReceiptAsset ? (
+                <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2">
+                  {attachedReceiptAsset.dataUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={attachedReceiptAsset.dataUrl}
+                      alt="Receipt preview"
+                      className="h-10 w-10 rounded object-cover"
+                    />
+                  ) : null}
+                  <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                    {attachedReceiptAsset.fileName}
+                  </span>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded-full p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    onClick={() => {
+                      if (attachedReceiptAsset.dataUrl?.startsWith("blob:")) {
+                        URL.revokeObjectURL(attachedReceiptAsset.dataUrl)
+                      }
+                      setAttachedReceiptAsset(null)
+                      setReceiptError(null)
+                    }}
+                    aria-label="Remove receipt"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : receiptUploading ? (
+                <p className="text-sm text-muted-foreground">Uploading receipt...</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    ref={receiptFileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleReceiptFileChange}
+                  />
+                  {isNativeCamera ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void handleNativeReceiptCapture("camera")}
+                    >
+                      <Camera className="h-4 w-4" />
+                      Camera
+                    </Button>
+                  ) : null}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      isNativeCamera
+                        ? void handleNativeReceiptCapture("photos")
+                        : receiptFileInputRef.current?.click()
+                    }
+                  >
+                    <ImagePlus className="h-4 w-4" />
+                    Choose Image
+                  </Button>
+                </div>
+              )}
+
+              {receiptError ? (
+                <p className="text-xs text-destructive">{receiptError}</p>
+              ) : null}
+            </div>
+
             <div>
               <Label htmlFor="date">Date</Label>
               <Input
@@ -1407,90 +1566,33 @@ export default function ExpenseForm() {
               </>
             )}
 
-            {/* Receipt attachment */}
-            <div className="space-y-2 rounded-xl border border-dashed border-border px-4 py-3">
-              <div className="flex items-center gap-2">
-                <Paperclip className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm font-medium text-foreground">
-                  Attach Receipt
-                  <span className="ml-1 text-xs font-normal text-muted-foreground">(Optional)</span>
-                </span>
-              </div>
+            {!isVehicleMileageMode ? (
+              <RecurringCadencePicker
+                idPrefix="expense"
+                enabled={repeatEnabled}
+                onEnabledChange={setRepeatEnabled}
+                cadence={repeatCadence}
+                onCadenceChange={setRepeatCadence}
+                endDate={repeatEndDate}
+                onEndDateChange={setRepeatEndDate}
+                minEndDate={form.date}
+              />
+            ) : null}
 
-              {attachedReceiptAsset ? (
-                <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2">
-                  {attachedReceiptAsset.dataUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={attachedReceiptAsset.dataUrl}
-                      alt="Receipt preview"
-                      className="h-10 w-10 rounded object-cover"
-                    />
-                  ) : null}
-                  <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-                    {attachedReceiptAsset.fileName}
-                  </span>
-                  <button
-                    type="button"
-                    className="shrink-0 rounded-full p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                    onClick={() => {
-                      if (attachedReceiptAsset.dataUrl?.startsWith("blob:")) {
-                        URL.revokeObjectURL(attachedReceiptAsset.dataUrl)
-                      }
-                      setAttachedReceiptAsset(null)
-                      setReceiptError(null)
-                    }}
-                    aria-label="Remove receipt"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              ) : receiptUploading ? (
-                <p className="text-sm text-muted-foreground">Uploading receipt...</p>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  <input
-                    ref={receiptFileInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={handleReceiptFileChange}
-                  />
-                  {isNativeCamera ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void handleNativeReceiptCapture("camera")}
-                    >
-                      <Camera className="h-4 w-4" />
-                      Camera
-                    </Button>
-                  ) : null}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() =>
-                      isNativeCamera
-                        ? void handleNativeReceiptCapture("photos")
-                        : receiptFileInputRef.current?.click()
-                    }
-                  >
-                    <ImagePlus className="h-4 w-4" />
-                    Choose Image
-                  </Button>
-                </div>
-              )}
-
-              {receiptError ? (
-                <p className="text-xs text-destructive">{receiptError}</p>
-              ) : null}
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1"
+                onClick={handleClearForm}
+                disabled={submitting || receiptUploading}
+              >
+                Clear Form
+              </Button>
+              <Button type="submit" disabled={submitting || receiptUploading} className="flex-1">
+                {submitting ? "Saving..." : repeatEnabled ? "Add Recurring Expense" : "Add Expense"}
+              </Button>
             </div>
-
-            <Button type="submit" disabled={submitting || receiptUploading} className="w-full">
-              {submitting ? "Saving..." : "Add Expense"}
-            </Button>
           </form>
         </CardContent>
       )}

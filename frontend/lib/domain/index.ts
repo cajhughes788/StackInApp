@@ -5,6 +5,7 @@
 import * as domainSettings from "@/lib/storage/domainSettings"
 import * as domainEntries from "@/lib/storage/domainEntries"
 import * as domainExpenses from "@/lib/storage/domainExpenses"
+import * as domainRecurringRules from "@/lib/storage/domainRecurringRules"
 import * as taxProfileCache from "@/lib/storage/taxProfileCache"
 import * as payStubsCache from "@/lib/storage/payStubsCache"
 import * as profitLossCache from "@/lib/storage/profitLossCache"
@@ -33,6 +34,7 @@ export async function clearAllLocalDomainData() {
   await Promise.all([
     domainSettings.invalidateSettings(),
     domainExpenses.clearAll(),
+    domainRecurringRules.clearAll(),
     taxProfileCache.clearTaxProfileCache(),
     payStubsCache.clearPayStubsCache(),
     profitLossCache.clearProfitLossCache(),
@@ -89,6 +91,10 @@ export async function clearWorkspaceLocalDomainData(
     {
       name: "expenses",
       run: () => domainExpenses.clearWorkspace(workspaceId),
+    },
+    {
+      name: "recurring_rules",
+      run: () => domainRecurringRules.clearWorkspace(workspaceId),
     },
     {
       name: "tax_profile",

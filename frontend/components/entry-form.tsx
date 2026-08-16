@@ -19,10 +19,14 @@ import { EntryFormVisibility, resolveEntryFormVisibility, } from "@shared/entryV
 import { useEntriesStore } from "@/lib/stores/useEntriesStore";
 import { useSettingsStore } from "@/lib/stores/useSettingsStore";
 import * as entriesService from "@/lib/domain/entriesService";
+import * as recurringRulesService from "@/lib/domain/recurringRulesService";
+import { RecurringCadenceFields } from "@/components/recurring-cadence-picker";
+import type { RecurringCadence, RecurringIncomeSource } from "@shared/schemas/recurringRule";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SettingsDocSchema } from "@shared/schemas/settings";
@@ -41,6 +45,7 @@ function enforceHHMM(raw: string): string {
         return `${digits.slice(0, 2)}:${digits.slice(2, 4)}`;
     return "";
 }
+const PAYMENT_REPEAT_FIELDS = ["venmo", "appleCash", "zelle", "posSales", "cashSales"] as const;
 export default function EntryForm() {
     const workspaceState = useWorkspaceStore((s) => s.state);
     const activeWorkspace = workspaceState.status === "ready"
@@ -127,17 +132,23 @@ export default function EntryForm() {
             breakMinutes: settings.w2?.breakMinutesDefault ?? prev.breakMinutes,
         }));
     }, [settings]);
-    /** keep the entry date inside the viewed (possibly past) period's bounds */
+    /** keep the entry date inside the viewed (possibly past) period's bounds.
+     * selectedPeriod is null when the period selector is back on "current" —
+     * that's not "no period", it means today's period, so the date should
+     * reset to today rather than being left at whatever past period's date
+     * was still sitting in the form. */
     useEffect(() => {
-        if (!selectedPeriod)
+        if (!selectedPeriod) {
+            setForm((prev) => (prev.date === today ? prev : { ...prev, date: today }));
             return;
+        }
         setForm((prev) => ({
             ...prev,
             date: prev.date < selectedPeriod.start || prev.date > selectedPeriod.end
                 ? selectedPeriod.end
                 : prev.date,
         }));
-    }, [selectedPeriod]);
+    }, [selectedPeriod, today]);
     /** UI-only total — allowed */
     const total = useMemo(() => {
         const t = Number(form.tips || 0);
@@ -148,6 +159,12 @@ export default function EntryForm() {
     const [submitting, setSubmitting] = useState(false);
     const [success, setSuccess] = useState(false);
     const [expanded, setExpanded] = useState(false);
+    // Which single income source (if any) is marked recurring. A recurring
+    // rule can only carry one number with one category, so only one field's
+    // Repeats switch can be on at a time — see isFieldRecurringEligible below.
+    const [repeatSourceField, setRepeatSourceField] = useState<RecurringIncomeSource | null>(null);
+    const [repeatCadence, setRepeatCadence] = useState<RecurringCadence>({ freq: "monthly" });
+    const [repeatEndDate, setRepeatEndDate] = useState("");
     const submitTraceRef = useRef<ReturnType<typeof createProfileTrace> | null>(null);
     debugRender("entry-form", {
         workspaceId: activeWorkspaceId,
@@ -251,6 +268,144 @@ export default function EntryForm() {
         </p>
       </div>);
     };
+    /** A recurring rule can only carry one number with one category. `field`
+     * is eligible only when: it (or, for "custom", the single custom income
+     * row) has a positive amount; a payment field has at most one category
+     * selected in its breakdown draft (a multi-category split can't collapse
+     * into one recurring template); and every OTHER income-affecting field
+     * — the other payment fields, custom income, hours, tips, reported/
+     * unreported cash — is empty. A recurring submission carries only that
+     * one number forward; anything else typed today would otherwise be
+     * silently dropped from future occurrences.
+     *
+     * Returns the specific reason a field isn't eligible (or null when it
+     * is) so the UI can tell "you haven't entered an amount yet" apart from
+     * "clear the other fields first" — those call for different messages,
+     * and showing the wrong one before the user has typed anything is
+     * confusing. */
+    const getRecurringIneligibilityReason = useCallback((f: typeof form, field: RecurringIncomeSource): "no_amount" | "multi_category" | "other_fields_populated" | null => {
+        if (field === "custom") {
+            const item = (f.customIncome ?? [])[0];
+            if ((f.customIncome ?? []).length !== 1 || !item || !(Number(item.amount ?? 0) > 0) || !item.label?.trim()) {
+                return "no_amount";
+            }
+        } else {
+            const amount = parseMoney(f[field]);
+            if (amount <= 0) return "no_amount";
+            const draft = f.paymentBreakdowns[field];
+            if (draft.selected.length > 1) return "multi_category";
+        }
+        if (parseMoney(f.tips) || parseMoney(f.reportedCash) || parseMoney(f.unreportedCash) || parseMoney(f.independentHours)) {
+            return "other_fields_populated";
+        }
+        if (field === "custom") {
+            if (!PAYMENT_REPEAT_FIELDS.every((pf) => !parseMoney(f[pf]))) return "other_fields_populated";
+        } else {
+            const otherPaymentFieldsEmpty = PAYMENT_REPEAT_FIELDS
+                .filter((pf) => pf !== field)
+                .every((pf) => !parseMoney(f[pf]));
+            if (!otherPaymentFieldsEmpty || (f.customIncome ?? []).length > 0) return "other_fields_populated";
+        }
+        return null;
+    }, []);
+    const recurringIneligibilityMessage = (reason: "no_amount" | "multi_category" | "other_fields_populated") => {
+        switch (reason) {
+            case "no_amount":
+                return "Please enter an amount for this field before turning on Repeats.";
+            case "multi_category":
+                return "This field is split across multiple categories — Repeats needs a single category. Uncheck the extra categories first.";
+            case "other_fields_populated":
+                return "Recurring income can only apply to one income source per entry — clear the other income fields first.";
+        }
+    };
+    const isFieldRecurringEligible = useCallback((f: typeof form, field: RecurringIncomeSource): boolean => {
+        return getRecurringIneligibilityReason(f, field) === null;
+    }, [getRecurringIneligibilityReason]);
+    useEffect(() => {
+        if (repeatSourceField && !isFieldRecurringEligible(form, repeatSourceField)) {
+            setRepeatSourceField(null);
+        }
+    }, [form, repeatSourceField, isFieldRecurringEligible]);
+    const handleRepeatSwitchChange = useCallback((field: RecurringIncomeSource, checked: boolean) => {
+        if (!checked) {
+            setRepeatSourceField((current) => (current === field ? null : current));
+            return;
+        }
+        const reason = getRecurringIneligibilityReason(form, field);
+        if (reason) {
+            alert(recurringIneligibilityMessage(reason));
+            return;
+        }
+        setRepeatSourceField(field);
+    }, [form, getRecurringIneligibilityReason]);
+    function renderRepeatSwitch(field: RecurringIncomeSource) {
+        return (<div className="mt-1 flex items-center gap-2">
+        <Switch id={`${field}-repeat`} checked={repeatSourceField === field} onCheckedChange={(checked) => handleRepeatSwitchChange(field, checked)}/>
+        <Label htmlFor={`${field}-repeat`} className="text-xs font-normal text-muted-foreground">Repeats</Label>
+      </div>);
+    }
+    /** Once a field is marked recurring, every other income-affecting field is
+     * hidden rather than just blocked — a recurring rule can only carry one
+     * number with one category (see getRecurringIneligibilityReason above),
+     * so leaving fields visible that the user can't actually use is confusing.
+     * `source` fields (payment methods + custom) stay visible only when they
+     * ARE the active recurring field; non-source fields (hours/tips/cash) hide
+     * unconditionally once any field is recurring, since they block
+     * eligibility no matter which source is selected. */
+    const showIncomeSource = useCallback((source: RecurringIncomeSource) => !repeatSourceField || repeatSourceField === source, [repeatSourceField]);
+    const showNonSourceIncomeField = !repeatSourceField;
+    const addCustomIncomeRow = useCallback((label: string = "") => {
+        setForm((prev) => ({
+            ...prev,
+            customIncome: [...(prev.customIncome ?? []), { label, amount: 0, category: "other" as IncomeCategory }],
+        }));
+    }, []);
+    /** Shared by the post-submit reset and the manual "Clear Form" button —
+     * clears every entered field back to its default, but preserves the
+     * settings-derived defaults (rate, custom deduction toggles) and the
+     * in/out AM/PM period selectors the same way a successful submit does. */
+    const buildClearedFormState = useCallback((prev: typeof form) => {
+        const nowIso = new Date().toISOString();
+        return {
+            ...prev,
+            date: getLocalDateInputValue(),
+            tips: "",
+            reportedCash: "",
+            unreportedCash: "",
+            hours: "",
+            inTime: "",
+            inPeriod: prev.inPeriod,
+            outTime: "",
+            outPeriod: prev.outPeriod,
+            rate: settings?.w2?.defaultHourlyRate?.toString() ?? "",
+            notes: "",
+            appliedCustomDeductions: settings?.w2?.customDeductions
+                ? settings.w2?.customDeductions.map((d: { label: string; amount: number }) => d.label)
+                : [],
+            independentHours: "",
+            venmo: "",
+            appleCash: "",
+            zelle: "",
+            posSales: "",
+            cashSales: "",
+            paymentBreakdowns: {
+                venmo: emptyBreakdownDraft(),
+                appleCash: emptyBreakdownDraft(),
+                zelle: emptyBreakdownDraft(),
+                posSales: emptyBreakdownDraft(),
+                cashSales: emptyBreakdownDraft(),
+            },
+            customIncome: [],
+            createdAtLocal: nowIso,
+            updatedAtLocal: nowIso,
+        };
+    }, [settings]);
+    const handleClearForm = useCallback(() => {
+        setForm((prev) => buildClearedFormState(prev));
+        setRepeatSourceField(null);
+        setRepeatCadence({ freq: "monthly" });
+        setRepeatEndDate("");
+    }, [buildClearedFormState]);
     /** ------------------------------------------------
      * SUBMISSION HANDLER
      * ------------------------------------------------ */
@@ -336,6 +491,14 @@ export default function EntryForm() {
                         outTime: `${form.outTime} ${form.outPeriod}`,
                     }),
                 };
+            }
+            const repeatIneligibilityReason = activeWorkspace.type === "independent" && repeatSourceField
+                ? getRecurringIneligibilityReason(form, repeatSourceField)
+                : null;
+            if (repeatIneligibilityReason) {
+                alert(recurringIneligibilityMessage(repeatIneligibilityReason));
+                setSubmitting(false);
+                return;
             }
             // Independent block (uses new Independent visibility flags)
             if (activeWorkspace.type === "independent") {
@@ -435,70 +598,66 @@ export default function EntryForm() {
             if (!activeWorkspaceId) {
                 throw new Error("No active workspace selected");
             }
-            await entriesService.createEntry(activeWorkspaceId, parseResult.data, {
-                trace: submitTraceRef.current
+            if (activeWorkspace.type === "independent" && repeatSourceField) {
+                const incomeTemplate = repeatSourceField === "custom"
                     ? {
-                        traceId: submitTraceRef.current.traceId,
-                        flow: submitTraceRef.current.flow,
+                        source: "custom" as const,
+                        amount: Number(form.customIncome[0].amount),
+                        category: form.customIncome[0].category,
+                        label: form.customIncome[0].label,
                     }
-                    : null,
-            });
+                    : (() => {
+                        const draft = form.paymentBreakdowns[repeatSourceField];
+                        const category = draft.selected[0] ?? paymentCategoryConfig[repeatSourceField].defaultCategory;
+                        return {
+                            source: repeatSourceField,
+                            amount: parseMoney(form[repeatSourceField]),
+                            category,
+                        };
+                    })();
+                await recurringRulesService.createRecurringRule(activeWorkspaceId, {
+                    type: "income" as const,
+                    cadence: repeatCadence,
+                    anchorDate: form.date,
+                    endDate: repeatEndDate || null,
+                    notes: form.notes.trim(),
+                    incomeTemplate,
+                });
+            } else {
+                await entriesService.createEntry(activeWorkspaceId, parseResult.data, {
+                    trace: submitTraceRef.current
+                        ? {
+                            traceId: submitTraceRef.current.traceId,
+                            flow: submitTraceRef.current.flow,
+                        }
+                        : null,
+                });
+            }
             setSuccess(true);
             submitTraceRef.current.mark("entry_create.ui_success");
             /** Reset raw form fields */
-            const resetNowIso = new Date().toISOString();
-            // CHANGE: reset independent-only fields along with W2 fields
-            setForm({
-                ...form,
-                date: getLocalDateInputValue(),
-                tips: "",
-                reportedCash: "",
-                unreportedCash: "",
-                hours: "",
-                inTime: "",
-                inPeriod: form.inPeriod,
-                outTime: "",
-                outPeriod: form.outPeriod,
-                rate: settings.w2?.defaultHourlyRate?.toString() ?? "",
-                notes: "",
-                appliedCustomDeductions: settings.w2?.customDeductions
-                    ? settings.w2?.customDeductions.map((d: {
-                        label: string;
-                        amount: number;
-                    }) => d.label)
-                    : [],
-                independentHours: "",
-                venmo: "",
-                appleCash: "",
-                zelle: "",
-                posSales: "",
-                cashSales: "",
-                paymentBreakdowns: {
-                    venmo: emptyBreakdownDraft(),
-                    appleCash: emptyBreakdownDraft(),
-                    zelle: emptyBreakdownDraft(),
-                    posSales: emptyBreakdownDraft(),
-                    cashSales: emptyBreakdownDraft(),
-                },
-                customIncome: [],
-                // Add timestamps into RESET state (per user request)
-                createdAtLocal: resetNowIso,
-                updatedAtLocal: resetNowIso,
-            });
+            setForm((prev) => buildClearedFormState(prev));
             setExpanded(false);
+            setRepeatSourceField(null);
+            setRepeatCadence({ freq: "monthly" });
+            setRepeatEndDate("");
             submitTraceRef.current.mark("entry_create.form_reset");
         }
         catch (error) {
             submitTraceRef.current?.error("entry_create.failed", error);
-            alert(error instanceof Error
-                ? error.message
-                : "Failed to save entry. Please try again.");
+            // Offline already surfaced its own toast — avoid a redundant alert.
+            const isOfflineRecurringError = error instanceof Error && error.message.startsWith("Offline —");
+            if (!isOfflineRecurringError) {
+                alert(error instanceof Error
+                    ? error.message
+                    : "Failed to save entry. Please try again.");
+            }
         }
         finally {
             submitTraceRef.current?.mark("entry_create.complete");
             setSubmitting(false);
         }
-    }, [form, submitting, visibility, settings, activeWorkspace, activeWorkspaceId]);
+    }, [form, submitting, visibility, settings, activeWorkspace, activeWorkspaceId, repeatSourceField, repeatCadence, repeatEndDate, getRecurringIneligibilityReason, buildClearedFormState]);
     /** ------------------------------------------------
      * FORM UI
      * ------------------------------------------------ */
@@ -660,61 +819,66 @@ export default function EntryForm() {
                 and uses the new independent visibility flags. */}
           {visibility?.mode === "independent" && (<>
               {/* Independent Hours */}
-              {visibility.showHours && (<div>
+              {visibility.showHours && showNonSourceIncomeField && (<div>
                   <Label htmlFor="independentHours">Hours Worked</Label>
                   <Input id="independentHours" type="number" step="0.1" value={form.independentHours} onChange={(e) => setForm({ ...form, independentHours: e.target.value })}/>
                 </div>)}
 
-              {visibility.showIndependentTips && (<div>
+              {visibility.showIndependentTips && showNonSourceIncomeField && (<div>
                   <Label htmlFor="independentTips">Credit Card Tips</Label>
                   <Input id="independentTips" type="number" step="0.01" value={form.tips} onChange={(e) => setForm({ ...form, tips: e.target.value })}/>
                 </div>)}
 
-              {visibility.showIndependentReportedCash && (<div>
+              {visibility.showIndependentReportedCash && showNonSourceIncomeField && (<div>
                   <Label htmlFor="independentReportedCash">Reported Cash</Label>
                   <Input id="independentReportedCash" type="number" step="0.01" value={form.reportedCash} onChange={(e) => setForm({ ...form, reportedCash: e.target.value })}/>
                 </div>)}
 
-              {visibility.showIndependentUnreportedCash && (<div>
+              {visibility.showIndependentUnreportedCash && showNonSourceIncomeField && (<div>
                   <Label htmlFor="independentUnreportedCash">Unreported Cash</Label>
                   <Input id="independentUnreportedCash" type="number" step="0.01" value={form.unreportedCash} onChange={(e) => setForm({ ...form, unreportedCash: e.target.value })}/>
                 </div>)}
 
               {/* Venmo */}
-              {visibility.showVenmo && (<div>
+              {visibility.showVenmo && showIncomeSource("venmo") && (<div>
                   <Label htmlFor="venmo">Venmo</Label>
                   <Input id="venmo" type="number" step="0.01" value={form.venmo} onChange={(e) => updateCategorizedPaymentAmount("venmo", e.target.value)}/>
                   {renderPaymentBreakdownFields("venmo")}
+                  {renderRepeatSwitch("venmo")}
                 </div>)}
 
               {/* Apple Pay */}
-              {visibility.showAppleCash && (<div>
+              {visibility.showAppleCash && showIncomeSource("appleCash") && (<div>
                   <Label htmlFor="appleCash">Apple Pay</Label>
                   <Input id="appleCash" type="number" step="0.01" value={form.appleCash} onChange={(e) => updateCategorizedPaymentAmount("appleCash", e.target.value)}/>
                   {renderPaymentBreakdownFields("appleCash")}
+                  {renderRepeatSwitch("appleCash")}
                 </div>)}
 
-              {visibility.showZelle && (<div>
+              {visibility.showZelle && showIncomeSource("zelle") && (<div>
                   <Label htmlFor="zelle">Zelle</Label>
                   <Input id="zelle" type="number" step="0.01" value={form.zelle} onChange={(e) => updateCategorizedPaymentAmount("zelle", e.target.value)}/>
                   {renderPaymentBreakdownFields("zelle")}
+                  {renderRepeatSwitch("zelle")}
                 </div>)}
 
               {/* POS Sales */}
-              {visibility.showPosSales && (<div>
+              {visibility.showPosSales && showIncomeSource("posSales") && (<div>
                   <Label htmlFor="posSales">POS Sales</Label>
                   <Input id="posSales" type="number" step="0.01" value={form.posSales} onChange={(e) => updateCategorizedPaymentAmount("posSales", e.target.value)}/>
                   {renderPaymentBreakdownFields("posSales")}
+                  {renderRepeatSwitch("posSales")}
                 </div>)}
 
-              {visibility.showCashSales && (<div>
+              {visibility.showCashSales && showIncomeSource("cashSales") && (<div>
                   <Label htmlFor="cashSales">Cash Sales</Label>
                   <Input id="cashSales" type="number" step="0.01" value={form.cashSales} onChange={(e) => updateCategorizedPaymentAmount("cashSales", e.target.value)}/>
                   {renderPaymentBreakdownFields("cashSales")}
+                  {renderRepeatSwitch("cashSales")}
                 </div>)}
 
               {/* Independent Custom Income Repeater */}
-              {visibility.showCustomIncome && (<div className="space-y-2">
+              {visibility.showCustomIncome && showIncomeSource("custom") && (<div className="space-y-2">
                   <Label>Custom Income</Label>
                   {(form.customIncome ?? []).map((item, idx) => (<div key={idx} className="flex gap-2">
                       <Input placeholder="Label" value={item.label} onChange={(e) => {
@@ -744,16 +908,26 @@ export default function EntryForm() {
                         <option value="other">Other</option>
                       </select>
                     </div>))}
-                  <Button type="button" onClick={() => setForm({
-                        ...form,
-                        customIncome: [
-                            ...(form.customIncome ?? []),
-                            { label: "", amount: 0, category: "other" },
-                        ],
-                    })}>
-                    Add Custom Income
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    {(settings.independent?.customIncomeFields ?? []).map((field, idx) => (<Button key={`${field.label}-${idx}`} type="button" variant="outline" size="sm" onClick={() => addCustomIncomeRow(field.label)}>
+                        + {field.label}
+                      </Button>))}
+                    <Button type="button" variant="outline" size="sm" onClick={() => addCustomIncomeRow()}>
+                      + Add Custom Income
+                    </Button>
+                  </div>
+
+                  {(form.customIncome ?? []).length === 1 ? renderRepeatSwitch("custom") : null}
                 </div>)}
+
+              {repeatSourceField ? (<div className="space-y-3 rounded-xl border border-border bg-muted/10 px-4 py-3">
+                  <div className="text-sm font-medium">
+                    Repeats: {repeatSourceField === "custom"
+                        ? (form.customIncome[0]?.label || "Custom Income")
+                        : paymentCategoryConfig[repeatSourceField].label}
+                  </div>
+                  <RecurringCadenceFields idPrefix="income" cadence={repeatCadence} onCadenceChange={setRepeatCadence} endDate={repeatEndDate} onEndDateChange={setRepeatEndDate} minEndDate={form.date}/>
+                </div>) : null}
             </>)}
 
           {visibility?.showNotes && (<div>
@@ -761,9 +935,14 @@ export default function EntryForm() {
               <Input id="notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Optional notes" type="text"/>
             </div>)}
 
-          <Button type="submit" disabled={submitting} className="w-full">
-            {submitting ? "Saving..." : "Add Entry"}
-          </Button>
+          <div className="flex gap-2">
+            <Button type="button" variant="outline" className="flex-1" onClick={handleClearForm} disabled={submitting}>
+              Clear Form
+            </Button>
+            <Button type="submit" disabled={submitting} className="flex-1">
+              {submitting ? "Saving..." : repeatSourceField ? "Add Recurring Income" : "Add Entry"}
+            </Button>
+          </div>
         </form>
       </CardContent>)}
     </Card>);

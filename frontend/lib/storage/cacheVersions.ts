@@ -10,6 +10,7 @@ export const CACHE_VERSIONS = {
   profitLoss: 4,
   receiptDrafts: 1,
   receiptMedia: 1,
+  recurringRules: 1,
 } as const
 
 export type CacheDomain = keyof typeof CACHE_VERSIONS

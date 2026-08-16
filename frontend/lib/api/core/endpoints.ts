@@ -13,6 +13,13 @@ export const API_ENDPOINTS = {
     delete: "https://deleteexpense-3lc2fwdgwq-uc.a.run.app",
   },
 
+  recurringRules: {
+    get: "https://getrecurringrules-3lc2fwdgwq-uc.a.run.app",
+    post: "https://createrecurringrule-3lc2fwdgwq-uc.a.run.app",
+    patch: "https://editrecurringrule-3lc2fwdgwq-uc.a.run.app",
+    delete: "https://deleterecurringrule-3lc2fwdgwq-uc.a.run.app",
+  },
+
   imports: {
     batch: {
       get: "https://getimportbatches-3lc2fwdgwq-uc.a.run.app",

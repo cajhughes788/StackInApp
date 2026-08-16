@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { Info } from "lucide-react"
+import { useRouter } from "next/navigation"
 import { IndependentSettingsType } from "@shared/schemas/settings"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -20,6 +21,7 @@ export default function IndependentSettingsSection({
     behavior?: "immediate" | "deferred"
   ) => void
 }) {
+  const router = useRouter()
   const [local, setLocal] = useState<Partial<IndependentSettingsType>>(
     data ?? {}
   )
@@ -355,6 +357,22 @@ export default function IndependentSettingsSection({
 
           <Button variant="outline" onClick={addCustomField}>
             + Add Custom Field
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* RECURRING */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Recurring Expenses & Income</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="mb-3 text-sm text-muted-foreground">
+            Manage rules that automatically create expenses or income on a schedule — set up from
+            the expense form or a Custom Income entry with &ldquo;Repeats&rdquo; turned on.
+          </p>
+          <Button variant="outline" onClick={() => router.push("/app/recurring")}>
+            Manage Recurring
           </Button>
         </CardContent>
       </Card>

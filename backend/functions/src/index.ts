@@ -24,6 +24,10 @@ export {
   editExpense,
   deleteExpense,
   getExpenses,
+  createRecurringRule,
+  editRecurringRule,
+  deleteRecurringRule,
+  getRecurringRules,
   createImportBatch,
   getImportBatches,
   getImportItems,
@@ -46,6 +50,7 @@ export {
 } from "./api"
 
 export { generatePayStubsDaily } from "./scheduled/generatePayStubsDaily"
+export { generateRecurringTransactionsDaily } from "./scheduled/generateRecurringTransactionsDaily"
 export { generateProfitLossStatementsMonthly } from "./scheduled/generateProfitLossStatementsMonthly"
 export { deleteScheduledAccounts } from "./scheduled/deleteScheduledAccounts"
 export { cleanupOrphanReceiptAssets } from "./scheduled/cleanupOrphanReceiptAssets"

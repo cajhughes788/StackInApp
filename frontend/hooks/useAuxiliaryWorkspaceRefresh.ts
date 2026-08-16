@@ -13,6 +13,7 @@ import { measureAsync } from "@/lib/observability/perf"
 import { useEntriesStore } from "@/lib/stores/useEntriesStore"
 import { useExpensesStore } from "@/lib/stores/useExpensesStore"
 import { usePeriodSelectionStore } from "@/lib/stores/usePeriodSelectionStore"
+import { useRecurringRulesStore } from "@/lib/stores/useRecurringRulesStore"
 import { useReceiptDraftsStore } from "@/lib/stores/useReceiptDraftsStore"
 import { useSettingsStore } from "@/lib/stores/useSettingsStore"
 import { useTaxProfileStore } from "@/lib/stores/useTaxProfileStore"
@@ -100,6 +101,8 @@ export function useAuxiliaryWorkspaceRefresh({ enabled }: { enabled: boolean }) 
                 void useReceiptDraftsStore
                   .getState()
                   .refreshFromBackend(workspace.id, { force: false })
+
+                void useRecurringRulesStore.getState().hydrateFromCacheOnce(workspace.id)
               } else {
                 await useTaxProfileStore.getState().hydrateFromCacheOnce(workspace.id)
               }
