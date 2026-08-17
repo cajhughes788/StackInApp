@@ -138,7 +138,7 @@ async function removeOptimisticEntry(
 function showQueuedEntryToast() {
     toast({
         title: "Entry queued",
-        description: "You're offline right now. Your entry will sync automatically when you're back online.",
+        description: "Your connection is slow or offline right now. This entry will finish saving automatically.",
     });
 }
 function showPermanentEntryFailureToast(error: unknown) {
@@ -368,6 +368,14 @@ async function reconcileOptimisticEntry(workspaceId: string, settings: SettingsT
                 entryId: optimistic.id,
                 scopedKey,
             });
+            // Don't wait for a real online/offline transition or the next app
+            // reload to find out whether this actually landed — ask the
+            // backend now. reconcileRenderableEntries (entrySync.ts) preserves
+            // this row through the merge even if the backend fetch doesn't
+            // show it yet (it's local-only / syncState "queued"), and replaces
+            // it in place — matched via clientMutationId — if the fetch
+            // reveals the write actually succeeded. Safe to fire either way.
+            void useEntriesStore.getState().refreshFromBackend(workspaceId, optimistic.periodId, { force: true }).catch(() => {});
             return;
         }
         traceReconciliation("entries", optimistic.clientMutationId ?? clientMutationId, "rollback_applied", {

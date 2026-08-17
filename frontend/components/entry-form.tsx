@@ -16,6 +16,7 @@ import {
 import { createProfileTrace } from "@/lib/observability/profileTrace";
 import { EntrySchema, IncomeBreakdownSchema, type IncomeCategory, type PaymentMethod, } from "@shared/schemas/entry";
 import { EntryFormVisibility, resolveEntryFormVisibility, } from "@shared/entryVisibility";
+import { getCurrentEntryPeriod } from "@shared/payPeriods";
 import { useEntriesStore } from "@/lib/stores/useEntriesStore";
 import { useSettingsStore } from "@/lib/stores/useSettingsStore";
 import * as entriesService from "@/lib/domain/entriesService";
@@ -62,6 +63,21 @@ export default function EntryForm() {
             return null;
         return resolveEntryFormVisibility(settings, activeWorkspace.type);
     }, [settings, activeWorkspace]);
+    /** selectedPeriod is null while viewing the default "Current" period (see
+     * usePeriodSelectionStore) — the date input's min/max must still be
+     * bounded in that case, or nothing stops the user from typing a date
+     * that lands in a different period than the one on screen. Such an
+     * entry still saves fine (backend + cache both get it correctly scoped
+     * to its own period), but useEntriesStore's applyEntryMutation
+     * intentionally won't touch the currently-loaded period's in-memory
+     * list for a foreign periodId, so the visible grid/gauge silently
+     * doesn't reflect it until the user actually navigates to that period. */
+    const currentEntryPeriodBounds = useMemo(() => {
+        if (!settings || !activeWorkspace)
+            return null;
+        return getCurrentEntryPeriod(settings, activeWorkspace.type);
+    }, [settings, activeWorkspace]);
+    const dateInputBounds = selectedPeriod ?? currentEntryPeriodBounds;
     const initialNowIso = new Date().toISOString();
     const today = getLocalDateInputValue();
     /** ------------------------------------------------
@@ -107,7 +123,7 @@ export default function EntryForm() {
         },
         customIncome: [] as {
             label: string;
-            amount: number;
+            amount: string;
             category: IncomeCategory;
         }[],
         // notes
@@ -357,7 +373,7 @@ export default function EntryForm() {
     const addCustomIncomeRow = useCallback((label: string = "") => {
         setForm((prev) => ({
             ...prev,
-            customIncome: [...(prev.customIncome ?? []), { label, amount: 0, category: "other" as IncomeCategory }],
+            customIncome: [...(prev.customIncome ?? []), { label, amount: "", category: "other" as IncomeCategory }],
         }));
     }, []);
     /** Shared by the post-submit reset and the manual "Clear Form" button —
@@ -708,8 +724,8 @@ export default function EntryForm() {
               className="w-full min-w-0"
               value={form.date}
               onChange={(e) => setForm({ ...form, date: e.target.value })}
-              min={selectedPeriod?.start}
-              max={selectedPeriod?.end}
+              min={dateInputBounds?.start}
+              max={dateInputBounds?.end}
               required
             />
           </div>
@@ -890,7 +906,7 @@ export default function EntryForm() {
                             const next = [...form.customIncome];
                             next[idx] = {
                                 ...next[idx],
-                                amount: Number(e.target.value),
+                                amount: e.target.value,
                             };
                             setForm({ ...form, customIncome: next });
                         }}/>

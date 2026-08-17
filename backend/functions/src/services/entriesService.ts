@@ -58,27 +58,6 @@ async function assertWorkspaceMembership(workspaceId: string, uid: string): Prom
         throw new ForbiddenError("Forbidden");
     }
 }
-async function findEntryByClientMutationId(workspaceId: string, clientMutationId: string): Promise<{
-    id: string;
-    entry: EntryType;
-} | null> {
-    const snap = await db
-        .collection(`workspaces/${workspaceId}/entries`)
-        .where("clientMutationId", "==", clientMutationId)
-        .limit(1)
-        .get();
-    if (snap.empty) {
-        return null;
-    }
-    const doc = snap.docs[0];
-    return {
-        id: doc.id,
-        entry: EntrySchema.parse({
-            id: doc.id,
-            ...doc.data(),
-        }),
-    };
-}
 /**
  * List entries for a user, scoped to the current pay period by default.
  * Optional: pass forceFull = true to load all entries (for reports or admin).
@@ -216,16 +195,6 @@ export async function createEntry(workspaceId: string, uid: string, input: unkno
     }, settings);
     const createdAtLocal = raw.createdAtLocal ?? nowIso;
     const clientMutationId = raw.clientMutationId;
-    if (typeof clientMutationId === "string" && clientMutationId.length > 0) {
-        const existing = await findEntryByClientMutationId(workspaceId, clientMutationId);
-        if (existing) {
-            return {
-                ok: true,
-                id: existing.id,
-                entry: existing.entry,
-            };
-        }
-    }
     // CHANGE (BACKEND SURGICAL EDIT SET #2):
     // Firestore storage now matches EntrySchema exactly:
     // { workspace, periodId, date, notes, w2?, independent?, totals, createdAtLocal, updatedAtLocal, clientMutationId }
@@ -243,9 +212,37 @@ export async function createEntry(workspaceId: string, uid: string, input: unkno
     };
     const canonical: EntryType = EntrySchema.parse(entryToWrite);
     // ----------------------------
-    // 6. WRITE TO FIRESTORE
+    // 6. WRITE TO FIRESTORE — idempotent on clientMutationId.
     // ----------------------------
-    const docRef = await withBackendProfileStep(activeTrace, "entry_create.firestore_write", () => db.collection(`workspaces/${workspaceId}/entries`).add(canonical), { workspaceId, periodId });
+    // A deterministic doc id + atomic .create() (Firestore rejects with
+    // ALREADY_EXISTS if the doc is already there) replaces the old
+    // "query for an existing clientMutationId, then .add() if none found"
+    // check. That pattern was a check-then-act race: two concurrent requests
+    // carrying the same clientMutationId — e.g. the frontend's own fetch
+    // retry firing while the first request is still mid-flight after a slow
+    // reconnect — could both pass the "not found" check and both .add(),
+    // producing two real entries with the same clientMutationId. .create()
+    // is atomic at the storage layer, so only one concurrent writer can ever
+    // win regardless of timing.
+    const docRef = typeof clientMutationId === "string" && clientMutationId.length > 0
+        ? db.collection(`workspaces/${workspaceId}/entries`).doc(`cmid_${clientMutationId}`)
+        : db.collection(`workspaces/${workspaceId}/entries`).doc();
+    try {
+        await withBackendProfileStep(activeTrace, "entry_create.firestore_write", () => docRef.create(canonical), { workspaceId, periodId });
+    }
+    catch (err: any) {
+        if (err?.code === 6) {
+            // Lost the race to a concurrent request with the same
+            // clientMutationId — return what it wrote instead of erroring.
+            const existingSnap = await docRef.get();
+            return {
+                ok: true,
+                id: docRef.id,
+                entry: EntrySchema.parse({ id: docRef.id, ...existingSnap.data() }),
+            };
+        }
+        throw err;
+    }
     if (canonical.workspace === "independent") {
         await syncIndependentProfitLossDates(workspaceId, [canonical.date]);
     }

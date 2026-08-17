@@ -106,7 +106,11 @@ export async function apiFetch<T = any>(endpoint: string, opts: RequestInit & {
 } = {}, auth: boolean = true): Promise<T> {
     const { timeout = 12000, profile, signal: externalSignal, ...fetchOpts } = opts;
     const controller = new AbortController();
-    const abortTimeout = setTimeout(() => controller.abort(), timeout);
+    let timedOut = false;
+    const abortTimeout = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+    }, timeout);
     const forwardAbort = () => controller.abort();
     if (externalSignal?.aborted) {
         forwardAbort();
@@ -209,7 +213,15 @@ export async function apiFetch<T = any>(endpoint: string, opts: RequestInit & {
             trace?.mark(`${requestStep}.aborted`, {
                 endpoint,
                 method: fetchOpts.method ?? "GET",
+                timedOut,
             });
+            // Tag so shouldQueueOfflineMutation can tell "our own timeout gave up
+            // waiting" (safe to queue + retry — the request may have completed
+            // server-side) apart from a caller-initiated cancellation (not safe
+            // to replay, since the caller deliberately abandoned it).
+            if (timedOut && err && typeof err === "object") {
+                (err as { isTimeout?: boolean }).isTimeout = true;
+            }
         }
         throw err;
     }

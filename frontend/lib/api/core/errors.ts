@@ -26,9 +26,22 @@ export function isAbortError(error: unknown): boolean {
   return /abort|canceled|cancelled/i.test(error.message)
 }
 
+// apiFetch tags the error it throws with isTimeout=true when ITS OWN request
+// timer fired the abort (see client.ts) — as opposed to an external signal
+// the caller supplied to deliberately cancel the request. That distinction
+// matters here: a request our client gave up waiting on may well have
+// finished successfully server-side (Cloud Functions don't stop executing
+// just because the client's connection dropped), so it's safe — and
+// necessary — to queue it for a deduped retry via clientMutationId rather
+// than rolling back and forcing the user to resubmit with a new one, which
+// produces a genuine duplicate if the original request actually landed.
+export function isTimeoutError(error: unknown): boolean {
+  return isAbortError(error) && Boolean((error as { isTimeout?: boolean } | null | undefined)?.isTimeout)
+}
+
 export function shouldQueueOfflineMutation(error: unknown): boolean {
   if (isAbortError(error)) {
-    return false
+    return isTimeoutError(error)
   }
 
   if (error instanceof ApiError && error.status) {
