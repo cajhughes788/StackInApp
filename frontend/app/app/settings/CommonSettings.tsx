@@ -24,6 +24,16 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/components/ui/use-toast"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { NativeGeofence } from "@/plugins/NativeGeofence"
 
 export default function CommonSettingsSection({
@@ -48,6 +58,7 @@ export default function CommonSettingsSection({
   const [locationActionError, setLocationActionError] = useState<string | null>(
     null
   )
+  const [showLocationSettingsDialog, setShowLocationSettingsDialog] = useState(false)
   const { toast } = useToast()
   const nativePlatform =
     typeof window !== "undefined" && Capacitor.isNativePlatform()
@@ -357,6 +368,18 @@ export default function CommonSettingsSection({
     return "Please check your device settings and try again."
   }
 
+  // Navigating a WKWebView to the app-settings: URL scheme is how Capacitor
+  // iOS apps deep-link into their own page in the Settings app — iOS
+  // intercepts the navigation and hands it to UIApplication.open, no native
+  // plugin required. There's no Android equivalent available without a
+  // custom plugin, and location reminder controls are hidden on Android
+  // anyway (see showLocationReminderControls above).
+  function openIosAppSettings() {
+    if (typeof window !== "undefined") {
+      window.location.href = "app-settings:"
+    }
+  }
+
   async function requestLocationAccess() {
     try {
       setRequestingLocationAccess(true)
@@ -413,11 +436,9 @@ export default function CommonSettingsSection({
 
       const message = buildLocationPermissionError(result)
       setLocationActionError(message)
-      toast({
-        title: "Location reminders need full access",
-        description: message,
-        variant: "destructive",
-      })
+      // Toasts aren't reliably visible to the user — this needs an
+      // explanation they can't miss, so it's a persistent dialog instead.
+      setShowLocationSettingsDialog(true)
       return false
     } catch (error) {
       const message =
@@ -896,6 +917,51 @@ export default function CommonSettingsSection({
       </Card>
       ) : null}
       </div>
+
+      <AlertDialog
+        open={showLocationSettingsDialog}
+        onOpenChange={setShowLocationSettingsDialog}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Turn On &ldquo;Always&rdquo; Location Access</AlertDialogTitle>
+            <AlertDialogDescription>
+              Location-based reminders need location access set to{" "}
+              <strong>Always</strong>, but StackIn currently only has partial
+              or no access.
+              <br />
+              <br />
+              To fix this:
+              <br />
+              1. Open the <strong>Settings</strong> app
+              <br />
+              2. Tap <strong>StackIn</strong>
+              <br />
+              3. Tap <strong>Location</strong>
+              <br />
+              4. Choose <strong>Always</strong>
+              <br />
+              <br />
+              Then come back and turn the reminder on again.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setShowLocationSettingsDialog(false)}>
+              Not Now
+            </AlertDialogCancel>
+            {nativePlatform === "ios" ? (
+              <AlertDialogAction
+                onClick={() => {
+                  setShowLocationSettingsDialog(false)
+                  openIosAppSettings()
+                }}
+              >
+                Open Settings
+              </AlertDialogAction>
+            ) : null}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }
