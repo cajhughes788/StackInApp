@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import AppLoader from "@/components/app-loader";
 import { exportCsvFile } from "@/lib/documentExport";
-import { formatCurrency, formatDate } from "@/lib/helpers";
+import { formatCurrency, formatDate, getLocalDateInputValue } from "@/lib/helpers";
 import { printHtmlDocument } from "@/lib/print";
 import { Type as PayStub } from "@shared/schemas/paystub";
 import type { W2HoursGoalType } from "@shared/schemas/settings";
@@ -455,6 +455,14 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
                 };
             })
             .sort((a, b) => b.key.localeCompare(a.key));
+    }, [flatHoursRows]);
+    const defaultGoalStartDate = useMemo(() => {
+        const yearPrefix = String(new Date().getFullYear());
+        const datesThisYear = flatHoursRows
+            .filter((row) => row.date.startsWith(yearPrefix))
+            .map((row) => row.date);
+        if (datesThisYear.length === 0) return getLocalDateInputValue();
+        return datesThisYear.reduce((min, d) => (d < min ? d : min));
     }, [flatHoursRows]);
     const hoursGoal = settings?.w2?.hoursGoal ?? null;
     const hoursSinceGoalStart = useMemo(() => {
@@ -973,6 +981,7 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
       <HoursGoalCard
         goal={hoursGoal}
         hoursSinceGoalStart={hoursSinceGoalStart}
+        defaultStartDate={defaultGoalStartDate}
         onSetGoal={persistHoursGoal}
         onClearGoal={() => persistHoursGoal(null)}
       />

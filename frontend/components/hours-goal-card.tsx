@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { ChevronDown, Target } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -13,6 +13,7 @@ import { getLocalDateInputValue } from "@/lib/helpers"
 type HoursGoalCardProps = {
   goal: W2HoursGoalType | null
   hoursSinceGoalStart: number
+  defaultStartDate: string
   onSetGoal: (goal: W2HoursGoalType) => Promise<void>
   onClearGoal: () => Promise<void>
 }
@@ -36,34 +37,56 @@ function StatTile({ label, value, accent = false }: { label: string; value: stri
   )
 }
 
-export default function HoursGoalCard({ goal, hoursSinceGoalStart, onSetGoal, onClearGoal }: HoursGoalCardProps) {
+export default function HoursGoalCard({
+  goal,
+  hoursSinceGoalStart,
+  defaultStartDate,
+  onSetGoal,
+  onClearGoal,
+}: HoursGoalCardProps) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
+  const [startDateInput, setStartDateInput] = useState("")
   const [endDateInput, setEndDateInput] = useState("")
   const [targetInput, setTargetInput] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
   const today = getLocalDateInputValue()
+
+  // Primes the start date for a not-yet-created goal once real activity data has
+  // loaded, without clobbering anything the user has already typed into the field.
+  useEffect(() => {
+    if (!goal && startDateInput === "") {
+      setStartDateInput(defaultStartDate)
+    }
+  }, [goal, defaultStartDate, startDateInput])
+
   const projection = goal
     ? calculateHoursGoalProjection(hoursSinceGoalStart, goal.targetAvgHoursPerWeek, goal.startDate, goal.endDate)
     : null
 
   function startEditing() {
-    setEndDateInput(goal && !projection?.isPastEndDate ? goal.endDate : "")
-    setTargetInput(goal && !projection?.isPastEndDate ? String(goal.targetAvgHoursPerWeek) : "")
+    const editingExisting = goal && !projection?.isPastEndDate
+    setStartDateInput(editingExisting ? goal.startDate : defaultStartDate)
+    setEndDateInput(editingExisting ? goal.endDate : "")
+    setTargetInput(editingExisting ? String(goal.targetAvgHoursPerWeek) : "")
     setError(null)
     setIsEditing(true)
   }
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
+    if (!startDateInput) {
+      setError("Choose a start date.")
+      return
+    }
     if (!endDateInput) {
       setError("Choose a target date.")
       return
     }
-    if (endDateInput <= today) {
-      setError("Target date must be in the future.")
+    if (endDateInput <= startDateInput) {
+      setError("Target date must be after the start date.")
       return
     }
     const target = Number(targetInput)
@@ -72,12 +95,11 @@ export default function HoursGoalCard({ goal, hoursSinceGoalStart, onSetGoal, on
       return
     }
 
-    const isFreshGoal = !goal || projection?.isPastEndDate === true
     setError(null)
     setSaving(true)
     try {
       await onSetGoal({
-        startDate: isFreshGoal ? today : goal!.startDate,
+        startDate: startDateInput,
         endDate: endDateInput,
         targetAvgHoursPerWeek: target,
       })
@@ -149,6 +171,22 @@ export default function HoursGoalCard({ goal, hoursSinceGoalStart, onSetGoal, on
               {showForm ? (
                 <form onSubmit={handleSubmit} className="space-y-3">
                   <div>
+                    <Label htmlFor="hours-goal-start-date">Start date</Label>
+                    <Input
+                      id="hours-goal-start-date"
+                      type="date"
+                      data-stackin-date-input="true"
+                      className="w-full"
+                      value={startDateInput}
+                      max={today}
+                      onChange={(event) => setStartDateInput(event.target.value)}
+                      required
+                    />
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      Defaults to your first logged hours this year.
+                    </p>
+                  </div>
+                  <div>
                     <Label htmlFor="hours-goal-end-date">Target date</Label>
                     <Input
                       id="hours-goal-end-date"
@@ -156,7 +194,7 @@ export default function HoursGoalCard({ goal, hoursSinceGoalStart, onSetGoal, on
                       data-stackin-date-input="true"
                       className="w-full"
                       value={endDateInput}
-                      min={today}
+                      min={startDateInput || today}
                       onChange={(event) => setEndDateInput(event.target.value)}
                       required
                     />
@@ -195,15 +233,15 @@ export default function HoursGoalCard({ goal, hoursSinceGoalStart, onSetGoal, on
               ) : (
                 <>
                   <div className="grid grid-cols-2 gap-3">
-                    <StatTile label="Hours So Far" value={formatHours(hoursSinceGoalStart)} />
+                    <StatTile label={`Hours Since ${goal!.startDate}`} value={formatHours(hoursSinceGoalStart)} />
                     <StatTile label="Current Avg / Week" value={formatHours(projection?.currentAvgPerWeek ?? 0)} />
                   </div>
 
                   <div className="rounded-2xl border border-slate-200 bg-slate-50/90 px-3 py-3 dark:border-slate-700 dark:bg-slate-800/60">
                     <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
                       {projection?.isPastEndDate
-                        ? `Target was ${formatHours(goal!.targetAvgHoursPerWeek)} hrs/wk by ${goal!.endDate}`
-                        : `To hit ${formatHours(goal!.targetAvgHoursPerWeek)} hrs/wk by ${goal!.endDate}`}
+                        ? `Target was ${formatHours(goal!.targetAvgHoursPerWeek)} hrs/wk from ${goal!.startDate} to ${goal!.endDate}`
+                        : `To average ${formatHours(goal!.targetAvgHoursPerWeek)} hrs/wk from ${goal!.startDate} to ${goal!.endDate}`}
                     </div>
                     <div className="mt-1 text-xl font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">
                       {projection?.isPastEndDate
