@@ -24,6 +24,7 @@ import { usePayStubsStore } from "@/lib/stores/usePaystubsStore";
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore";
 import StackInHeader from "@/components/stackin-header";
 import YearlyEarningsGaugeCard from "@/components/yearly-earnings-gauge-card";
+import HoursWorkedCard from "@/components/hours-worked-card";
 import { useRouteScrollReset } from "@/hooks/useRouteScrollReset";
 // Simple pure-React dropdown replacement
 function SimpleMenu({ onPrint, onDownload, onShare }: {
@@ -361,6 +362,7 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
         let unreportedCash = 0;
         let card = 0;
         let payPeriods = 0;
+        let hoursWorked = 0;
         for (const stub of uniqueStubs) {
             const rows = getSelectedRows(stub);
             const rowsInYear = rows.filter((row) => {
@@ -376,9 +378,11 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
                 reportedCash += getRowReportedCash(row);
                 card += getRowTips(row);
                 unreportedCash += getRowUnreportedCash(row);
+                hoursWorked += getRowPaidHours(row);
             }
         }
         const cash = reportedCash + unreportedCash;
+        const totalGross = hourly + cash + card;
         return {
             year,
             payPeriods,
@@ -391,9 +395,50 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
                 reported: reportedCash,
                 unreported: unreportedCash,
             },
-            totalGross: hourly + cash + card,
+            totalGross,
+            avgPerHour: hoursWorked > 0 ? totalGross / hoursWorked : 0,
         };
     }, [stubs]);
+    const flatHoursRows = useMemo(() => {
+        const latestStubByPeriod = new Map<string, PayStub>();
+        for (const stub of stubs) {
+            const existing = latestStubByPeriod.get(stub.periodId);
+            if (!existing || getStubRecency(stub) >= getStubRecency(existing)) {
+                latestStubByPeriod.set(stub.periodId, stub);
+            }
+        }
+        const rows: { date: string; hours: number }[] = [];
+        for (const stub of latestStubByPeriod.values()) {
+            for (const row of getSelectedRows(stub)) {
+                const hours = getRowPaidHours(row);
+                const date = String(row.date ?? stub.periodEnd ?? stub.periodStart ?? "");
+                if (hours > 0 && date) {
+                    rows.push({ date, hours });
+                }
+            }
+        }
+        return rows;
+    }, [stubs]);
+    const monthlyHoursBuckets = useMemo(() => {
+        const totalsByMonth = new Map<string, number>();
+        for (const row of flatHoursRows) {
+            const key = row.date.slice(0, 7);
+            totalsByMonth.set(key, (totalsByMonth.get(key) ?? 0) + row.hours);
+        }
+        return [...totalsByMonth.entries()]
+            .map(([key, totalHours]) => {
+                const [year, month] = key.split("-").map(Number);
+                const periodStart = `${key}-01`;
+                const periodEnd = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+                const label = new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString("en-US", {
+                    month: "long",
+                    year: "numeric",
+                    timeZone: "UTC",
+                });
+                return { key, label, totalHours: Math.round(totalHours * 100) / 100, periodStart, periodEnd };
+            })
+            .sort((a, b) => b.key.localeCompare(a.key));
+    }, [flatHoursRows]);
     const selected = useMemo(() => {
         if (!resolvedPeriodId) {
             return null;
@@ -878,7 +923,9 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
     return (<>
     <StackInHeader />
     <div className="mx-auto max-w-6xl space-y-4 p-4 xl:max-w-7xl">
-      <YearlyEarningsGaugeCard year={yearlyGaugeSummary.year} payPeriods={yearlyGaugeSummary.payPeriods} totalGross={yearlyGaugeSummary.totalGross} breakdown={yearlyGaugeSummary.breakdown} cashBreakdown={yearlyGaugeSummary.cashBreakdown}/>
+      <YearlyEarningsGaugeCard year={yearlyGaugeSummary.year} payPeriods={yearlyGaugeSummary.payPeriods} totalGross={yearlyGaugeSummary.totalGross} breakdown={yearlyGaugeSummary.breakdown} cashBreakdown={yearlyGaugeSummary.cashBreakdown} avgPerHour={yearlyGaugeSummary.avgPerHour}/>
+
+      <HoursWorkedCard variant="trend" monthlyBuckets={monthlyHoursBuckets} />
 
       <div>
         <div>

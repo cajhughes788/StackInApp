@@ -13,6 +13,7 @@ import {
 } from "lucide-react"
 import AppLoader from "@/components/app-loader"
 import StackInHeader from "@/components/stackin-header"
+import HoursWorkedCard from "@/components/hours-worked-card"
 import {
   Accordion,
   AccordionContent,
@@ -417,6 +418,12 @@ export default function ProfitLossPage() {
   const entry = useProfitLossStore((s) =>
     activeWorkspaceId ? s.byWorkspaceId[activeWorkspaceId]?.[periodType] : undefined
   )
+  const monthEntry = useProfitLossStore((s) =>
+    activeWorkspaceId ? s.byWorkspaceId[activeWorkspaceId]?.["month"] : undefined
+  )
+  const yearEntry = useProfitLossStore((s) =>
+    activeWorkspaceId ? s.byWorkspaceId[activeWorkspaceId]?.["year"] : undefined
+  )
   const hydrateFromCacheOnce = useProfitLossStore((s) => s.hydrateFromCacheOnce)
   const refreshFromBackend = useProfitLossStore((s) => s.refreshFromBackend)
 
@@ -462,6 +469,26 @@ export default function ProfitLossPage() {
     refreshFromBackend,
   ])
 
+  // Hours Worked card always shows this-month/this-year figures regardless of
+  // which statement tab is active, so month + year statements are kept hydrated independently.
+  useEffect(() => {
+    if (!activeWorkspaceId || activeWorkspace?.type !== "independent") return
+    hydrateFromCacheOnce(activeWorkspaceId, "month")
+    hydrateFromCacheOnce(activeWorkspaceId, "year")
+  }, [activeWorkspaceId, activeWorkspace?.type, hydrateFromCacheOnce])
+
+  useEffect(() => {
+    if (!activeWorkspaceId || activeWorkspace?.type !== "independent") return
+    if (monthEntry?.hasHydrated) refreshFromBackend(activeWorkspaceId, "month", { force: false })
+    if (yearEntry?.hasHydrated) refreshFromBackend(activeWorkspaceId, "year", { force: false })
+  }, [
+    activeWorkspaceId,
+    activeWorkspace?.type,
+    monthEntry?.hasHydrated,
+    yearEntry?.hasHydrated,
+    refreshFromBackend,
+  ])
+
   useEffect(() => {
     setSelectedId((current) => {
       if (statements.length === 0) return null
@@ -474,6 +501,19 @@ export default function ProfitLossPage() {
     () => statements.find((statement) => statement.id === selectedId) ?? null,
     [statements, selectedId]
   )
+
+  const hoursStats = useMemo(() => {
+    const now = new Date()
+    const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
+    const currentYearKey = String(now.getFullYear())
+    const thisMonthStatement = monthEntry?.statements.find((s) => s.periodKey === currentMonthKey) ?? null
+    const thisYearStatement = yearEntry?.statements.find((s) => s.periodKey === currentYearKey) ?? null
+    return {
+      thisMonthHours: thisMonthStatement?.hours.total ?? 0,
+      thisYearHours: thisYearStatement?.hours.total ?? 0,
+      avgPerWeek: thisYearStatement?.hours.avgPerWeek ?? 0,
+    }
+  }, [monthEntry?.statements, yearEntry?.statements])
 
   const detailLabel = useMemo(() => {
     if (periodType === "month") return "Month P&L"
@@ -846,6 +886,14 @@ export default function ProfitLossPage() {
             </div>
           </div>
         </div>
+
+        <HoursWorkedCard
+          variant="simple"
+          thisMonthHours={hoursStats.thisMonthHours}
+          thisYearHours={hoursStats.thisYearHours}
+          avgPerWeek={hoursStats.avgPerWeek}
+          hideWhenEmpty
+        />
 
         <Card className="border-slate-200 bg-white text-slate-900 shadow-sm">
           <CardHeader className="pb-4">

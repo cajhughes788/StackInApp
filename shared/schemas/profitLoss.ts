@@ -40,6 +40,11 @@ export const ProfitLossExpensesSchema = z.object({
   total: z.number(),
 })
 
+export const ProfitLossHoursSchema = z.object({
+  total: z.number(),
+  avgPerWeek: z.number(),
+})
+
 export const ProfitLossMetaSchema = z.object({
   incomeEntryCount: z.number().int().nonnegative(),
   expenseCount: z.number().int().nonnegative(),
@@ -61,6 +66,7 @@ export const ProfitLossStatementSchema = z.object({
   income: ProfitLossIncomeSchema,
   expenses: ProfitLossExpensesSchema,
   netProfit: z.number(),
+  hours: ProfitLossHoursSchema.default({ total: 0, avgPerWeek: 0 }),
   meta: ProfitLossMetaSchema,
 })
 
@@ -74,5 +80,6 @@ export type ProfitLossIncomeCategoryDetail = z.infer<
 export type ProfitLossIncome = z.infer<typeof ProfitLossIncomeSchema>
 export type ProfitLossExpenseCategory = z.infer<typeof ProfitLossExpenseCategorySchema>
 export type ProfitLossExpenses = z.infer<typeof ProfitLossExpensesSchema>
+export type ProfitLossHours = z.infer<typeof ProfitLossHoursSchema>
 export type ProfitLossMeta = z.infer<typeof ProfitLossMetaSchema>
 export type ProfitLossStatement = z.infer<typeof ProfitLossStatementSchema>

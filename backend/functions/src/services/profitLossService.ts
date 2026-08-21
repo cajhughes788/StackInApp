@@ -3,7 +3,8 @@ import { db } from "../admin";
 import { findExpenseCategoryGuideEntry, getCpaExpenseCategory } from "@shared/expenseCategories";
 import { EntrySchema, type EntryType, type IncomeCategory, } from "@shared/schemas/entry";
 import { ExpenseSchema, type ExpenseType, } from "@shared/schemas/expense";
-import type { ProfitLossDetailItem } from "@shared/schemas/profitLoss";
+import { calculateAvgHoursPerWeek } from "@shared/hoursStats";
+import type { ProfitLossDetailItem, ProfitLossHours } from "@shared/schemas/profitLoss";
 import { ProfitLossStatementSchema, ProfitLossStatementListSchema, type ProfitLossPeriodType, type ProfitLossStatement, } from "@shared/schemas/profitLoss";
 const DEFAULT_TIME_ZONE = "America/Los_Angeles";
 const INCOME_CATEGORY_CONFIG: Array<{
@@ -294,6 +295,25 @@ function buildPeriods(periodType: ProfitLossPeriodType, entries: EntryType[], ex
     }
     return periods.reverse();
 }
+function buildHours(entries: EntryType[], descriptor: PeriodDescriptor): ProfitLossHours {
+    const hoursEntries = entries.filter((entry) => (entry.totals?.totalHours ?? 0) > 0);
+    const total = roundCurrency(hoursEntries.reduce((sum, entry) => sum + (entry.totals?.totalHours ?? 0), 0));
+    // Floor the averaging window to the first date hours were actually logged in this
+    // period, so a user who starts partway through (e.g. joins in May) isn't diluted
+    // by the months before they had any activity.
+    const earliestActivityDate = hoursEntries.reduce<string | null>(
+        (earliest, entry) => (!earliest || entry.date < earliest ? entry.date : earliest),
+        null
+    );
+    const avgPerWeek = calculateAvgHoursPerWeek(
+        total,
+        descriptor.periodStart,
+        descriptor.periodEnd,
+        undefined,
+        earliestActivityDate
+    );
+    return { total, avgPerWeek };
+}
 function buildStatement(workspaceId: string, descriptor: PeriodDescriptor, entries: EntryType[], expenses: ExpenseType[], previousVersion = 0): ProfitLossStatement {
     // Single pass — derive top-level totals from the same computation that
     // builds the category line items, eliminating the redundant aggregateIndependentPnL pass.
@@ -332,6 +352,7 @@ function buildStatement(workspaceId: string, descriptor: PeriodDescriptor, entri
             total: totalExpenses,
         },
         netProfit: roundCurrency(incomeTotal - totalExpenses),
+        hours: buildHours(entries, descriptor),
         meta: {
             incomeEntryCount: entries.length,
             expenseCount: expenses.length,
@@ -400,6 +421,7 @@ function getComparableStatementShape(statement: ProfitLossStatement) {
         income: statement.income,
         expenses: statement.expenses,
         netProfit: statement.netProfit,
+        hours: statement.hours,
         meta: {
             incomeEntryCount: statement.meta.incomeEntryCount,
             expenseCount: statement.meta.expenseCount,

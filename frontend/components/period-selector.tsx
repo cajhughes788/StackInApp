@@ -58,7 +58,7 @@ export default function PeriodSelector() {
           setSelectedPeriod(activeWorkspaceId, isCurrent ? null : period)
         }}
       >
-        <SelectTrigger className="w-fit gap-1.5 border-none bg-transparent px-0 text-lg font-semibold shadow-none hover:bg-transparent focus:ring-0">
+        <SelectTrigger className="w-fit gap-1.5 border-none bg-transparent px-0 text-lg font-semibold text-foreground shadow-none hover:bg-transparent focus:ring-0 [&_svg:not([class*='text-'])]:text-foreground">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
