@@ -6,6 +6,7 @@ import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
 import { AccountAuthorityProvider } from "@/contexts/account-authority-context"
 import { AuthProvider } from "@/contexts/auth-context"
 import { ThemeProvider } from "@/components/theme-provider"
+import { PointerEventsGuard } from "@/components/pointer-events-guard"
 
 const inter = Inter({
   subsets: ["latin"],
@@ -63,6 +64,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} storageKey="stackin-theme">
           <AuthProvider>
             <AccountAuthorityProvider>
+              <PointerEventsGuard />
               {children}
               <PWAInstallPrompt />
             </AccountAuthorityProvider>
