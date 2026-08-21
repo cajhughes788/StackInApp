@@ -18,13 +18,16 @@ import { exportCsvFile } from "@/lib/documentExport";
 import { formatCurrency, formatDate } from "@/lib/helpers";
 import { printHtmlDocument } from "@/lib/print";
 import { Type as PayStub } from "@shared/schemas/paystub";
+import type { W2HoursGoalType } from "@shared/schemas/settings";
 import { useAuth } from "@/contexts/auth-context";
 import { useSettingsStore } from "@/lib/stores/useSettingsStore";
+import * as settingsService from "@/lib/domain/settingsService";
 import { usePayStubsStore } from "@/lib/stores/usePaystubsStore";
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore";
 import StackInHeader from "@/components/stackin-header";
 import YearlyEarningsGaugeCard from "@/components/yearly-earnings-gauge-card";
 import HoursWorkedCard from "@/components/hours-worked-card";
+import HoursGoalCard from "@/components/hours-goal-card";
 import { useRouteScrollReset } from "@/hooks/useRouteScrollReset";
 // Simple pure-React dropdown replacement
 function SimpleMenu({ onPrint, onDownload, onShare }: {
@@ -160,6 +163,7 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
     const ensureSettingsLoaded = useSettingsStore((s) => s.ensureLoaded);
     const settingsEntry = useSettingsStore((s) => activeWorkspaceId ? s.byWorkspaceId[activeWorkspaceId] : undefined);
     const settings = settingsEntry?.data ?? null;
+    const updateSettingsStore = useSettingsStore((s) => s.setSettings);
     const settingsLoading = activeWorkspaceId != null
         ? (settingsEntry?.status ?? "idle") === "loading"
         : true;
@@ -420,13 +424,19 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
         return rows;
     }, [stubs]);
     const monthlyHoursBuckets = useMemo(() => {
-        const totalsByMonth = new Map<string, number>();
+        const totalsByMonth = new Map<string, { hours: number; firstActivityDate: string }>();
         for (const row of flatHoursRows) {
             const key = row.date.slice(0, 7);
-            totalsByMonth.set(key, (totalsByMonth.get(key) ?? 0) + row.hours);
+            const current = totalsByMonth.get(key);
+            if (!current) {
+                totalsByMonth.set(key, { hours: row.hours, firstActivityDate: row.date });
+            } else {
+                current.hours += row.hours;
+                if (row.date < current.firstActivityDate) current.firstActivityDate = row.date;
+            }
         }
         return [...totalsByMonth.entries()]
-            .map(([key, totalHours]) => {
+            .map(([key, { hours: totalHours, firstActivityDate }]) => {
                 const [year, month] = key.split("-").map(Number);
                 const periodStart = `${key}-01`;
                 const periodEnd = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
@@ -435,10 +445,43 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
                     year: "numeric",
                     timeZone: "UTC",
                 });
-                return { key, label, totalHours: Math.round(totalHours * 100) / 100, periodStart, periodEnd };
+                return {
+                    key,
+                    label,
+                    totalHours: Math.round(totalHours * 100) / 100,
+                    periodStart,
+                    periodEnd,
+                    firstActivityDate,
+                };
             })
             .sort((a, b) => b.key.localeCompare(a.key));
     }, [flatHoursRows]);
+    const hoursGoal = settings?.w2?.hoursGoal ?? null;
+    const hoursSinceGoalStart = useMemo(() => {
+        if (!hoursGoal) return 0;
+        return Math.round(
+            flatHoursRows
+                .filter((row) => row.date >= hoursGoal.startDate && row.date <= hoursGoal.endDate)
+                .reduce((sum, row) => sum + row.hours, 0) * 100
+        ) / 100;
+    }, [flatHoursRows, hoursGoal]);
+    async function persistHoursGoal(nextGoal: W2HoursGoalType | null) {
+        if (!activeWorkspaceId || !settings) return;
+        const optimisticSettings = { ...settings, w2: { ...settings.w2, hoursGoal: nextGoal } };
+        updateSettingsStore(activeWorkspaceId, optimisticSettings, {
+            source: "optimistic",
+            localUpdatedAt: Date.now(),
+        });
+        const saved = await settingsService.save(activeWorkspaceId, { w2: { hoursGoal: nextGoal } });
+        if (saved.source === "backend" && saved.data) {
+            updateSettingsStore(activeWorkspaceId, saved.data, {
+                source: "backend",
+                remoteMeta: saved.remoteMeta,
+                lastSuccessfulSyncAt: saved.lastSuccessfulSyncAt,
+                localUpdatedAt: saved.localUpdatedAt,
+            });
+        }
+    }
     const selected = useMemo(() => {
         if (!resolvedPeriodId) {
             return null;
@@ -926,6 +969,13 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
       <YearlyEarningsGaugeCard year={yearlyGaugeSummary.year} payPeriods={yearlyGaugeSummary.payPeriods} totalGross={yearlyGaugeSummary.totalGross} breakdown={yearlyGaugeSummary.breakdown} cashBreakdown={yearlyGaugeSummary.cashBreakdown} avgPerHour={yearlyGaugeSummary.avgPerHour}/>
 
       <HoursWorkedCard variant="trend" monthlyBuckets={monthlyHoursBuckets} />
+
+      <HoursGoalCard
+        goal={hoursGoal}
+        hoursSinceGoalStart={hoursSinceGoalStart}
+        onSetGoal={persistHoursGoal}
+        onClearGoal={() => persistHoursGoal(null)}
+      />
 
       <div>
         <div>

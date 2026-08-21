@@ -54,6 +54,12 @@ export const CommonSettings = z.object({
  * W2 SETTINGS — required only for UI-critical fields
  * -----------------------------------------------------*/
 
+export const W2HoursGoal = z.object({
+  startDate: z.string(),
+  endDate: z.string(),
+  targetAvgHoursPerWeek: z.coerce.number().positive(),
+})
+
 export const W2Settings = z.object({
   // UI requires knowing which input mode to show
   workInputMode: z.enum(["enter_hours", "enter_in_out_times"]).optional(),
@@ -79,6 +85,8 @@ export const W2Settings = z.object({
   // Pay period logic requires these to function
   payFrequency: z.enum(["weekly", "biweekly", "semi-monthly", "monthly"]).optional(),
   payPeriodStartDate: z.string().optional(),
+
+  hoursGoal: W2HoursGoal.nullable().optional(),
 
   // Must NOT use defaults, sparse DB only
   customDeductions: z
@@ -169,6 +177,7 @@ export const BranchSchemaByMode: Record<
 export type CommonSettingsType = z.infer<typeof CommonSettings>
 export type W2SettingsType = z.infer<typeof W2Settings>
 export type IndependentSettingsType = z.infer<typeof IndependentSettings>
+export type W2HoursGoalType = z.infer<typeof W2HoursGoal>
 export type TimeEntryReminderType = z.infer<typeof TimeEntryReminder>
 export type LocationEntryReminderType = z.infer<typeof LocationEntryReminder>
 export type EntryReminderDeliveryModeType = z.infer<typeof EntryReminderDeliveryMode>

@@ -11,6 +11,7 @@ export type MonthlyHoursBucket = {
   totalHours: number
   periodStart: string
   periodEnd: string
+  firstActivityDate: string
 }
 
 type HoursWorkedCardProps =
@@ -33,7 +34,7 @@ function formatHours(value: number): string {
 function TrendVariant({ monthlyBuckets }: { monthlyBuckets: MonthlyHoursBucket[] }) {
   const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null)
 
-  const now = useMemo(() => new Date(), [])
+  const now = new Date()
   const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
   const currentYearPrefix = String(now.getFullYear())
 
@@ -62,13 +63,21 @@ function TrendVariant({ monthlyBuckets }: { monthlyBuckets: MonthlyHoursBucket[]
   }, [yearBuckets, currentMonthKey])
 
   const selectedBucket = yearBuckets.find((bucket) => bucket.key === selectedMonthKey) ?? null
+  // Floor to the first day hours were actually logged in the selected month, so a
+  // partial first month (e.g. hired on the 15th) isn't diluted by the unworked days.
   const selectedAvgPerWeek = selectedBucket
-    ? calculateAvgHoursPerWeek(selectedBucket.totalHours, selectedBucket.periodStart, selectedBucket.periodEnd)
+    ? calculateAvgHoursPerWeek(
+        selectedBucket.totalHours,
+        selectedBucket.periodStart,
+        selectedBucket.periodEnd,
+        now,
+        selectedBucket.firstActivityDate
+      )
     : 0
 
-  // Floor the yearly average to the first month with any logged hours, so a user who
-  // starts partway through the year isn't diluted by the unused months before that.
-  const earliestActivityDate = yearBuckets[0]?.periodStart ?? null
+  // Floor the yearly average to the first day with any logged hours this year, so a
+  // user who starts partway through the year isn't diluted by the unused months before that.
+  const earliestActivityDate = yearBuckets[0]?.firstActivityDate ?? null
   const yearAvgPerWeek = calculateAvgHoursPerWeek(
     thisYearHours,
     `${now.getFullYear()}-01-01`,
