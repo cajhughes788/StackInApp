@@ -1,13 +1,13 @@
 import type { SubscriptionTier } from "@shared/contracts/subscription"
 
 export const STRIPE_PRICE_IDS: Record<SubscriptionTier, string> = {
-  w2_basic: "price_1TSKYRFVyV2bNsbdeUKMqpM8",
+  w2_basic: "price_1U6ZuBFVyV2bNsbdKwBCzEM3",
   independent_basic: "price_1TSKa5FVyV2bNsbddxJfd4Ty",
   hybrid_plus: "price_1TSKUuFVyV2bNsbdby2ymNAu",
 }
 
 const LEGACY_STRIPE_PRICE_IDS: Record<SubscriptionTier, string[]> = {
-  w2_basic: ["price_1TEaSbFVyV2bNsbdIOlWsONM"],
+  w2_basic: ["price_1TEaSbFVyV2bNsbdIOlWsONM", "price_1TSKYRFVyV2bNsbdeUKMqpM8"],
   independent_basic: ["price_1TEaSwFVyV2bNsbdOPanb758"],
   hybrid_plus: ["price_1TF3MuFVyV2bNsbdib4wiIB5"],
 }

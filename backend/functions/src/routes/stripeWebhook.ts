@@ -152,6 +152,7 @@ export async function stripeWebhookHandler(req: Request, res: Response): Promise
                 }
                 const tier = getTierFromStripePriceId(priceId);
                 if (!tier) {
+                    console.error(`stripeWebhook: unknown price ${priceId} on subscription ${subscription.id} (uid ${uid}) — add it to STRIPE_PRICE_IDS or LEGACY_STRIPE_PRICE_IDS`);
                     break;
                 }
                 await upsertSubscriptionDoc(uid, {
