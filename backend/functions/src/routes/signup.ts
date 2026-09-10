@@ -8,7 +8,9 @@ import { auth, db } from "../admin"
 
 const CURRENT_LEGAL_CONSENT_VERSION = "2026-04-27"
 const CURRENT_TERMS_VERSION = "2026-04-27"
-const CURRENT_PRIVACY_VERSION = "2026-04-27"
+// Must match LEGAL_PRIVACY_VERSION in trackd-website/lib/legal.ts exactly —
+// the signup page sends that value and this route rejects anything else.
+const CURRENT_PRIVACY_VERSION = "2026-09-06"
 
 // ---------------------------------------------------------------------------
 // Validation schema

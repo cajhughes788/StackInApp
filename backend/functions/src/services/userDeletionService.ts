@@ -1,4 +1,6 @@
 import { auth, db } from "../admin"
+import { revokePlaidItemsForWorkspace } from "./plaidService"
+import { deleteWorkspaceStorage } from "./workspaceDeletionService"
 
 function serializeError(error: unknown) {
   if (!(error instanceof Error)) {
@@ -114,6 +116,20 @@ export async function purgeUserData(uid: string): Promise<void> {
     })
 
     if (workspaceSnap.exists && workspaceSnap.data()?.ownerId === uid) {
+      await runLoggedStep(
+        "revoke_plaid_items",
+        { uid, workspaceId },
+        () => revokePlaidItemsForWorkspace(workspaceId)
+      )
+      // db.recursiveDelete only touches Firestore — without this, receipt
+      // images and their derived previews/thumbnails in Cloud Storage would
+      // survive a full account deletion indefinitely, orphaned with nothing
+      // left pointing at them.
+      await runLoggedStep(
+        "delete_workspace_storage",
+        { uid, workspaceId },
+        () => deleteWorkspaceStorage(workspaceId)
+      )
       await runLoggedStep(
         "recursive_delete_workspace",
         { uid, workspaceId, workspacePath: workspaceRef.path },

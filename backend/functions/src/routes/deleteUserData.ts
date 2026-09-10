@@ -6,6 +6,7 @@
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { purgeUserData } from "../services/userDeletionService";
+import { sendHttpError } from "../lib/httpErrors";
 // ---------------------------------------------------------------------------
 // 🔹 Zod schema for validating UID
 // ---------------------------------------------------------------------------
@@ -62,9 +63,6 @@ export async function deleteUserDataHandler(req: Request, res: Response): Promis
             uid: (req as any).user?.uid ?? null,
             error: serializeError(err),
         });
-        res.status(500).json({
-            ok: false,
-            error: err?.message ?? "Internal Server Error",
-        });
+        sendHttpError(res, err, "deleteUserData");
     }
 }

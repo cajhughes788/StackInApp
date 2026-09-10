@@ -20,12 +20,25 @@ def capacitor_pods
   pod 'CapacitorLocalNotifications', :path => '../../../node_modules/@capacitor/local-notifications'
   pod 'CapacitorNetwork', :path => '../../../node_modules/@capacitor/network'
   pod 'CapacitorPreferences', :path => '../../../node_modules/@capacitor/preferences'
+  pod 'CapacitorPushNotifications', :path => '../../../node_modules/@capacitor/push-notifications'
   pod 'CapacitorShare', :path => '../../../node_modules/@capacitor/share'
 end
 
 target 'App' do
   capacitor_pods
   # Add your Pods here
+  # @capacitor/push-notifications only exposes the raw APNs device token on
+  # iOS. FCM (used by pushNotificationService.ts on the backend) needs an
+  # FCM registration token instead, which requires the native Firebase SDK
+  # to bridge the two — see FcmTokenPlugin.swift. Deliberately placed here,
+  # not inside capacitor_pods above — `npx cap sync` regenerates that
+  # function from installed @capacitor/* plugins and will silently drop
+  # anything added inside it, which is exactly what happened last sync.
+  pod 'Firebase/Messaging'
+  # App Check attestation (see AppCheckPlugin.swift / AppDelegate.swift).
+  # Same reasoning as Firebase/Messaging above for living outside
+  # capacitor_pods.
+  pod 'Firebase/AppCheck'
 end
 
 post_install do |installer|

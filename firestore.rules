@@ -37,6 +37,15 @@ service cloud.firestore {
       match /{document=**} {
         allow read: if isWorkspaceMember(workspaceId);
       }
+
+      // Plaid access tokens must never be readable from the client, even by
+      // workspace members — all Plaid data flows through backend routes
+      // (see backend/functions/src/services/plaidService.ts), so client
+      // reads are unnecessary and would otherwise leak bank credentials via
+      // the wildcard rule above.
+      match /plaidItems/{itemId} {
+        allow read: if false;
+      }
     }
   }
 }

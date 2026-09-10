@@ -28,6 +28,7 @@ import { useSelectedPeriod } from "@/lib/stores/usePeriodSelectionStore";
 import ExpenseForm from "@/components/expense-form";
 import ExpensesGrid from "@/components/expenses-grid";
 import VenmoImportPanel from "@/components/venmo-import-panel";
+import PlaidPendingTransactionsPanel from "@/components/plaid-pending-transactions-panel";
 import {
     useExpensesData,
     useExpensesRenderState,
@@ -63,6 +64,17 @@ export default function HomePage() {
     // ---- INCOME vs EXPENSES TOGGLE ----
     const [mode, setMode] = useState<"income" | "expenses">("income");
     const [showNet, setShowNet] = useState(false);
+    // Lets a push-notification tap (registerPush.ts) or other deep link land
+    // directly on the Expenses tab via /app/home?mode=expenses. Reads
+    // window.location directly rather than useSearchParams() so this page
+    // doesn't need a Suspense boundary.
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        const params = new URLSearchParams(window.location.search);
+        if (params.get("mode") === "expenses") {
+            setMode("expenses");
+        }
+    }, []);
     // ---- ENTRIES STORE ----
     const entries = useEntriesData(activeWorkspaceId);
     const entriesState = useEntriesRenderState(activeWorkspaceId);
@@ -297,6 +309,7 @@ export default function HomePage() {
           </div>)}
 
         {supportsExpenses ? (<div className="space-y-3">
+            {mode === "expenses" ? <PlaidPendingTransactionsPanel /> : null}
             {showVenmoImportPanel ? <VenmoImportPanel /> : null}
             {/* ReceiptCapturePanel removed — receipt attachment now happens inside ExpenseForm */}
           </div>) : null}

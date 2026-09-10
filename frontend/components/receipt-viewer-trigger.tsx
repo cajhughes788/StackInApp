@@ -221,7 +221,11 @@ export default function ReceiptViewerTrigger({
           setOpen(false)
           return
         }
-        setError("Receipt preview is unavailable.")
+        setError(
+          result.asset?.uploadStatus === "failed"
+            ? "This receipt's image failed to upload. Please reattach it."
+            : "Receipt preview is unavailable."
+        )
       }
     } catch (err) {
       const fallbackUrl = await resolveReceiptOriginalUrl(

@@ -14,7 +14,7 @@ import {
     Share2,
 } from "lucide-react";
 import AppLoader from "@/components/app-loader";
-import { exportCsvFile } from "@/lib/documentExport";
+import { exportCsvFile, escapeCsvField } from "@/lib/documentExport";
 import { formatCurrency, formatDate, getLocalDateInputValue } from "@/lib/helpers";
 import { printHtmlDocument } from "@/lib/print";
 import { Type as PayStub } from "@shared/schemas/paystub";
@@ -341,7 +341,7 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
         ];
 
         return csvRows
-            .map((row) => row.map((value) => `"${String(value ?? "").replaceAll('"', '""')}"`).join(","))
+            .map((row) => row.map(escapeCsvField).join(","))
             .join("\n");
     }
     const yearlyGaugeSummary = useMemo(() => {

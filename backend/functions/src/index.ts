@@ -35,6 +35,7 @@ export {
   createReceiptAsset,
   getReceiptAsset,
   deleteReceiptAsset,
+  updateReceiptAssetUploadStatus,
   createReceiptDraft,
   getReceiptDrafts,
   updateReceiptDraft,
@@ -47,6 +48,18 @@ export {
   submitSupportReport,
   requestAccountDeletion,
   cancelAccountDeletionRequest,
+  createPlaidLinkToken,
+  createPlaidUpdateLinkToken,
+  exchangePlaidPublicToken,
+  unlinkPlaidItem,
+  getPlaidItems,
+  importPlaidHistory,
+  getPlaidPendingTransactions,
+  confirmPlaidPendingTransaction,
+  updatePlaidAccountDefault,
+  linkPlaidMerchantToRecurringRule,
+  plaidWebhook,
+  registerDeviceToken,
 } from "./api"
 
 export { generatePayStubsDaily } from "./scheduled/generatePayStubsDaily"
@@ -54,4 +67,5 @@ export { generateRecurringTransactionsDaily } from "./scheduled/generateRecurrin
 export { generateProfitLossStatementsMonthly } from "./scheduled/generateProfitLossStatementsMonthly"
 export { deleteScheduledAccounts } from "./scheduled/deleteScheduledAccounts"
 export { cleanupOrphanReceiptAssets } from "./scheduled/cleanupOrphanReceiptAssets"
+export { flagStalePlaidItemsDaily } from "./scheduled/flagStalePlaidItemsDaily"
 export { notifySupportReportCreated } from "./triggers/notifySupportReportCreated"

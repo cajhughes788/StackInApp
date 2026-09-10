@@ -1,5 +1,6 @@
 import { DateTime } from "luxon";
 import { db } from "../admin";
+import { assertWorkspaceMembership } from "../lib/workspaceMembership";
 import { findExpenseCategoryGuideEntry, getCpaExpenseCategory } from "@shared/expenseCategories";
 import { EntrySchema, type EntryType, type IncomeCategory, } from "@shared/schemas/entry";
 import { ExpenseSchema, type ExpenseType, } from "@shared/schemas/expense";
@@ -511,11 +512,12 @@ export async function syncProfitLossForFinancialDates(workspaceId: string, dates
     const targets = dates.flatMap((date) => typeof date === "string" ? getTargetsForDate(date) : []);
     await syncProfitLossTargets(workspaceId, targets);
 }
-export async function generateProfitLossStatement(workspaceId: string, opts: {
+export async function generateProfitLossStatement(workspaceId: string, uid: string, opts: {
     periodType: ProfitLossPeriodType;
     periodKey: string;
     force?: boolean;
 }): Promise<ProfitLossStatement> {
+    await assertWorkspaceMembership(workspaceId, uid);
     await ensureIndependentWorkspace(workspaceId);
     const descriptor = getDescriptorFromKey(opts.periodType, opts.periodKey);
     const existing = await loadExistingStatement(workspaceId, descriptor);
@@ -532,9 +534,10 @@ export async function generateProfitLossStatement(workspaceId: string, opts: {
     await syncRollupAncestors(workspaceId, descriptor);
     return statement;
 }
-export async function listProfitLossStatements(workspaceId: string, periodType: ProfitLossPeriodType, opts?: {
+export async function listProfitLossStatements(workspaceId: string, uid: string, periodType: ProfitLossPeriodType, opts?: {
     ensureFresh?: boolean;
 }): Promise<ProfitLossStatement[]> {
+    await assertWorkspaceMembership(workspaceId, uid);
     await ensureIndependentWorkspace(workspaceId);
 
     // Read the statement collection directly instead of scanning all expenses and
@@ -585,7 +588,7 @@ export async function listProfitLossStatements(workspaceId: string, periodType: 
         results.sort((a, b) => b.periodStart.localeCompare(a.periodStart))
     );
 }
-export async function generateDueProfitLossStatementsForWorkspace(workspaceId: string, now = DateTime.now().setZone(DEFAULT_TIME_ZONE)) {
+export async function generateDueProfitLossStatementsForWorkspace(workspaceId: string, uid: string, now = DateTime.now().setZone(DEFAULT_TIME_ZONE)) {
     await ensureIndependentWorkspace(workspaceId);
     const due: Array<{
         periodType: ProfitLossPeriodType;
@@ -611,7 +614,7 @@ export async function generateDueProfitLossStatementsForWorkspace(workspaceId: s
         });
     }
     for (const item of due) {
-        await generateProfitLossStatement(workspaceId, {
+        await generateProfitLossStatement(workspaceId, uid, {
             periodType: item.periodType,
             periodKey: item.periodKey,
             force: false,

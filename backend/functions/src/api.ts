@@ -32,6 +32,10 @@ import { onRequest } from "firebase-functions/v2/https"
 import { withCorsAuth } from "./middleware/withCorsAuth"
 import * as SECRETS from "./secrets"
 
+// Referenced by deleteUserData below (account deletion revokes any linked
+// Plaid items) as well as the Plaid routes further down this file.
+const PLAID_SECRETS = [SECRETS.PLAID_CLIENT_ID, SECRETS.PLAID_SECRET, SECRETS.PLAID_ENV, SECRETS.PLAID_TOKEN_ENCRYPTION_KEY]
+
 // ---------------------------------------------------------------------------
 // Public routes (no auth)
 // ---------------------------------------------------------------------------
@@ -189,6 +193,11 @@ export const getReceiptAsset = withCorsAuth(async (req, res) => {
 export const deleteReceiptAsset = withCorsAuth(async (req, res) => {
   const { deleteReceiptAssetHandler } = await import("./routes/deleteReceiptAsset.js")
   await deleteReceiptAssetHandler(req, res)
+})
+
+export const updateReceiptAssetUploadStatus = withCorsAuth(async (req, res) => {
+  const { updateReceiptAssetUploadStatusHandler } = await import("./routes/updateReceiptAssetUploadStatus.js")
+  await updateReceiptAssetUploadStatusHandler(req, res)
 })
 
 // ---------------------------------------------------------------------------
@@ -351,10 +360,14 @@ export const saveTaxProfile = withCorsAuth(async (req, res) => {
 // Account & bootstrap
 // ---------------------------------------------------------------------------
 
-export const deleteUserData = withCorsAuth(async (req, res) => {
-  const { deleteUserDataHandler } = await import("./routes/deleteUserData.js")
-  await deleteUserDataHandler(req, res)
-})
+export const deleteUserData = withCorsAuth(
+  async (req, res) => {
+    const { deleteUserDataHandler } = await import("./routes/deleteUserData.js")
+    await deleteUserDataHandler(req, res)
+  },
+  true,
+  { secrets: PLAID_SECRETS }
+)
 
 export const getAppBootstrap = withCorsAuth(async (req, res) => {
   const { getAppBootstrapHandler } = await import("./routes/getAppBootstrap.js")
@@ -364,4 +377,102 @@ export const getAppBootstrap = withCorsAuth(async (req, res) => {
 export const submitSupportReport = withCorsAuth(async (req, res) => {
   const { submitSupportReportHandler } = await import("./routes/submitSupportReport.js")
   await submitSupportReportHandler(req, res)
+})
+
+// ---------------------------------------------------------------------------
+// Plaid bank integration
+// ---------------------------------------------------------------------------
+
+export const createPlaidLinkToken = withCorsAuth(
+  async (req, res) => {
+    const { createPlaidLinkTokenHandler } = await import("./routes/createPlaidLinkToken.js")
+    await createPlaidLinkTokenHandler(req, res)
+  },
+  true,
+  { secrets: PLAID_SECRETS }
+)
+
+export const createPlaidUpdateLinkToken = withCorsAuth(
+  async (req, res) => {
+    const { createPlaidUpdateLinkTokenHandler } = await import("./routes/createPlaidUpdateLinkToken.js")
+    await createPlaidUpdateLinkTokenHandler(req, res)
+  },
+  true,
+  { secrets: PLAID_SECRETS }
+)
+
+export const exchangePlaidPublicToken = withCorsAuth(
+  async (req, res) => {
+    const { exchangePlaidPublicTokenHandler } = await import("./routes/exchangePlaidPublicToken.js")
+    await exchangePlaidPublicTokenHandler(req, res)
+  },
+  true,
+  { secrets: PLAID_SECRETS }
+)
+
+export const unlinkPlaidItem = withCorsAuth(
+  async (req, res) => {
+    const { unlinkPlaidItemHandler } = await import("./routes/unlinkPlaidItem.js")
+    await unlinkPlaidItemHandler(req, res)
+  },
+  true,
+  { secrets: PLAID_SECRETS }
+)
+
+export const getPlaidItems = withCorsAuth(async (req, res) => {
+  const { getPlaidItemsHandler } = await import("./routes/getPlaidItems.js")
+  await getPlaidItemsHandler(req, res)
+})
+
+// Bulk historical backfill (see plaidService.importPlaidHistory) — not the
+// same thing as a "sync now speeds up live detection" button. A multi-month
+// pull can span several Plaid /transactions/sync pages, so this gets a
+// longer timeout than the withCorsAuth default.
+export const importPlaidHistory = withCorsAuth(
+  async (req, res) => {
+    const { importPlaidHistoryHandler } = await import("./routes/importPlaidHistory.js")
+    await importPlaidHistoryHandler(req, res)
+  },
+  true,
+  { secrets: PLAID_SECRETS, timeoutSeconds: 300 }
+)
+
+export const getPlaidPendingTransactions = withCorsAuth(async (req, res) => {
+  const { getPlaidPendingTransactionsHandler } = await import("./routes/getPlaidPendingTransactions.js")
+  await getPlaidPendingTransactionsHandler(req, res)
+})
+
+export const confirmPlaidPendingTransaction = withCorsAuth(async (req, res) => {
+  const { confirmPlaidPendingTransactionHandler } = await import("./routes/confirmPlaidPendingTransaction.js")
+  await confirmPlaidPendingTransactionHandler(req, res)
+})
+
+export const updatePlaidAccountDefault = withCorsAuth(async (req, res) => {
+  const { updatePlaidAccountDefaultHandler } = await import("./routes/updatePlaidAccountDefault.js")
+  await updatePlaidAccountDefaultHandler(req, res)
+})
+
+export const linkPlaidMerchantToRecurringRule = withCorsAuth(async (req, res) => {
+  const { linkPlaidMerchantToRecurringRuleHandler } = await import("./routes/linkPlaidMerchantToRecurringRule.js")
+  await linkPlaidMerchantToRecurringRuleHandler(req, res)
+})
+
+// Bare onRequest like stripeWebhook — Plaid's signature verification needs
+// the raw request body, which withCorsAuth's express.json() parsing would
+// otherwise consume before the handler sees it.
+export const plaidWebhook = onRequest(
+  { secrets: PLAID_SECRETS },
+  async (req, res) => {
+    const { plaidWebhookHandler } = await import("./routes/plaidWebhook.js")
+    await plaidWebhookHandler(req as any, res as any)
+  }
+)
+
+// ---------------------------------------------------------------------------
+// Devices (push notifications)
+// ---------------------------------------------------------------------------
+
+export const registerDeviceToken = withCorsAuth(async (req, res) => {
+  const { registerDeviceTokenHandler } = await import("./routes/registerDeviceToken.js")
+  await registerDeviceTokenHandler(req, res)
 })

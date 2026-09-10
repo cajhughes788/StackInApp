@@ -1,17 +1,55 @@
 import UIKit
 import Capacitor
-import UserNotifications
+import FirebaseCore
+import FirebaseMessaging
+import FirebaseAppCheck
 
 
 @UIApplicationMain
-class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+class AppDelegate: UIResponder, UIApplicationDelegate, MessagingDelegate {
 
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         // Override point for customization after application launch.
-        UNUserNotificationCenter.current().delegate = self
+        // Must be set before FirebaseApp.configure() — Firebase reads the
+        // provider factory during configure() and won't pick it up if set
+        // any later (see AppCheckPlugin.swift).
+        AppCheck.setAppCheckProviderFactory(StackInAppCheckProviderFactory())
+        FirebaseApp.configure()
+        Messaging.messaging().delegate = self
+        // Deliberately NOT setting UNUserNotificationCenter.current().delegate
+        // here. Capacitor's own bridge (CapacitorBridge.swift) claims that
+        // delegate slot itself via its NotificationRouter once the bridge
+        // view controller loads, and routes willPresent/didReceive into
+        // @capacitor/push-notifications and @capacitor/local-notifications'
+        // JS listeners (pushNotificationActionPerformed, etc). Assigning it
+        // here would win the race (this runs first) and silently block both
+        // plugins' tap/foreground events from ever firing — see
+        // capacitor.config.ts's PushNotifications.presentationOptions for
+        // how foreground push banners are preserved without this.
+        application.registerForRemoteNotifications()
         return true
+    }
+
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        // Feeds the raw APNs token to FirebaseMessaging so it can mint the FCM
+        // registration token our backend actually sends to (see
+        // messaging(_:didReceiveRegistrationToken:) below and FcmTokenPlugin.swift).
+        Messaging.messaging().apnsToken = deviceToken
+        NotificationCenter.default.post(name: .capacitorDidRegisterForRemoteNotifications, object: deviceToken)
+    }
+
+    // MessagingDelegate — fires whenever Firebase (re)generates the FCM token
+    // for this device, once apnsToken above has been set. FcmTokenPlugin
+    // listens for this via NotificationCenter and forwards it to JS.
+    func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
+        guard let fcmToken else { return }
+        NotificationCenter.default.post(name: .fcmTokenReceived, object: fcmToken)
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        NotificationCenter.default.post(name: .capacitorDidFailToRegisterForRemoteNotifications, object: error)
     }
 
     func applicationWillResignActive(_ application: UIApplication) {
@@ -47,14 +85,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         // Feel free to add additional processing here, but if you want the App API to support
         // tracking app url opens, make sure to keep this call
         return ApplicationDelegateProxy.shared.application(application, continue: userActivity, restorationHandler: restorationHandler)
-    }
-
-    func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        willPresent notification: UNNotification,
-        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
-    ) {
-        completionHandler([.banner, .sound, .badge, .list])
     }
 
 }

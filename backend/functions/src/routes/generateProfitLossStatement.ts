@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import * as profitLossSvc from "../services/profitLossService";
 import { ProfitLossPeriodTypeSchema } from "@shared/schemas/profitLoss";
+import { sendHttpError } from "../lib/httpErrors";
 const BodySchema = z.object({
     workspaceId: z.string().min(1).optional(),
     periodType: ProfitLossPeriodTypeSchema,
@@ -33,7 +34,7 @@ export async function generateProfitLossStatementHandler(req: Request, res: Resp
             res.status(400).json({ ok: false, error: "Missing workspaceId" });
             return;
         }
-        const statement = await profitLossSvc.generateProfitLossStatement(workspaceId, {
+        const statement = await profitLossSvc.generateProfitLossStatement(workspaceId, uid, {
             periodType: parsed.data.periodType,
             periodKey: parsed.data.periodKey,
             force: parsed.data.force ?? true,
@@ -44,9 +45,6 @@ export async function generateProfitLossStatementHandler(req: Request, res: Resp
         });
     }
     catch (err: any) {
-        res.status(500).json({
-            ok: false,
-            error: err?.message ?? "Internal Server Error",
-        });
+        sendHttpError(res, err, "generateProfitLossStatement");
     }
 }

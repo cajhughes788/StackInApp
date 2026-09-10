@@ -136,9 +136,13 @@ export async function deleteWorkspaceHandler(
       return
     }
 
+    // Unlike the branches above, this is a genuinely unexpected failure —
+    // never echo its raw message to the client (see httpErrors.ts's same
+    // rule for the equivalent case). Full detail is already in the
+    // trace.error call above.
     res.status(500).json({
       ok: false,
-      error: message,
+      error: "Internal server error",
       traceId: trace.traceId,
       failedStep,
       code,

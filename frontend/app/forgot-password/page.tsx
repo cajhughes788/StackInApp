@@ -2,8 +2,9 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
+import { FirebaseError } from "firebase/app"
 import { sendPasswordResetEmail } from "firebase/auth"
-import { getAuthSafe } from "@/lib/firebase" 
+import { getAuthSafe } from "@/lib/firebase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -31,28 +32,38 @@ export default function ForgotPasswordPage() {
       return
     }
 
-    try {
-      setIsSending(true)
-      await sendPasswordResetEmail(auth, email.trim())
-
+    const showSentAndRedirect = () => {
       toast({
         title: "Password Reset Email Sent",
         description: `If an account exists for ${email.trim()}, you'll receive a reset link shortly.`,
       })
-
       setEmail("")
       setRedirecting(true)
-
-      // Auto redirect after 3 seconds
       setTimeout(() => {
         router.push("/login")
       }, 3000)
-    } catch (err: any) {
-      toast({
-        title: "Error",
-        description: err.message || "Failed to send reset email",
-        variant: "destructive",
-      })
+    }
+
+    try {
+      setIsSending(true)
+      await sendPasswordResetEmail(auth, email.trim())
+      showSentAndRedirect()
+    } catch (err) {
+      // Deliberately identical to the success path for every error except a
+      // malformed email — anything else (including auth/user-not-found,
+      // which Firebase can still throw here depending on the project's
+      // email-enumeration-protection setting) must never distinguish "no
+      // account" from a real failure, or this becomes an oracle for
+      // checking who has a StackIn account by email address.
+      if (err instanceof FirebaseError && err.code === "auth/invalid-email") {
+        toast({
+          title: "Email looks off",
+          description: "Please enter a valid email address and try again.",
+          variant: "destructive",
+        })
+      } else {
+        showSentAndRedirect()
+      }
     } finally {
       setIsSending(false)
     }

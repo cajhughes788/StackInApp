@@ -36,6 +36,24 @@ export async function getReceiptAsset(
   return res.asset
 }
 
+export async function updateReceiptAssetUploadStatus(
+  workspaceId: string,
+  receiptAssetId: string,
+  uploadStatus: "complete" | "failed",
+  profile?: ApiProfileContext,
+  signal?: AbortSignal
+): Promise<ReceiptAsset> {
+  const res = await tryWrite<{ ok: boolean; asset: ReceiptAsset }>(
+    `${API_ENDPOINTS.receiptAssets.patchUploadStatus}?workspaceId=${encodeURIComponent(workspaceId)}&receiptAssetId=${encodeURIComponent(receiptAssetId)}`,
+    "PATCH",
+    { uploadStatus },
+    profile,
+    signal
+  )
+
+  return res.asset
+}
+
 export async function deleteReceiptAsset(
   workspaceId: string,
   receiptAssetId: string,

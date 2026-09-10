@@ -87,6 +87,22 @@ async function shareBlobFile({
   }
 }
 
+// Guards against CSV/formula injection: a cell whose text starts with
+// =, +, -, or @ is interpreted as a formula by Excel/Sheets/LibreOffice on
+// open, quoting alone does not stop this. Since workspaces can have more
+// than one member, a value here (e.g. an expense description) isn't
+// necessarily something the person exporting typed themselves — a
+// collaborator could plant a payload (e.g. an =HYPERLINK(...) that
+// exfiltrates other cell contents when clicked) that only executes once
+// this CSV is opened. Prefixing with a single quote forces literal-text
+// interpretation without changing the visible value.
+export function escapeCsvField(value: unknown): string {
+  const text = String(value ?? "")
+  const needsFormulaGuard = /^[=+\-@]/.test(text)
+  const safeText = needsFormulaGuard ? `'${text}` : text
+  return `"${safeText.replaceAll('"', '""')}"`
+}
+
 export async function exportCsvFile(
   filename: string,
   csv: string,

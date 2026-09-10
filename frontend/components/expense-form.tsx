@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Camera, ImagePlus, Info, Minus, Paperclip, Plus, X } from "lucide-react"
+import { Info, Minus, Plus } from "lucide-react"
 
 import { getBusinessMileageRate } from "@shared/businessMileage"
 import { getCalendarMonthBucketFromDate } from "@shared/payPeriods"
@@ -37,22 +37,8 @@ import { useExpenseMemoryStore } from "@/lib/stores/useExpenseMemoryStore"
 import { useSettingsStore } from "@/lib/stores/useSettingsStore"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import { useSelectedPeriod } from "@/lib/stores/usePeriodSelectionStore"
-import { createReceiptAsset, deleteReceiptAsset } from "@/lib/api/receiptAssetsApi"
-import { analyzeReceiptImageQuality } from "@/lib/receipts/imageQuality"
-import {
-  loadReceiptImage,
-  normalizeExifOrientation,
-} from "@/lib/receipts/imagePipeline"
-import {
-  buildClientReceiptDerivedPath,
-  buildClientReceiptStoragePath,
-  prepareReceiptPreviewFile,
-  prepareReceiptThumbnailFile,
-  prepareReceiptUploadFile,
-  uploadReceiptAssetToStorage,
-} from "@/lib/receipts/receiptAssetStorage"
-import { captureReceiptImage, isNativeCameraAvailable } from "@/lib/native/camera"
-import type { ReceiptAsset } from "@shared/schemas/receiptAsset"
+import { useReceiptCapture } from "@/hooks/use-receipt-capture"
+import ReceiptCaptureField from "@/components/receipt-capture-field"
 
 const ExpenseInputSchema = ExpenseInput
 const VEHICLE_MODE_STORAGE_KEY = "stackin.vehicleExpenseMode"
@@ -226,16 +212,8 @@ export default function ExpenseForm() {
   // state reuses the same key, but a new submission gets a fresh one.
   const clientMutationIdRef = useRef<string>(generateClientMutationId())
 
-  // Receipt attachment state
-  const [attachedReceiptAsset, setAttachedReceiptAsset] = useState<ReceiptAsset | null>(null)
-  const [receiptUploading, setReceiptUploading] = useState(false)
-  const [receiptError, setReceiptError] = useState<string | null>(null)
-  const [isNativeCamera, setIsNativeCamera] = useState(false)
-  const receiptFileInputRef = useRef<HTMLInputElement | null>(null)
-
-  useEffect(() => {
-    setIsNativeCamera(isNativeCameraAvailable())
-  }, [])
+  const receiptCapture = useReceiptCapture(activeWorkspaceId)
+  const { attachedReceiptAsset, receiptUploading, clearAttachedReceipt } = receiptCapture
 
   const {
     hydrateFromStorageOnce,
@@ -637,19 +615,6 @@ export default function ExpenseForm() {
     [activeWorkspaceId]
   )
 
-  // Revoke the blob: URL before clearing the receipt state so the browser can
-  // release the backing file bytes. Must be called instead of setAttachedReceiptAsset(null)
-  // directly whenever the asset is discarded outside of the user pressing ✕.
-  const clearAttachedReceipt = useCallback(() => {
-    setAttachedReceiptAsset((current) => {
-      if (current?.dataUrl?.startsWith("blob:")) {
-        URL.revokeObjectURL(current.dataUrl)
-      }
-      return null
-    })
-    setReceiptError(null)
-  }, [])
-
   // Resets the form to a blank state without submitting — same fields a
   // successful submit clears, plus the attached receipt (which a submit
   // leaves for the created expense but a manual clear should discard).
@@ -671,133 +636,6 @@ export default function ExpenseForm() {
       activeElement.blur()
     }
   }, [])
-
-  async function processReceiptFile(file: File) {
-    // Capture workspaceId once so the catch cleanup uses the same value as the writes.
-    const workspaceId = activeWorkspaceId
-    if (!workspaceId) return
-    const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]
-    const isAllowed =
-      ALLOWED_TYPES.includes(file.type.toLowerCase()) ||
-      /\.(jpe?g|png|webp|heic)$/i.test(file.name)
-    if (!isAllowed) {
-      setReceiptError("Unsupported file type. Please use JPEG, PNG, WebP, or HEIC.")
-      return
-    }
-    if (file.size > 30 * 1024 * 1024) {
-      setReceiptError("Image is too large. Please use an image under 30 MB.")
-      return
-    }
-
-    setReceiptUploading(true)
-    setReceiptError(null)
-
-    // Tracks whether the Firestore record was written so the catch can delete it
-    // if the subsequent GCS upload fails (partial-failure cleanup).
-    let createdAssetId: string | null = null
-    // Hoisted so the finally block can always close it, regardless of which
-    // step throws. decoded.close() frees the GPU-backed ImageBitmap.
-    let decoded: Awaited<ReturnType<typeof loadReceiptImage>> | null = null
-
-    try {
-      decoded = await loadReceiptImage(file)
-      decoded = await normalizeExifOrientation(file, decoded)
-
-      const quality = await analyzeReceiptImageQuality(file, decoded)
-      if (quality.qualityStatus === "bad") {
-        throw new Error(quality.warnings[0] || "This image is too blurry or unclear. Please retake the photo.")
-      }
-
-      const assetId = `receipt-${crypto.randomUUID?.() ?? Date.now()}`
-      const uploadFile = await prepareReceiptUploadFile(file, decoded)
-      // decoded is no longer needed after the upload file is prepared — close
-      // it now so the bitmap is freed before the network calls begin.
-      decoded.close()
-      decoded = null
-
-      const originalPath = buildClientReceiptStoragePath(workspaceId, assetId, file.name)
-      const previewPath = buildClientReceiptDerivedPath(workspaceId, assetId, "preview")
-      const thumbPath = buildClientReceiptDerivedPath(workspaceId, assetId, "thumb")
-
-      await Promise.all([
-        createReceiptAsset(workspaceId, {
-          id: assetId,
-          fileName: file.name,
-          mimeType: uploadFile.type || "image/jpeg",
-          sizeBytes: uploadFile.size,
-          captureSource: "upload",
-          quality: quality.quality,
-          blurScore: quality.blurScore,
-          glareScore: quality.glareScore,
-          qualityStatus: quality.qualityStatus,
-          qualityWarnings: quality.warnings,
-          width: quality.width,
-          height: quality.height,
-        }).then(() => { createdAssetId = assetId }),
-        uploadReceiptAssetToStorage(uploadFile, originalPath, { resolveDownloadUrl: false }),
-      ])
-
-      // Render and upload preview (max 1400 px) and thumbnail (max 320 px / 120 KB)
-      // in the background — the user can already see the form by this point.
-      void Promise.all([
-        prepareReceiptPreviewFile(file),
-        prepareReceiptThumbnailFile(file),
-      ]).then(([previewFile, thumbFile]) =>
-        Promise.all([
-          uploadReceiptAssetToStorage(previewFile, previewPath, { resolveDownloadUrl: false }),
-          uploadReceiptAssetToStorage(thumbFile, thumbPath, { resolveDownloadUrl: false }),
-        ])
-      ).catch(() => {
-        // Non-fatal — previews/thumbnails are a display optimisation.
-        // The full-resolution original is already uploaded and usable.
-      })
-
-      const asset: ReceiptAsset = {
-        id: assetId,
-        fileName: file.name,
-        mimeType: uploadFile.type || "image/jpeg",
-        sizeBytes: uploadFile.size,
-        version: 1,
-        originalStoragePath: originalPath,
-        storagePath: originalPath,
-        previewStoragePath: previewPath,
-        thumbnailStoragePath: thumbPath,
-        captureSource: "upload",
-        qualityStatus: quality.qualityStatus,
-        qualityWarnings: quality.warnings,
-        dataUrl: URL.createObjectURL(file),
-      }
-      setAttachedReceiptAsset(asset)
-    } catch (err) {
-      // If the Firestore record was written but the GCS upload (or anything after)
-      // failed, delete the record so it doesn't become a permanent orphan.
-      if (createdAssetId !== null) {
-        void deleteReceiptAsset(workspaceId, createdAssetId).catch(() => {})
-      }
-      setReceiptError(err instanceof Error ? err.message : "Failed to attach receipt.")
-    } finally {
-      // Always release the ImageBitmap — covers every throw path including
-      // bad-quality early exits and canvas errors in prepareReceiptUploadFile.
-      decoded?.close()
-      setReceiptUploading(false)
-    }
-  }
-
-  async function handleReceiptFileChange(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
-    if (!file) return
-    await processReceiptFile(file)
-    event.target.value = ""
-  }
-
-  async function handleNativeReceiptCapture(source: "camera" | "photos") {
-    try {
-      const file = await captureReceiptImage(source)
-      if (file) await processReceiptFile(file)
-    } catch (err) {
-      setReceiptError(err instanceof Error ? err.message : "Unable to open camera.")
-    }
-  }
 
   const buildPayload = useCallback(() => {
     const normalizedAccount =
@@ -923,6 +761,15 @@ export default function ExpenseForm() {
         const validated = parsed.data
         const submittedForm = form
         const submittedRepeatEnabled = repeatEnabled
+        // If a receipt capture is still in its brief processing window at
+        // submit time, don't make the user wait on it — grab the in-flight
+        // promise now, before clearAttachedReceipt() below resets the
+        // hook's own state, so the create call below can pick up the
+        // resulting receiptAssetId once it's ready without blocking
+        // anything the user does in the meantime. Recurring rule templates
+        // deliberately don't support receipts (see recurringRule.ts), so
+        // only the plain-expense branch needs this.
+        const pendingReceiptCapture = receiptUploading ? receiptCapture.waitForPendingCapture() : null
         const createPromise = submittedRepeatEnabled
           ? recurringRulesService.createRecurringRule(activeWorkspaceId, {
               type: "expense" as const,
@@ -936,7 +783,12 @@ export default function ExpenseForm() {
                 account: validated.account,
               },
             })
-          : expensesService.createExpense(activeWorkspaceId, validated)
+          : (async () => {
+              const receiptAssetId = pendingReceiptCapture
+                ? ((await pendingReceiptCapture)?.id ?? validated.receiptAssetId)
+                : validated.receiptAssetId
+              return expensesService.createExpense(activeWorkspaceId, { ...validated, receiptAssetId })
+            })()
 
         setForm(createEmptyFormState(form.vehicle.mode))
         setVendorFocused(false)
@@ -984,6 +836,8 @@ export default function ExpenseForm() {
       clearAttachedReceipt,
       dismissKeyboard,
       form,
+      receiptCapture,
+      receiptUploading,
       repeatCadence,
       repeatEnabled,
       repeatEndDate,
@@ -1072,86 +926,15 @@ export default function ExpenseForm() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Receipt attachment — placed first so the user can kick off the
-                upload immediately while filling in the rest of the form. */}
-            <div className="space-y-2 rounded-xl border border-dashed border-border px-4 py-3">
-              <div className="flex items-center gap-2">
-                <Paperclip className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm font-medium text-foreground">
-                  Attach Receipt
-                  <span className="ml-1 text-xs font-normal text-muted-foreground">(Optional)</span>
-                </span>
-              </div>
-
-              {attachedReceiptAsset ? (
-                <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2">
-                  {attachedReceiptAsset.dataUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={attachedReceiptAsset.dataUrl}
-                      alt="Receipt preview"
-                      className="h-10 w-10 rounded object-cover"
-                    />
-                  ) : null}
-                  <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-                    {attachedReceiptAsset.fileName}
-                  </span>
-                  <button
-                    type="button"
-                    className="shrink-0 rounded-full p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                    onClick={() => {
-                      if (attachedReceiptAsset.dataUrl?.startsWith("blob:")) {
-                        URL.revokeObjectURL(attachedReceiptAsset.dataUrl)
-                      }
-                      setAttachedReceiptAsset(null)
-                      setReceiptError(null)
-                    }}
-                    aria-label="Remove receipt"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              ) : receiptUploading ? (
-                <p className="text-sm text-muted-foreground">Uploading receipt...</p>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  <input
-                    ref={receiptFileInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={handleReceiptFileChange}
-                  />
-                  {isNativeCamera ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void handleNativeReceiptCapture("camera")}
-                    >
-                      <Camera className="h-4 w-4" />
-                      Camera
-                    </Button>
-                  ) : null}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() =>
-                      isNativeCamera
-                        ? void handleNativeReceiptCapture("photos")
-                        : receiptFileInputRef.current?.click()
-                    }
-                  >
-                    <ImagePlus className="h-4 w-4" />
-                    Choose Image
-                  </Button>
-                </div>
-              )}
-
-              {receiptError ? (
-                <p className="text-xs text-destructive">{receiptError}</p>
-              ) : null}
-            </div>
+                upload immediately while filling in the rest of the form.
+                Hidden during the brief decode/quality-check/create-doc
+                window (receiptUploading) rather than showing a "processing"
+                state — it reappears once that settles (as either the
+                attached preview or, on failure, the picker buttons plus an
+                inline error), and the rest of the form — including
+                submitting it — was never blocked on this in the first
+                place; see handleSubmit's pendingReceiptCapture handling. */}
+            {receiptUploading ? null : <ReceiptCaptureField capture={receiptCapture} />}
 
             <div>
               <Label htmlFor="date">Date</Label>
@@ -1585,11 +1368,11 @@ export default function ExpenseForm() {
                 variant="outline"
                 className="flex-1"
                 onClick={handleClearForm}
-                disabled={submitting || receiptUploading}
+                disabled={submitting}
               >
                 Clear Form
               </Button>
-              <Button type="submit" disabled={submitting || receiptUploading} className="flex-1">
+              <Button type="submit" disabled={submitting} className="flex-1">
                 {submitting ? "Saving..." : repeatEnabled ? "Add Recurring Expense" : "Add Expense"}
               </Button>
             </div>

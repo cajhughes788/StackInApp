@@ -2,6 +2,8 @@ import { initializeApp, applicationDefault, getApps } from "firebase-admin/app"
 import { getFirestore } from "firebase-admin/firestore"
 import { getAuth } from "firebase-admin/auth"
 import { getStorage } from "firebase-admin/storage"
+import { getMessaging } from "firebase-admin/messaging"
+import { getAppCheck } from "firebase-admin/app-check"
 
 function resolveStorageBucket(): string | undefined {
   const explicitBucket =
@@ -38,3 +40,5 @@ export const db = getFirestore()
 db.settings({ ignoreUndefinedProperties: true })
 export const auth = getAuth()
 export const storage = getStorage()
+export const messaging = getMessaging()
+export const appCheck = getAppCheck()

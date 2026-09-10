@@ -14,7 +14,7 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>app.stackin</string>
+			<string>com.cajetanhughes.stackin</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>stackin</string>
@@ -73,6 +73,7 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
+		<string>remote-notification</string>
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>

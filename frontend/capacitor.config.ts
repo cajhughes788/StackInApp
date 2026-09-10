@@ -1,10 +1,18 @@
 import { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'app.stackin',
+  appId: 'com.cajetanhughes.stackin',
   appName: 'StackIn',
   webDir: 'out',
   plugins: {
+    PushNotifications: {
+      // Without this, PushNotificationsHandler.willPresent (see
+      // @capacitor/push-notifications' iOS source) returns no presentation
+      // options and foreground push notifications show no banner/sound at
+      // all. Local notifications aren't affected — their handler always
+      // presents regardless of this config.
+      presentationOptions: ["badge", "sound", "alert"],
+    },
     CapacitorSQLite: {
       iosDatabaseLocation: 'Library/CapacitorDatabase',
       iosIsEncryption: true,

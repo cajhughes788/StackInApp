@@ -25,3 +25,5 @@ export { getTaxProfile, saveTaxProfile } from "@/lib/api/taxProfileApi";
 export { getPayStubs, generatePayStub, generateCurrentPayStub } from "@/lib/api/payStubsApi";
 export { getProfitLossStatements, generateProfitLossStatement, } from "@/lib/api/profitLossApi";
 export { createWorkspaceAPI, deleteWorkspaceAPI } from "@/lib/api/workspaceApi";
+export { getPlaidLinkToken, exchangePlaidPublicToken, getPlaidItems, unlinkPlaidItem, getPlaidPendingTransactions, confirmPlaidPendingTransaction, type PlaidItem, type PlaidPendingTransaction, } from "@/lib/api/plaidApi";
+export { registerDeviceToken } from "@/lib/api/devicesApi";

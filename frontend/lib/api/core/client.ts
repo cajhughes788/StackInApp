@@ -1,6 +1,7 @@
 "use client";
 import { Capacitor } from "@capacitor/core";
 import { getAuthSafe } from "@/lib/firebase";
+import { getAppCheckToken } from "@/lib/appCheck/registerAppCheck";
 import * as offlineQueue from "@/lib/storage/offlineQueue";
 import type { ProfileTraceEvent } from "@/lib/observability/profileTrace";
 import { createProfileTrace } from "@/lib/observability/profileTrace";
@@ -143,6 +144,13 @@ export async function apiFetch<T = any>(endpoint: string, opts: RequestInit & {
                 });
             }
         }
+        // Attached regardless of the `auth` param — App Check attests the
+        // app itself, not a logged-in user, so it applies to unauthenticated
+        // endpoints too. Server-side verification is monitor-only for now
+        // (see withCorsAuth.ts), so a null token here just shows up as
+        // "missing" there rather than failing the request.
+        const appCheckToken = await getAppCheckToken();
+        if (appCheckToken) headers["X-Firebase-AppCheck"] = appCheckToken;
         if (controller.signal.aborted) {
             throw new DOMException("Request aborted", "AbortError");
         }

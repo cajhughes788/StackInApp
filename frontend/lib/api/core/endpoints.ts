@@ -35,6 +35,7 @@ export const API_ENDPOINTS = {
     get: "https://getreceiptasset-3lc2fwdgwq-uc.a.run.app",
     post: "https://createreceiptasset-3lc2fwdgwq-uc.a.run.app",
     delete: "https://deletereceiptasset-3lc2fwdgwq-uc.a.run.app",
+    patchUploadStatus: "https://updatereceiptassetuploadstatus-3lc2fwdgwq-uc.a.run.app",
   },
 
   receiptAnalysis: {
@@ -102,5 +103,22 @@ export const API_ENDPOINTS = {
       `https://updateworkspace-3lc2fwdgwq-uc.a.run.app?workspaceId=${workspaceId}`,
     delete: (workspaceId: string) =>
       `https://deleteworkspace-3lc2fwdgwq-uc.a.run.app?workspaceId=${workspaceId}`,
+  },
+
+  plaid: {
+    createLinkToken: "https://createplaidlinktoken-3lc2fwdgwq-uc.a.run.app",
+    createUpdateLinkToken: "https://createplaidupdatelinktoken-3lc2fwdgwq-uc.a.run.app",
+    exchangePublicToken: "https://exchangeplaidpublictoken-3lc2fwdgwq-uc.a.run.app",
+    unlinkItem: "https://unlinkplaiditem-3lc2fwdgwq-uc.a.run.app",
+    items: "https://getplaiditems-3lc2fwdgwq-uc.a.run.app",
+    importHistory: "https://importplaidhistory-3lc2fwdgwq-uc.a.run.app",
+    pendingTransactions: "https://getplaidpendingtransactions-3lc2fwdgwq-uc.a.run.app",
+    confirmPendingTransaction: "https://confirmplaidpendingtransaction-3lc2fwdgwq-uc.a.run.app",
+    updateAccountDefault: "https://updateplaidaccountdefault-3lc2fwdgwq-uc.a.run.app",
+    linkMerchantToRecurringRule: "https://linkplaidmerchanttorecurringrule-3lc2fwdgwq-uc.a.run.app",
+  },
+
+  devices: {
+    registerToken: "https://registerdevicetoken-3lc2fwdgwq-uc.a.run.app",
   },
 } as const

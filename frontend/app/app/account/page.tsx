@@ -46,6 +46,7 @@ import {
 } from "@/lib/mobile/geofenceReminderSync"
 import { debugError, debugLog } from "@/lib/debugLoop"
 import { useAppBootstrapState } from "@/contexts/app-bootstrap-context"
+import PlaidConnectButton from "@/components/plaid-connect-button"
 
 export default function AccountPage() {
   const router = useRouter()
@@ -120,10 +121,10 @@ const handleLogout = async () => {
         title: "Password Reset Email Sent",
         description: `A password reset link has been sent to ${user.email}`,
       })
-    } catch (err: any) {
+    } catch {
       toast({
         title: "Error",
-        description: err.message || "Failed to send password reset email",
+        description: "Failed to send password reset email",
         variant: "destructive",
       })
     } finally {
@@ -561,6 +562,17 @@ const handleLogout = async () => {
 	                </p>
 	              )}
 	            </div>
+
+	            {activeWorkspace ? (
+	              <div className="space-y-3 border-t border-muted pt-4">
+	                <h3 className="font-semibold text-base">Connected Accounts</h3>
+	                <p className="text-sm text-muted-foreground">
+	                  Link a bank account to get notified about new transactions. Review and
+	                  confirm them as business expenses from the Expenses tab on your home screen.
+	                </p>
+	                <PlaidConnectButton workspaceId={activeWorkspace.id} />
+	              </div>
+	            ) : null}
 
 	            <div className="space-y-3 pt-4 border-t border-muted">
 	              <h3 className="font-semibold text-base">Workspace</h3>

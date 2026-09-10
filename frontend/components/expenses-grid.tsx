@@ -7,7 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { GridEditorPopoverContent } from "@/components/grid-editor-popover-content"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { MessageCircle, MoreVertical } from "lucide-react"
+import { AlertCircle, MessageCircle, MoreVertical } from "lucide-react"
 import {
   useExpensesData,
   useExpensesRenderState,
@@ -26,7 +26,9 @@ import { thBase, tdBase } from "@/lib/tableStyles"
 import { cn } from "@/lib/utils"
 import { useToast } from "@/hooks/use-toast"
 import ReceiptViewerTrigger from "@/components/receipt-viewer-trigger"
+import AttachReceiptDialog from "@/components/attach-receipt-dialog"
 import SyncStatusIndicator from "@/components/sync-status-indicator"
+import { needsReceiptForAuditDefense, RECEIPT_REQUIRED_THRESHOLD } from "@shared/receiptRequirements"
 
 const formatShortDate = (iso: string) =>
   parseLocalDate(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" })
@@ -71,6 +73,7 @@ export default function ExpensesGrid() {
     id: string
     field: EditableExpenseField
   } | null>(null)
+  const [attachReceiptExpenseId, setAttachReceiptExpenseId] = useState<string | null>(null)
 
   const customExpenseCategories =
     settings?.independent?.customExpenseCategories ?? []
@@ -278,64 +281,89 @@ export default function ExpensesGrid() {
                   }
                   className="bg-card even:bg-secondary/55 divide-x divide-border"
                 >
-                  {/* NOTES BUBBLE */}
+                  {/* NOTES BUBBLE — always interactive so a receipt can be
+                      attached to any expense after the fact, regardless of
+                      how it was created (manual, CSV/Venmo import, or a
+                      confirmed Plaid transaction). */}
                   <td className={`${tdBase} w-8 px-1 py-1.5 text-center align-middle`}>
-                    {e.description || (e.receiptAssetId && activeWorkspaceId) ? (
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <button
-                            className="text-muted-foreground hover:text-foreground"
-                            title="View details"
-                          >
-                            <MessageCircle className="h-5 w-5" aria-hidden="true" />
-                          </button>
-                        </PopoverTrigger>
-                        <PopoverContent className="max-w-xs rounded-2xl border border-border bg-popover p-3 text-popover-foreground shadow-md">
-                          <div className="space-y-3">
-                            {e.description ? (
-                              <p className="whitespace-pre-wrap text-sm">{e.description}</p>
-                            ) : null}
-                            {Array.isArray(e.allocations) && e.allocations.length > 0 ? (
-                              <div className="space-y-2">
-                                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                                  Category Breakdown
-                                </p>
-                                <div className="space-y-1">
-                                  {e.allocations.map((allocation: any, allocationIndex: number) => (
-                                    <div
-                                      key={`${e.id ?? "expense"}-allocation-${allocationIndex}`}
-                                      className="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-muted/35 px-3 py-2 text-sm"
-                                    >
-                                      <span className="min-w-0 truncate">{allocation.category}</span>
-                                      <span className="shrink-0 font-medium">
-                                        {formatCurrency(allocation.amount ?? 0)}
-                                      </span>
-                                    </div>
-                                  ))}
-                                </div>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <button
+                          className="relative inline-flex text-muted-foreground hover:text-foreground"
+                          title={
+                            needsReceiptForAuditDefense(e.amount ?? 0, e.receiptAssetId)
+                              ? `Missing receipt — expenses over ${formatCurrency(RECEIPT_REQUIRED_THRESHOLD)} generally need one for audit defense`
+                              : "View details"
+                          }
+                        >
+                          <MessageCircle
+                            className={cn(
+                              "h-5 w-5",
+                              !e.description && !e.receiptAssetId && !(Array.isArray(e.allocations) && e.allocations.length > 0)
+                                ? "opacity-30"
+                                : undefined
+                            )}
+                            aria-hidden="true"
+                          />
+                          {needsReceiptForAuditDefense(e.amount ?? 0, e.receiptAssetId) ? (
+                            <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-destructive" />
+                          ) : null}
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent className="max-w-xs rounded-2xl border border-border bg-popover p-3 text-popover-foreground shadow-md">
+                        <div className="space-y-3">
+                          {e.description ? (
+                            <p className="whitespace-pre-wrap text-sm">{e.description}</p>
+                          ) : null}
+                          {Array.isArray(e.allocations) && e.allocations.length > 0 ? (
+                            <div className="space-y-2">
+                              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                Category Breakdown
+                              </p>
+                              <div className="space-y-1">
+                                {e.allocations.map((allocation: any, allocationIndex: number) => (
+                                  <div
+                                    key={`${e.id ?? "expense"}-allocation-${allocationIndex}`}
+                                    className="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-muted/35 px-3 py-2 text-sm"
+                                  >
+                                    <span className="min-w-0 truncate">{allocation.category}</span>
+                                    <span className="shrink-0 font-medium">
+                                      {formatCurrency(allocation.amount ?? 0)}
+                                    </span>
+                                  </div>
+                                ))}
                               </div>
-                            ) : null}
-                            {e.receiptAssetId && activeWorkspaceId ? (
-                              <ReceiptViewerTrigger
-                                workspaceId={activeWorkspaceId}
-                                receiptAssetId={e.receiptAssetId}
-                                title={e.vendor || e.description || "Receipt"}
-                                label="View Receipt"
+                            </div>
+                          ) : null}
+                          {e.receiptAssetId && activeWorkspaceId ? (
+                            <ReceiptViewerTrigger
+                              workspaceId={activeWorkspaceId}
+                              receiptAssetId={e.receiptAssetId}
+                              title={e.vendor || e.description || "Receipt"}
+                              label="View Receipt"
+                              variant="outline"
+                              className="w-full"
+                            />
+                          ) : (
+                            <div className="space-y-1.5">
+                              {needsReceiptForAuditDefense(e.amount ?? 0, e.receiptAssetId) ? (
+                                <p className="flex items-center gap-1.5 text-xs text-destructive">
+                                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                                  Over {formatCurrency(RECEIPT_REQUIRED_THRESHOLD)} — a receipt is recommended for audit defense.
+                                </p>
+                              ) : null}
+                              <Button
                                 variant="outline"
                                 className="w-full"
-                              />
-                            ) : null}
-                          </div>
-                        </PopoverContent>
-                      </Popover>
-                    ) : (
-                      <span
-                        className="inline-flex text-muted-foreground opacity-30"
-                        title="No notes"
-                      >
-                        <MessageCircle className="h-5 w-5" aria-hidden="true" />
-                      </span>
-                    )}
+                                onClick={() => setAttachReceiptExpenseId(e.id)}
+                              >
+                                Attach Receipt
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      </PopoverContent>
+                    </Popover>
                   </td>
 
                   {/* DATE */}
@@ -565,6 +593,14 @@ export default function ExpensesGrid() {
           </tfoot>
         </table>
       </div>
+
+      <AttachReceiptDialog
+        open={attachReceiptExpenseId != null}
+        onOpenChange={(open) => !open && setAttachReceiptExpenseId(null)}
+        workspaceId={activeWorkspaceId}
+        expenseId={attachReceiptExpenseId ?? ""}
+        vendorLabel={sorted.find((e) => e.id === attachReceiptExpenseId)?.vendor}
+      />
     </div>
   )
 }

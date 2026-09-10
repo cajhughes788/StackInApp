@@ -50,7 +50,7 @@ function logWorkspaceDeleteError(
   }))
 }
 
-async function deleteWorkspaceStorage(workspaceId: string): Promise<void> {
+export async function deleteWorkspaceStorage(workspaceId: string): Promise<void> {
   const prefix = `workspaces/${workspaceId}/`
   logWorkspaceDeleteInfo("storage_delete_start", {
     workspaceId,

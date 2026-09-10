@@ -110,6 +110,11 @@ export async function createReceiptAsset(
     glareScore: parsed.data.glareScore,
     qualityStatus: parsed.data.qualityStatus,
     qualityWarnings: parsed.data.qualityWarnings ?? [],
+    // The client links this asset to an expense as soon as this record
+    // exists, before the image bytes finish uploading to Storage — this
+    // record always starts "uploading" so a later failure has somewhere to
+    // be recorded instead of just disappearing.
+    uploadStatus: "uploading",
     createdAt: nowIso,
     updatedAt: nowIso,
   })
@@ -136,6 +141,32 @@ export async function getReceiptAsset(
   const asset = ReceiptAssetSchema.parse({
     id: snap.id,
     ...snap.data(),
+  })
+
+  return normalizeReceiptAsset(asset)
+}
+
+export async function updateReceiptAssetUploadStatus(
+  workspaceId: string,
+  uid: string,
+  receiptAssetId: string,
+  uploadStatus: "complete" | "failed"
+): Promise<ReceiptAsset> {
+  await assertWorkspaceMembership(workspaceId, uid)
+
+  const assetRef = db.doc(`workspaces/${workspaceId}/receiptAssets/${receiptAssetId}`)
+  const snap = await assetRef.get()
+  if (!snap.exists) {
+    throw new NotFoundError("Receipt asset not found")
+  }
+
+  const nowIso = new Date().toISOString()
+  await assetRef.update({ uploadStatus, updatedAt: nowIso })
+
+  const updatedSnap = await assetRef.get()
+  const asset = ReceiptAssetSchema.parse({
+    id: updatedSnap.id,
+    ...updatedSnap.data(),
   })
 
   return normalizeReceiptAsset(asset)

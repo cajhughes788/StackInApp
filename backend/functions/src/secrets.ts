@@ -22,3 +22,11 @@ export const SENDGRID_API_KEY = defineSecret("SENDGRID_API_KEY")
 
 // Slack
 export const SLACK_SUPPORT_WEBHOOK_URL = defineSecret("SLACK_SUPPORT_WEBHOOK_URL")
+
+// Plaid
+export const PLAID_CLIENT_ID = defineSecret("PLAID_CLIENT_ID")
+export const PLAID_SECRET = defineSecret("PLAID_SECRET")
+export const PLAID_ENV = defineSecret("PLAID_ENV")
+// Encrypts Plaid access tokens at rest in Firestore (see lib/tokenEncryption.ts) —
+// a base64-encoded 32-byte AES-256 key, generated with `openssl rand -base64 32`.
+export const PLAID_TOKEN_ENCRYPTION_KEY = defineSecret("PLAID_TOKEN_ENCRYPTION_KEY")

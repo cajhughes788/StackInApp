@@ -3,6 +3,7 @@ import type {
   ImportItemInput,
   ImportSource,
 } from "@shared/schemas/import"
+import { suggestExpenseCategoryFromText } from "@shared/expenseKeywordMatching"
 
 type ParsedCsvRow = {
   rawRow: Record<string, string>
@@ -217,27 +218,6 @@ function incomeItemFromRow(source: ImportSource, row: ParsedCsvRow): ImportItemI
   }
 }
 
-function expenseCategorySuggestion(description: string | null): string | null {
-  const normalized = (description ?? "").toLowerCase()
-  if (!normalized) return null
-  if (normalized.includes("uber") || normalized.includes("lyft") || normalized.includes("shell") || normalized.includes("chevron")) {
-    return "Vehicle & Transportation"
-  }
-  if (normalized.includes("supply") || normalized.includes("sally") || normalized.includes("cosmoprof") || normalized.includes("amazon")) {
-    return "Supplies"
-  }
-  if (normalized.includes("rent") || normalized.includes("booth")) {
-    return "Rent / Booth Rent"
-  }
-  if (normalized.includes("ad") || normalized.includes("meta") || normalized.includes("instagram")) {
-    return "Marketing & Advertising"
-  }
-  if (normalized.includes("quickbooks") || normalized.includes("glossgenius") || normalized.includes("vagaro") || normalized.includes("square")) {
-    return "Software & Subscriptions"
-  }
-  return null
-}
-
 function expenseItemFromRow(source: ImportSource, row: ParsedCsvRow): ImportItemInput {
   return {
     kind: "expense",
@@ -252,7 +232,7 @@ function expenseItemFromRow(source: ImportSource, row: ParsedCsvRow): ImportItem
     parseWarnings: row.parseWarnings,
     confidence: row.parseWarnings.length === 0 ? 0.9 : 0.65,
     suggestedDirection: "expense",
-    suggestedExpenseAccount: expenseCategorySuggestion(row.description),
+    suggestedExpenseAccount: suggestExpenseCategoryFromText(row.description),
     userDecision: {
       isBusiness: null,
       finalKind: "expense",

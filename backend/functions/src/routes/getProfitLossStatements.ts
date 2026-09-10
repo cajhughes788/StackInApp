@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import * as profitLossSvc from "../services/profitLossService";
 import { ProfitLossPeriodTypeSchema } from "@shared/schemas/profitLoss";
+import { sendHttpError } from "../lib/httpErrors";
 const QuerySchema = z.object({
     workspaceId: z.string().min(1),
     periodType: ProfitLossPeriodTypeSchema.default("month"),
@@ -31,7 +32,7 @@ export async function getProfitLossStatementsHandler(req: Request, res: Response
             return;
         }
         const { workspaceId, periodType, ensureFresh } = parsed.data;
-        const statements = await profitLossSvc.listProfitLossStatements(workspaceId, periodType, {
+        const statements = await profitLossSvc.listProfitLossStatements(workspaceId, uid, periodType, {
             ensureFresh,
         });
         res.status(200).json({
@@ -40,9 +41,6 @@ export async function getProfitLossStatementsHandler(req: Request, res: Response
         });
     }
     catch (err: any) {
-        res.status(500).json({
-            ok: false,
-            error: err?.message ?? "Internal Server Error",
-        });
+        sendHttpError(res, err, "getProfitLossStatements");
     }
 }

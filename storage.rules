@@ -1,0 +1,40 @@
+rules_version = '2';
+
+// Mirrors firestore.rules' workspace-membership model: a user may only
+// read/write receipt files under a workspace they belong to, matching the
+// same authorization boundary already enforced for Firestore data. This
+// project's firebase.json previously had no "storage" entry at all, meaning
+// these rules were not version-controlled or deployed through this repo —
+// whatever was configured lived only in the Firebase console with no audit
+// trail. This file makes bucket access reviewable and deployable like every
+// other security-relevant config here.
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isWorkspaceMember(workspaceId) {
+      return isSignedIn() &&
+        firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)/memberships/$(workspaceId));
+    }
+
+    // Receipt images — matches the size cap already enforced client-side
+    // (frontend/hooks/use-receipt-capture.ts) as a server-side backstop,
+    // since a client-side check alone can be bypassed by any direct SDK/API
+    // call. Content type is restricted to images (no PDFs are captured by
+    // the receipt flow), which also rules out uploading arbitrary
+    // executable or HTML content into the bucket.
+    match /workspaces/{workspaceId}/receipts/{receiptAssetId}/{fileName} {
+      allow read: if isWorkspaceMember(workspaceId);
+      allow write: if isWorkspaceMember(workspaceId)
+        && request.resource.size < 30 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // Deny-by-default for everything else in the bucket.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

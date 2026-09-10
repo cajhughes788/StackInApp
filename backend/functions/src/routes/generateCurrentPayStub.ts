@@ -4,6 +4,7 @@ import * as payStubsSvc from "../services/payStubsService";
 import { db } from "../admin";
 import { getCurrentPayPeriodAt } from "@shared/payPeriods";
 import { SettingsDocSchema, type SettingsType } from "@shared/schemas/settings";
+import { sendHttpError } from "../lib/httpErrors";
 
 const GenerateCurrentSchema = z.object({
   workspaceId: z.string().min(1).optional(),
@@ -120,13 +121,6 @@ export async function generateCurrentPayStubHandler(
       payStub: result,
     });
   } catch (err: any) {
-    console.error("[generateCurrentPayStub] request_failed", JSON.stringify({
-      error: err?.message ?? "Internal Server Error",
-      stack: err?.stack ?? null,
-    }));
-    res.status(500).json({
-      ok: false,
-      error: err?.message ?? "Internal Server Error",
-    });
+    sendHttpError(res, err, "generateCurrentPayStub");
   }
 }

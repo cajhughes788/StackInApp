@@ -1,5 +1,6 @@
 import { DateTime } from "luxon";
 import { db } from "../admin";
+import { assertWorkspaceMembership } from "../lib/workspaceMembership";
 import { PayStub, TaxProfile } from "@shared/schemas";
 import { EntrySchema, type EntryType } from "@shared/schemas/entry";
 import { SettingsDocSchema, type SettingsType, } from "@shared/schemas/settings";
@@ -297,6 +298,7 @@ export async function listPayStubs(workspaceId: string, uid: string, opts?: {
     cursorId?: string;
     forceFull?: boolean;
 }) {
+    await assertWorkspaceMembership(workspaceId, uid);
     console.log("[payStubsService.listPayStubs] start", JSON.stringify({
         workspaceId,
         uid,
@@ -353,6 +355,7 @@ export async function generatePayStub(workspaceId: string, uid: string, opts: {
     periodId: string;
     force?: boolean;
 }) {
+    await assertWorkspaceMembership(workspaceId, uid);
     console.log("[payStubsService.generatePayStub] start", JSON.stringify({
         workspaceId,
         uid,

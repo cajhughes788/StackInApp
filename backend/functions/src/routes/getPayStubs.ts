@@ -7,6 +7,7 @@ import { onRequest } from "firebase-functions/v2/https";
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { db } from "../admin";
+import { sendHttpError } from "../lib/httpErrors";
 import * as payStubsSvc from "../services/payStubsService";
 import { getMostRecentlyClosedPayPeriod } from "@shared/payPeriods";
 import { SettingsType, SettingsDocSchema } from "@shared/schemas/settings";
@@ -109,9 +110,6 @@ export async function getPayStubsHandler(req: Request, res: Response): Promise<v
         });
     }
     catch (err: any) {
-        res.status(500).json({
-            ok: false,
-            error: err?.message ?? "Internal Server Error",
-        });
+        sendHttpError(res, err, "getPayStubs");
     }
 }

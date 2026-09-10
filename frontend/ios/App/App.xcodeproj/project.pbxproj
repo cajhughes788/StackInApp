@@ -15,11 +15,14 @@
 		504EC30F1FED79650016851F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30E1FED79650016851F /* Assets.xcassets */; };
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
+		70ADCACFAF0B328A8A83CF8E /* AppCheckPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = F53E5711B333EB5A2A0879C0 /* AppCheckPlugin.swift */; };
 		A084ECDBA7D38E1E42DFC39D /* Pods_App.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AF277DCFFFF123FFC6DF26C7 /* Pods_App.framework */; };
 		A0DB4A00A6964C9D8565B96C /* NativePlacePickerPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBC521538E8C4DC0A50E91AB /* NativePlacePickerPlugin.swift */; };
 		A7B9D0E4D9F54B359C35A10A /* NativePrintPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6E5DFA640EE427AA028C9ED /* NativePrintPlugin.swift */; };
 		AE88D779D91E468CB17FF735 /* NativeGeofencePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0EE4A85BDFC46DF8F742FA2 /* NativeGeofencePlugin.swift */; };
 		B0CE10E0C21B472E8D335B18 /* BridgeViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF0C5EF743D846139057C800 /* BridgeViewController.swift */; };
+		B5634F50D49825C49A4483F2 /* FcmTokenPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = D52691A11967DFF9E7EE595B /* FcmTokenPlugin.swift */; };
+		BBF973ADC5136D9E22B6CFC6 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 7028A0A79FF7774651B1AE0F /* GoogleService-Info.plist */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,13 +35,16 @@
 		504EC3111FED79650016851F /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		504EC3131FED79650016851F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		50B271D01FEDC1A000F3C39B /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; path = public; sourceTree = "<group>"; };
+		7028A0A79FF7774651B1AE0F /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		9A7224A525D94D35AF8A8F73 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		AF277DCFFFF123FFC6DF26C7 /* Pods_App.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_App.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		AF51FD2D460BCFE21FA515B2 /* Pods-App.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-App.release.xcconfig"; path = "Pods/Target Support Files/Pods-App/Pods-App.release.xcconfig"; sourceTree = "<group>"; };
 		B6E5DFA640EE427AA028C9ED /* NativePrintPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePrintPlugin.swift; sourceTree = "<group>"; };
 		CF0C5EF743D846139057C800 /* BridgeViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeViewController.swift; sourceTree = "<group>"; };
 		D0EE4A85BDFC46DF8F742FA2 /* NativeGeofencePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeGeofencePlugin.swift; sourceTree = "<group>"; };
+		D52691A11967DFF9E7EE595B /* FcmTokenPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FcmTokenPlugin.swift; sourceTree = "<group>"; };
 		EBC521538E8C4DC0A50E91AB /* NativePlacePickerPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePlacePickerPlugin.swift; sourceTree = "<group>"; };
+		F53E5711B333EB5A2A0879C0 /* AppCheckPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppCheckPlugin.swift; sourceTree = "<group>"; };
 		FC68EB0AF532CFC21C3344DD /* Pods-App.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-App.debug.xcconfig"; path = "Pods/Target Support Files/Pods-App/Pods-App.debug.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -87,15 +93,18 @@
 				504EC3071FED79650016851F /* AppDelegate.swift */,
 				CF0C5EF743D846139057C800 /* BridgeViewController.swift */,
 				D0EE4A85BDFC46DF8F742FA2 /* NativeGeofencePlugin.swift */,
+				D52691A11967DFF9E7EE595B /* FcmTokenPlugin.swift */,
 				EBC521538E8C4DC0A50E91AB /* NativePlacePickerPlugin.swift */,
 				B6E5DFA640EE427AA028C9ED /* NativePrintPlugin.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
 				504EC3101FED79650016851F /* LaunchScreen.storyboard */,
 				504EC3131FED79650016851F /* Info.plist */,
+				7028A0A79FF7774651B1AE0F /* GoogleService-Info.plist */,
 				9A7224A525D94D35AF8A8F73 /* PrivacyInfo.xcprivacy */,
 				2FAD9762203C412B000D30F8 /* config.xml */,
 				50B271D01FEDC1A000F3C39B /* public */,
+				F53E5711B333EB5A2A0879C0 /* AppCheckPlugin.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -156,8 +165,6 @@
 				Base,
 			);
 			mainGroup = 504EC2FB1FED79650016851F;
-			packageReferences = (
-			);
 			productRefGroup = 504EC3051FED79650016851F /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -176,6 +183,7 @@
 				50B271D11FEDC1A000F3C39B /* public in Resources */,
 				504EC30F1FED79650016851F /* Assets.xcassets in Resources */,
 				38D0CE839A5341EAA227B94E /* PrivacyInfo.xcprivacy in Resources */,
+				BBF973ADC5136D9E22B6CFC6 /* GoogleService-Info.plist in Resources */,
 				50379B232058CBB4000EE86E /* capacitor.config.json in Resources */,
 				504EC30D1FED79650016851F /* Main.storyboard in Resources */,
 				2FAD9763203C412B000D30F8 /* config.xml in Resources */,
@@ -227,9 +235,11 @@
 			files = (
 				B0CE10E0C21B472E8D335B18 /* BridgeViewController.swift in Sources */,
 				AE88D779D91E468CB17FF735 /* NativeGeofencePlugin.swift in Sources */,
+				B5634F50D49825C49A4483F2 /* FcmTokenPlugin.swift in Sources */,
 				A0DB4A00A6964C9D8565B96C /* NativePlacePickerPlugin.swift in Sources */,
 				A7B9D0E4D9F54B359C35A10A /* NativePrintPlugin.swift in Sources */,
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
+				70ADCACFAF0B328A8A83CF8E /* AppCheckPlugin.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -367,14 +377,15 @@
 			baseConfigurationReference = FC68EB0AF532CFC21C3344DD /* Pods-App.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 11;
 				DEVELOPMENT_TEAM = S9H39QCPR7;
 				INFOPLIST_FILE = App/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
-				MARKETING_VERSION = 1.0.8;
+				MARKETING_VERSION = 1.1.1;
 				OTHER_SWIFT_FLAGS = "$(inherited) \"-D\" \"COCOAPODS\" \"-DDEBUG\"";
 				PRODUCT_BUNDLE_IDENTIFIER = com.cajetanhughes.stackin;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -389,14 +400,15 @@
 			baseConfigurationReference = AF51FD2D460BCFE21FA515B2 /* Pods-App.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 11;
 				DEVELOPMENT_TEAM = S9H39QCPR7;
 				INFOPLIST_FILE = App/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
-				MARKETING_VERSION = 1.0.8;
+				MARKETING_VERSION = 1.1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.cajetanhughes.stackin;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";

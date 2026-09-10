@@ -7,6 +7,7 @@ import { clearApiCaches } from "@/lib/api";
 import { clearAllSettingsHints } from "@/lib/storage/localSettingsHint";
 import { bumpAuthSessionVersion } from "@/lib/authSession";
 import { debugError, debugLog } from "@/lib/debugLoop";
+import { registerPushNotifications } from "@/lib/push/registerPush";
 // Zustand stores
 import { useTaxProfileStore } from "@/lib/stores/useTaxProfileStore";
 import { useEntriesStore } from "@/lib/stores/useEntriesStore";
@@ -163,6 +164,7 @@ export function AuthProvider({ children }: {
                 });
                 setUser(fbUser);
                 setAuthLoading(false);
+                void registerPushNotifications();
             })
                 .catch((error) => {
                 debugError("auth", "state_transition_failed", {

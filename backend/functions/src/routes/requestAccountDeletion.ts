@@ -4,6 +4,8 @@ import { defineSecret } from "firebase-functions/params";
 import type { SubscriptionDoc } from "@shared/contracts/subscription";
 import { db } from "../admin";
 import { purgeUserData } from "../services/userDeletionService";
+import { sendHttpError } from "../lib/httpErrors";
+import { requireRecentAuth } from "../lib/requireRecentAuth";
 export const STRIPE_SECRET_KEY = defineSecret("STRIPE_SECRET_KEY");
 function getStripeClient(): Stripe {
     const stripeSecretKey = STRIPE_SECRET_KEY.value();
@@ -48,6 +50,11 @@ export async function requestAccountDeletionHandler(req: Request, res: Response)
             res.status(401).json({ ok: false, error: "Unauthorized" });
             return;
         }
+        // The client re-prompts for a password (reauthenticateWithCredential)
+        // immediately before calling this endpoint — without this check that's
+        // purely a client-side UI gate, since a valid-but-not-recently-issued
+        // token could otherwise trigger permanent deletion directly.
+        requireRecentAuth(req as any);
         const subRef = db
             .collection("users")
             .doc(uid)
@@ -98,10 +105,7 @@ export async function requestAccountDeletionHandler(req: Request, res: Response)
             scheduledDeletionAt: now,
         });
     }
-    catch (error: any) {
-        res.status(500).json({
-            ok: false,
-            error: error?.message ?? "Internal server error",
-        });
+    catch (error) {
+        sendHttpError(res, error, "requestAccountDeletion");
     }
 }

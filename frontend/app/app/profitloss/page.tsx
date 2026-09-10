@@ -30,7 +30,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useAuth } from "@/contexts/auth-context"
-import { exportCsvFile } from "@/lib/documentExport"
+import { exportCsvFile, escapeCsvField } from "@/lib/documentExport"
 import { formatDate, formatCurrency } from "@/lib/helpers"
 import { printHtmlDocument } from "@/lib/print"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
@@ -592,11 +592,7 @@ export default function ProfitLossPage() {
     ]
 
     return rows
-      .map((row) =>
-        row
-          .map((value) => `"${String(value ?? "").replaceAll('"', '""')}"`)
-          .join(",")
-      )
+      .map((row) => row.map(escapeCsvField).join(","))
       .join("\n")
   }
 

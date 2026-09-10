@@ -9,7 +9,7 @@
     "start": "next start",
     "lint": "next lint",
     "clean": "rimraf .next out",
-    "sync": "npm run build && npx cap sync",
+    "sync": "npm run build && npx cap sync && node scripts/patch-capacitor-config.js",
     "test:sync": "node ../scripts/test-sync.cjs"
   },
   "dependencies": {
@@ -25,6 +25,7 @@
     "@capacitor/local-notifications": "^7.0.3",
     "@capacitor/network": "^7.0.2",
     "@capacitor/preferences": "^7.0.2",
+    "@capacitor/push-notifications": "^7.0.7",
     "@capacitor/share": "^7.0.4",
     "@hookform/resolvers": "^3.10.0",
     "@radix-ui/react-accordion": "1.2.2",
@@ -80,6 +81,7 @@
     "react-day-picker": "9.8.0",
     "react-dom": "^18.3.1",
     "react-hook-form": "^7.65.0",
+    "react-plaid-link": "^3.6.1",
     "react-resizable-panels": "^2.1.7",
     "recharts": "2.15.4",
     "sonner": "^1.7.4",

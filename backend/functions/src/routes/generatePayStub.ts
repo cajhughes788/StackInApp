@@ -9,6 +9,7 @@ import { z } from "zod";
 import * as payStubsSvc from "../services/payStubsService";
 import { getMostRecentlyClosedPayPeriod } from "@shared/payPeriods";
 import { db } from "../admin";
+import { sendHttpError } from "../lib/httpErrors";
 import { SettingsDocSchema, SettingsType } from "@shared/schemas/settings";
 // ---------------------------------------------------------------------------
 // 🔹 Validation schema
@@ -87,9 +88,6 @@ export async function generatePayStubHandler(req: Request, res: Response): Promi
         res.status(201).json({ ok: true, payStub: stub });
     }
     catch (err: any) {
-        res.status(500).json({
-            ok: false,
-            error: err?.message ?? "Internal Server Error",
-        });
+        sendHttpError(res, err, "generatePayStub");
     }
 }
