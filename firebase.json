@@ -2,7 +2,13 @@
   "functions": [
     {
       "source": "backend/functions",
-      "main": "lib/index.js",
+      // tsconfig.json sets rootDir to the repo root (needed so ../../shared
+      // compiles alongside src/), which makes tsc preserve each file's full
+      // path from that root — so the compiled entry point actually lands at
+      // lib/backend/functions/src/index.js, not lib/index.js. This was
+      // wrong before, silently: firebase deploy uploads and "succeeds"
+      // either way, so the mismatch never surfaced as a deploy error.
+      "main": "lib/backend/functions/src/index.js",
       "codebase": "default",
       "ignore": [
         "node_modules",
@@ -11,7 +17,12 @@
         "firebase-debug.*.log",
         "*.local"
       ],
-      "predeploy": ["npm --prefix backend/functions run lint"]
+      // Runs the actual TypeScript build before every deploy — previously
+      // only lint (a no-op) ran here, so `firebase deploy --only functions`
+      // silently deployed whatever was already sitting in lib/ from the
+      // last manual `npm run build`, which is exactly how this mismatch
+      // went unnoticed.
+      "predeploy": ["npm --prefix backend/functions run build", "npm --prefix backend/functions run lint"]
     }
   ],
   "firestore": {

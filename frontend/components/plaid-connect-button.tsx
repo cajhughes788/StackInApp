@@ -4,6 +4,16 @@ import { useCallback, useEffect, useState } from "react"
 import { Capacitor } from "@capacitor/core"
 import { Browser } from "@capacitor/browser"
 import { usePlaidLink } from "react-plaid-link"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import {
   Select,
@@ -13,17 +23,19 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
+import { ApiError } from "@/lib/api/core/errors"
 import {
   exchangePlaidPublicToken,
   getPlaidItems,
   getPlaidLinkToken,
   getPlaidUpdateLinkToken,
-  importPlaidHistory,
   unlinkPlaidItem,
   updatePlaidAccountDefault,
   type PlaidItem,
 } from "@/lib/api/plaidApi"
 import { waitForPlaidLinkExit } from "@/lib/mobile/plaidLinkDeepLink"
+
+type LinkMetadata = { institutionId: string | null; accounts: Array<{ name: string; mask: string | null }> }
 
 // window.location.origin inside the native app is Capacitor's internal
 // webview origin (e.g. capacitor://localhost), not a real HTTPS URL —
@@ -42,12 +54,16 @@ function WebPlaidLink({
   onExit,
 }: {
   linkToken: string
-  onSuccess: (publicToken: string) => void
+  onSuccess: (publicToken: string, metadata: LinkMetadata) => void
   onExit: () => void
 }) {
   const { open, ready } = usePlaidLink({
     token: linkToken,
-    onSuccess: (publicToken) => onSuccess(publicToken),
+    onSuccess: (publicToken, metadata) =>
+      onSuccess(publicToken, {
+        institutionId: metadata.institution?.institution_id ?? null,
+        accounts: metadata.accounts.map((account) => ({ name: account.name, mask: account.mask })),
+      }),
     onExit: () => onExit(),
   })
   useEffect(() => {
@@ -62,8 +78,8 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
   const [isConnecting, setIsConnecting] = useState(false)
   const [webLinkToken, setWebLinkToken] = useState<string | null>(null)
   const [webLinkMode, setWebLinkMode] = useState<"connect" | "reconnect">("connect")
-  const [importingItemId, setImportingItemId] = useState<string | null>(null)
   const [reconnectingItemId, setReconnectingItemId] = useState<string | null>(null)
+  const [unlinkPromptItem, setUnlinkPromptItem] = useState<PlaidItem | null>(null)
   const isNative = Capacitor.isNativePlatform()
 
   const loadItems = useCallback(async () => {
@@ -79,13 +95,23 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
   }, [loadItems])
 
   const finishExchange = useCallback(
-    async (publicToken: string) => {
+    async (publicToken: string, linkMetadata: LinkMetadata) => {
       try {
-        await exchangePlaidPublicToken(workspaceId, publicToken)
+        await exchangePlaidPublicToken(workspaceId, publicToken, linkMetadata)
         toast({ title: "Bank connected" })
         await loadItems()
-      } catch {
-        toast({ title: "Couldn't finish connecting your bank", variant: "destructive" })
+      } catch (err) {
+        // A 409 here means the duplicate-connection check in
+        // exchangePublicToken (plaidService.ts) caught this before it ever
+        // created a second Item for an account already linked to this
+        // workspace — that's an expected, specific outcome worth its own
+        // message, not a generic failure.
+        const isDuplicate = err instanceof ApiError && err.status === 409
+        toast({
+          title: isDuplicate ? "Already connected" : "Couldn't finish connecting your bank",
+          description: isDuplicate ? err.message : undefined,
+          variant: "destructive",
+        })
       } finally {
         setIsConnecting(false)
       }
@@ -103,19 +129,22 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
     if (isNative) {
       const exitPromise = waitForPlaidLinkExit()
       await Browser.open({ url: `${STACKIN_APP_HOSTING_URL}/plaid-link?linkToken=${encodeURIComponent(linkToken)}` })
-      const publicToken = await exitPromise
+      const exitResult = await exitPromise
       // No-op if the browser was already dismissed by the user (that's what
       // resolved exitPromise in the first place) — closing an already-closed
       // browser is harmless, but guard it so that can never throw here.
       await Browser.close().catch(() => {})
       if (mode === "connect") {
-        if (publicToken) {
-          await finishExchange(publicToken)
+        if (exitResult) {
+          await finishExchange(exitResult.publicToken, {
+            institutionId: exitResult.institutionId,
+            accounts: exitResult.accounts,
+          })
         } else {
           setIsConnecting(false)
         }
       } else {
-        if (publicToken) {
+        if (exitResult) {
           toast({ title: "Bank reconnected" })
           await loadItems()
         }
@@ -157,24 +186,6 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
     }
   }
 
-  async function handleImportHistory(workspaceIdForImport: string, itemId: string) {
-    setImportingItemId(itemId)
-    try {
-      const { added } = await importPlaidHistory(workspaceIdForImport, itemId, 3)
-      toast({
-        title: added > 0 ? `Pulled in ${added} transaction${added === 1 ? "" : "s"}` : "No transactions found",
-        description:
-          added > 0
-            ? "Review and confirm them from the Expenses tab."
-            : "Plaid doesn't have any transaction history for this account in the last 3 months.",
-      })
-    } catch {
-      toast({ title: "Couldn't import transaction history", variant: "destructive" })
-    } finally {
-      setImportingItemId(null)
-    }
-  }
-
   async function handleAccountDefaultChange(itemId: string, accountId: string, value: string) {
     const defaultBusiness = value === "business" ? true : value === "personal" ? false : null
     const previousItems = items
@@ -205,6 +216,8 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
       toast({ title: "Bank disconnected" })
     } catch {
       toast({ title: "Couldn't disconnect this bank", variant: "destructive" })
+    } finally {
+      setUnlinkPromptItem(null)
     }
   }
 
@@ -221,7 +234,7 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
                 <div className="text-xs text-muted-foreground">{item.linkedAccounts.length} account(s)</div>
               )}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
               {item.status === "error" ? (
                 <Button
                   variant="default"
@@ -232,18 +245,13 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
                 >
                   {reconnectingItemId === item.id ? "Reconnecting..." : "Reconnect"}
                 </Button>
-              ) : (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleImportHistory(workspaceId, item.id)}
-                  disabled={importingItemId === item.id}
-                  title="Pulls this account's last 3 months of transactions in now, instead of waiting for them to be detected automatically. New transactions after this still notify you as they happen."
-                >
-                  {importingItemId === item.id ? "Importing..." : "Import last 3 months"}
-                </Button>
-              )}
-              <Button variant="outline" size="sm" onClick={() => handleUnlink(item.id)}>
+              ) : null}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground hover:text-destructive"
+                onClick={() => setUnlinkPromptItem(item)}
+              >
                 Unlink
               </Button>
             </div>
@@ -290,10 +298,10 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
       {webLinkToken ? (
         <WebPlaidLink
           linkToken={webLinkToken}
-          onSuccess={(publicToken) => {
+          onSuccess={(publicToken, metadata) => {
             setWebLinkToken(null)
             if (webLinkMode === "connect") {
-              void finishExchange(publicToken)
+              void finishExchange(publicToken, metadata)
             } else {
               toast({ title: "Bank reconnected" })
               setIsConnecting(false)
@@ -308,6 +316,24 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
           }}
         />
       ) : null}
+
+      <AlertDialog open={unlinkPromptItem != null} onOpenChange={(open) => !open && setUnlinkPromptItem(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Disconnect {unlinkPromptItem?.institutionName ?? "this bank"}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              StackIn will stop pulling in new transactions from this account. Transactions you've
+              already reviewed and confirmed stay exactly as they are.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => unlinkPromptItem && void handleUnlink(unlinkPromptItem.id)}>
+              Disconnect
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

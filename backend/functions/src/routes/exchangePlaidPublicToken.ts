@@ -9,6 +9,15 @@ const QuerySchema = z.object({
 
 const BodySchema = z.object({
   publicToken: z.string().min(1),
+  // From Plaid Link's own onSuccess metadata — used to reject an accidental
+  // duplicate connection before it's ever created. Optional/nullable since
+  // older cached clients or an unexpected Plaid response shape shouldn't
+  // hard-fail this endpoint; the service treats a missing institutionId as
+  // "can't check" rather than "block."
+  institutionId: z.string().nullable().optional(),
+  accounts: z
+    .array(z.object({ name: z.string(), mask: z.string().nullable() }))
+    .optional(),
 })
 
 export async function exchangePlaidPublicTokenHandler(req: Request, res: Response): Promise<void> {
@@ -32,7 +41,10 @@ export async function exchangePlaidPublicTokenHandler(req: Request, res: Respons
       sendHttpError(res, new BadRequestError("Missing publicToken", parsedBody.error.format()), "exchangePlaidPublicToken")
       return
     }
-    const { itemId } = await exchangePublicToken(parsedQuery.data.workspaceId, uid, parsedBody.data.publicToken)
+    const { itemId } = await exchangePublicToken(parsedQuery.data.workspaceId, uid, parsedBody.data.publicToken, {
+      institutionId: parsedBody.data.institutionId ?? null,
+      accounts: parsedBody.data.accounts ?? [],
+    })
     res.status(200).json({ ok: true, itemId })
   } catch (err: any) {
     sendHttpError(res, err, "exchangePlaidPublicToken")

@@ -1,6 +1,12 @@
 import { App, type URLOpenListenerEvent } from "@capacitor/app"
 import { Browser } from "@capacitor/browser"
 
+export type PlaidLinkExitResult = {
+  publicToken: string
+  institutionId: string | null
+  accounts: Array<{ name: string; mask: string | null }>
+}
+
 // Resolves when Plaid Link in the native in-app browser is done, one way or
 // another: either frontend/app/plaid-link/page.tsx sends back the
 // stackin://plaid/link-complete redirect (success or Plaid's own exit flow),
@@ -8,21 +14,32 @@ import { Browser } from "@capacitor/browser"
 // native "Done" button instead of using Plaid's in-flow exit), which fires
 // @capacitor/browser's "browserFinished" event but no redirect at all.
 // Without racing both, that second path leaves the caller awaiting forever.
-export function waitForPlaidLinkExit(): Promise<string | null> {
+export function waitForPlaidLinkExit(): Promise<PlaidLinkExitResult | null> {
   return new Promise((resolve) => {
     let settled = false
-    const finish = (publicToken: string | null) => {
+    const finish = (result: PlaidLinkExitResult | null) => {
       if (settled) return
       settled = true
       urlHandle.then((listener) => listener.remove())
       browserHandle.then((listener) => listener.remove())
-      resolve(publicToken)
+      resolve(result)
     }
 
     const urlHandle = App.addListener("appUrlOpen", (event: URLOpenListenerEvent) => {
       if (!event.url.startsWith("stackin://plaid/link-complete")) return
-      const publicToken = new URL(event.url).searchParams.get("public_token")
-      finish(publicToken)
+      const params = new URL(event.url).searchParams
+      const publicToken = params.get("public_token")
+      if (!publicToken) {
+        finish(null)
+        return
+      }
+      let accounts: Array<{ name: string; mask: string | null }> = []
+      try {
+        accounts = JSON.parse(params.get("accounts") ?? "[]")
+      } catch {
+        accounts = []
+      }
+      finish({ publicToken, institutionId: params.get("institution_id"), accounts })
     })
 
     const browserHandle = Browser.addListener("browserFinished", () => {

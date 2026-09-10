@@ -1,7 +1,7 @@
 import { Configuration, PlaidApi, PlaidEnvironments, Products, CountryCode } from "plaid"
 import { db } from "../admin"
 import { assertWorkspaceMembership } from "../lib/workspaceMembership"
-import { BadRequestError, ForbiddenError, NotFoundError } from "../lib/httpErrors"
+import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "../lib/httpErrors"
 import { PlaidItemSchema, PlaidItemPublicSchema, type PlaidItemType, type PlaidLinkedAccountType } from "@shared/schemas/plaidItem"
 import { PlaidPendingTransactionSchema, type PlaidPendingTransactionType } from "@shared/schemas/plaidPendingTransaction"
 import { PlaidMerchantMemorySchema, type PlaidMerchantMemoryType } from "@shared/schemas/plaidMerchantMemory"
@@ -131,12 +131,52 @@ export async function createUpdateLinkToken(
   return { link_token: response.data.link_token }
 }
 
+// Compares against Plaid Link's own onSuccess metadata (institution_id +
+// each account's name/mask) rather than anything fetched after exchange —
+// the whole point is to catch a duplicate before the exchange call ever
+// happens, so a duplicate Item is never created in the first place instead
+// of being created and then cleaned up. Per Plaid's own guidance, name+mask
+// is the right pair to compare (never mask against a real account number —
+// this only ever compares mask to another mask from the same source).
+// Scoped to this one workspace: the same real bank account legitimately
+// showing up in two of a user's workspaces (e.g. two businesses sharing one
+// account) is not a duplicate worth blocking.
+async function findDuplicateLinkedAccount(
+  workspaceId: string,
+  institutionId: string,
+  accounts: Array<{ name: string; mask: string | null }>
+): Promise<boolean> {
+  const existingSnap = await plaidItemsCol(workspaceId).where("institutionId", "==", institutionId).get()
+  for (const doc of existingSnap.docs) {
+    const parsed = PlaidItemSchema.safeParse(doc.data())
+    if (!parsed.success) continue
+    const isMatch = parsed.data.linkedAccounts.some((existingAccount) =>
+      accounts.some((newAccount) => newAccount.name === existingAccount.name && newAccount.mask === existingAccount.mask)
+    )
+    if (isMatch) return true
+  }
+  return false
+}
+
 export async function exchangePublicToken(
   workspaceId: string,
   uid: string,
-  publicToken: string
+  publicToken: string,
+  linkMetadata: { institutionId: string | null; accounts: Array<{ name: string; mask: string | null }> }
 ): Promise<{ itemId: string }> {
   await assertWorkspaceMembership(workspaceId, uid)
+
+  // Fail open, not closed, if this metadata is ever missing — this check is
+  // about cost/UX (avoiding an accidental duplicate connection), not
+  // security, so a missing institutionId should never block a legitimate
+  // new connection from completing.
+  if (linkMetadata.institutionId) {
+    const isDuplicate = await findDuplicateLinkedAccount(workspaceId, linkMetadata.institutionId, linkMetadata.accounts)
+    if (isDuplicate) {
+      throw new ConflictError("This account is already connected to this workspace.")
+    }
+  }
+
   const plaid = getPlaidClient()
 
   const exchangeResponse = await plaid.itemPublicTokenExchange({ public_token: publicToken })

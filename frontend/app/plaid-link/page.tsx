@@ -49,9 +49,20 @@ function PlaidLinkRunner() {
   const { open, ready } = usePlaidLink({
     token: linkToken ?? "",
     receivedRedirectUri: oauthStateId ? window.location.href : undefined,
-    onSuccess: (publicToken) => {
+    onSuccess: (publicToken, metadata) => {
       sessionStorage.removeItem(LINK_TOKEN_STORAGE_KEY)
-      window.location.href = `stackin://plaid/link-complete?public_token=${encodeURIComponent(publicToken)}`
+      // Carried through so the native app can check for an accidental
+      // duplicate connection before exchanging — see exchangePublicToken in
+      // plaidService.ts. This in-app browser tab has no way to reach the
+      // app's own API directly (no auth session here), so this redirect is
+      // the only path for this data to get back to the app at all.
+      const accounts = metadata.accounts.map((account) => ({ name: account.name, mask: account.mask }))
+      const params = new URLSearchParams({ public_token: publicToken })
+      if (metadata.institution?.institution_id) {
+        params.set("institution_id", metadata.institution.institution_id)
+      }
+      params.set("accounts", JSON.stringify(accounts))
+      window.location.href = `stackin://plaid/link-complete?${params.toString()}`
     },
     onExit: () => {
       sessionStorage.removeItem(LINK_TOKEN_STORAGE_KEY)

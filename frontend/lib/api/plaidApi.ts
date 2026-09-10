@@ -53,11 +53,19 @@ export async function getPlaidUpdateLinkToken(workspaceId: string, itemId: strin
   return res.linkToken
 }
 
-export async function exchangePlaidPublicToken(workspaceId: string, publicToken: string): Promise<{ itemId: string }> {
+export async function exchangePlaidPublicToken(
+  workspaceId: string,
+  publicToken: string,
+  linkMetadata?: { institutionId: string | null; accounts: Array<{ name: string; mask: string | null }> }
+): Promise<{ itemId: string }> {
   const res = await tryWrite<{ itemId: string }>(
     `${API_ENDPOINTS.plaid.exchangePublicToken}?workspaceId=${encodeURIComponent(workspaceId)}`,
     "POST",
-    { publicToken }
+    {
+      publicToken,
+      institutionId: linkMetadata?.institutionId ?? null,
+      accounts: linkMetadata?.accounts ?? [],
+    }
   )
   return { itemId: res.itemId }
 }
@@ -68,17 +76,6 @@ export async function getPlaidItems(workspaceId: string): Promise<PlaidItem[]> {
   return res.items ?? []
 }
 
-export async function importPlaidHistory(
-  workspaceId: string,
-  itemId: string,
-  months = 3
-): Promise<{ added: number }> {
-  return tryWrite(
-    `${API_ENDPOINTS.plaid.importHistory}?workspaceId=${encodeURIComponent(workspaceId)}&itemId=${encodeURIComponent(itemId)}`,
-    "POST",
-    { months }
-  )
-}
 
 export async function updatePlaidAccountDefault(
   workspaceId: string,
