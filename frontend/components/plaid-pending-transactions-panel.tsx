@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react"
 import { Check, ChevronDown, ChevronUp, Paperclip, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -74,6 +74,172 @@ async function runWithConcurrency<T>(
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, runNext))
 }
 
+// How far (px) the card has to travel before release commits to an action
+// instead of springing back. Also used to fade in the reveal panel underneath.
+const SWIPE_COMMIT_THRESHOLD = 88
+const SWIPE_MAX_DRAG = 132
+
+function TransactionReviewCard({
+  transaction,
+  isSelected,
+  onToggleSelected,
+  categoryValue,
+  expenseCategoryOptions,
+  onCategoryChange,
+  onConfirm,
+  onRequestDismiss,
+  isReceiptRowOpen,
+  onToggleReceiptRow,
+  receiptCapture,
+}: {
+  transaction: PlaidPendingTransaction
+  isSelected: boolean
+  onToggleSelected: () => void
+  categoryValue: string | undefined
+  expenseCategoryOptions: string[]
+  onCategoryChange: (value: string) => void
+  onConfirm: () => void
+  onRequestDismiss: () => void
+  isReceiptRowOpen: boolean
+  onToggleReceiptRow: () => void
+  receiptCapture: ReturnType<typeof useReceiptCapture>
+}) {
+  const [dragX, setDragX] = useState(0)
+  const dragRef = useRef<{ startX: number; pointerId: number; dragging: boolean } | null>(null)
+
+  function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    // Don't start a swipe from inside the checkbox/select/receipt/icon controls —
+    // those need their own click/drag handling (Radix's Select in particular
+    // does its own pointer capture).
+    if ((event.target as HTMLElement).closest("[data-no-swipe]")) return
+    dragRef.current = { startX: event.clientX, pointerId: event.pointerId, dragging: true }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  function handlePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!dragRef.current?.dragging) return
+    const delta = event.clientX - dragRef.current.startX
+    setDragX(Math.max(-SWIPE_MAX_DRAG, Math.min(SWIPE_MAX_DRAG, delta)))
+  }
+
+  function endDrag() {
+    if (!dragRef.current?.dragging) return
+    dragRef.current.dragging = false
+    const finalX = dragX
+    setDragX(0)
+    if (finalX <= -SWIPE_COMMIT_THRESHOLD) onRequestDismiss()
+    else if (finalX >= SWIPE_COMMIT_THRESHOLD) onConfirm()
+  }
+
+  const revealStrength = Math.min(Math.abs(dragX) / SWIPE_COMMIT_THRESHOLD, 1)
+
+  return (
+    <div className="relative overflow-hidden rounded-xl">
+      <div
+        className="absolute inset-0 flex items-center justify-between px-4 text-sm font-semibold"
+        style={{ opacity: revealStrength }}
+        aria-hidden="true"
+      >
+        <span className={`flex items-center gap-1 text-emerald-700 dark:text-emerald-400 ${dragX > 0 ? "" : "invisible"}`}>
+          <Check className="h-4 w-4" /> Confirm as business
+        </span>
+        <span className={`flex items-center gap-1 text-destructive ${dragX < 0 ? "" : "invisible"}`}>
+          Not business <X className="h-4 w-4" />
+        </span>
+      </div>
+
+      <div
+        className="relative touch-pan-y space-y-3 rounded-xl border border-muted bg-card p-4"
+        style={{
+          transform: `translateX(${dragX}px)`,
+          transition: dragRef.current?.dragging ? "none" : "transform 0.2s ease",
+        }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-2" data-no-swipe>
+            <Checkbox
+              className="mt-1"
+              checked={isSelected}
+              onCheckedChange={onToggleSelected}
+              aria-label={`Select ${transaction.merchantName ?? transaction.rawName}`}
+            />
+            <div>
+              <div className="font-medium">{transaction.merchantName ?? transaction.rawName}</div>
+              <div className="text-sm text-muted-foreground">{transaction.date}</div>
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="font-semibold">{formatCurrency(transaction.amount)}</div>
+            {transaction.suggestedExpenseAccount ? (
+              <Badge variant="secondary" className="mt-1">
+                {transaction.suggestedExpenseAccount}
+              </Badge>
+            ) : null}
+          </div>
+        </div>
+
+        <div data-no-swipe>
+          <Select value={categoryValue} onValueChange={onCategoryChange}>
+            <SelectTrigger>
+              <SelectValue placeholder="Choose expense category" />
+            </SelectTrigger>
+            <SelectContent>
+              {expenseCategoryOptions.map((category) => (
+                <SelectItem key={category} value={category}>
+                  {category}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {isReceiptRowOpen ? (
+          <div data-no-swipe>
+            <ReceiptCaptureField capture={receiptCapture} />
+          </div>
+        ) : null}
+
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-muted-foreground">Swipe right to confirm, left to dismiss</span>
+          <div className="flex shrink-0 gap-1" data-no-swipe>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              aria-label="Confirm as business"
+              onClick={onConfirm}
+            >
+              <Check className="h-4 w-4" />
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              aria-label={isReceiptRowOpen ? "Remove receipt" : "Attach receipt"}
+              onClick={onToggleReceiptRow}
+            >
+              <Paperclip className="h-4 w-4" />
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              aria-label="Not business"
+              onClick={onRequestDismiss}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function PlaidPendingTransactionsPanel() {
   const workspaceState = useWorkspaceStore((state) => state.state)
   const activeWorkspace =
@@ -112,6 +278,12 @@ export default function PlaidPendingTransactionsPanel() {
   const [collapsed, setCollapsed] = useState(false)
   const [receiptRowId, setReceiptRowId] = useState<string | null>(null)
   const didAutoCollapseRef = useRef(arrivedViaReviewDeepLink())
+  // Bumped on every loadTransactions call so a slow, superseded request
+  // (e.g. one fired for a workspace ID that turned out to be a stale cache
+  // value from useWorkspaceStore's hydrate-then-reconcile flow) can't
+  // resolve after a newer one and clobber it with stale/empty data — that
+  // race is what made the review banner flash in and then disappear.
+  const activeRequestIdRef = useRef(0)
   const receiptCapture = useReceiptCapture(activeWorkspaceId)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkCategory, setBulkCategory] = useState<string>("")
@@ -119,9 +291,11 @@ export default function PlaidPendingTransactionsPanel() {
 
   const loadTransactions = useCallback(async () => {
     if (!activeWorkspaceId) return
+    const requestId = ++activeRequestIdRef.current
     setIsLoading(true)
     try {
       const results = await getPlaidPendingTransactions(activeWorkspaceId)
+      if (activeRequestIdRef.current !== requestId) return
       setTransactions(results)
       setSelectedIds(new Set())
       if (!didAutoCollapseRef.current && results.length > AUTO_COLLAPSE_THRESHOLD) {
@@ -129,9 +303,13 @@ export default function PlaidPendingTransactionsPanel() {
         didAutoCollapseRef.current = true
       }
     } catch {
-      toast({ title: "Couldn't load bank transactions", variant: "destructive" })
+      if (activeRequestIdRef.current === requestId) {
+        toast({ title: "Couldn't load bank transactions", variant: "destructive" })
+      }
     } finally {
-      setIsLoading(false)
+      if (activeRequestIdRef.current === requestId) {
+        setIsLoading(false)
+      }
     }
   }, [activeWorkspaceId, toast])
 
@@ -407,76 +585,24 @@ export default function PlaidPendingTransactionsPanel() {
 
       {!collapsed &&
         transactions.map((transaction) => (
-          <div key={transaction.id} className="rounded-xl border border-muted p-4 space-y-3">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-start gap-2">
-                <Checkbox
-                  className="mt-1"
-                  checked={selectedIds.has(transaction.id)}
-                  onCheckedChange={() => toggleSelected(transaction.id)}
-                  aria-label={`Select ${transaction.merchantName ?? transaction.rawName}`}
-                />
-                <div>
-                  <div className="font-medium">{transaction.merchantName ?? transaction.rawName}</div>
-                  <div className="text-sm text-muted-foreground">{transaction.date}</div>
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="font-semibold">{formatCurrency(transaction.amount)}</div>
-                {transaction.suggestedExpenseAccount ? (
-                  <Badge variant="secondary" className="mt-1">
-                    {transaction.suggestedExpenseAccount}
-                  </Badge>
-                ) : null}
-              </div>
-            </div>
-
-            <Select
-              value={selectedAccount[transaction.id] ?? transaction.suggestedExpenseAccount ?? undefined}
-              onValueChange={(value) =>
-                setSelectedAccount((prev) => ({ ...prev, [transaction.id]: value }))
-              }
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Choose expense category" />
-              </SelectTrigger>
-              <SelectContent>
-                {expenseCategoryOptions.map((category) => (
-                  <SelectItem key={category} value={category}>
-                    {category}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            {receiptRowId === transaction.id ? (
-              <ReceiptCaptureField capture={receiptCapture} />
-            ) : null}
-
-            <div className="flex gap-2">
-              <Button className="flex-1" onClick={() => handleConfirmClick(transaction)}>
-                <Check className="h-4 w-4 mr-1" /> Confirm as business
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                aria-label={receiptRowId === transaction.id ? "Remove receipt" : "Attach receipt"}
-                onClick={() =>
-                  receiptRowId === transaction.id ? closeReceiptRow() : setReceiptRowId(transaction.id)
-                }
-              >
-                <Paperclip className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="outline"
-                className="flex-1"
-                onClick={() => setDismissPrompt(transaction)}
-              >
-                <X className="h-4 w-4 mr-1" /> Not business
-              </Button>
-            </div>
-          </div>
+          <TransactionReviewCard
+            key={transaction.id}
+            transaction={transaction}
+            isSelected={selectedIds.has(transaction.id)}
+            onToggleSelected={() => toggleSelected(transaction.id)}
+            categoryValue={selectedAccount[transaction.id] ?? transaction.suggestedExpenseAccount ?? undefined}
+            expenseCategoryOptions={expenseCategoryOptions}
+            onCategoryChange={(value) =>
+              setSelectedAccount((prev) => ({ ...prev, [transaction.id]: value }))
+            }
+            onConfirm={() => handleConfirmClick(transaction)}
+            onRequestDismiss={() => setDismissPrompt(transaction)}
+            isReceiptRowOpen={receiptRowId === transaction.id}
+            onToggleReceiptRow={() =>
+              receiptRowId === transaction.id ? closeReceiptRow() : setReceiptRowId(transaction.id)
+            }
+            receiptCapture={receiptCapture}
+          />
         ))}
 
       <AlertDialog open={dismissPrompt != null} onOpenChange={(open) => !open && setDismissPrompt(null)}>

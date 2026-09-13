@@ -15,6 +15,7 @@ import {
 } from "@/lib/api/receiptDraftsApi";
 import { getAuthSessionVersion, isAuthSessionCurrent } from "@/lib/authSession";
 import * as receiptDraftsService from "@/lib/domain/receiptDraftsService";
+import { warmReceiptThumbnails } from "@/lib/domain/receiptAssetsService";
 import { startPerfTimer } from "@/lib/observability/perf";
 import {
   beginHydrationSync,
@@ -410,6 +411,10 @@ export const useReceiptDraftsStore = create<ReceiptDraftsStoreState>((set, get) 
         forceBackend: force,
       });
       if (!isAuthSessionCurrent(sessionVersion)) return;
+
+      if (fresh.didFetch) {
+        warmReceiptThumbnails(workspaceId, fresh.data);
+      }
 
       set((state) => {
         const currentEntry = getWorkspaceState(state.byWorkspaceId, workspaceId);

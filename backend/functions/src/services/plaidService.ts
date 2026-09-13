@@ -870,6 +870,18 @@ export async function confirmPendingTransaction(
   if (!snap.exists) throw new NotFoundError("Pending transaction not found")
   const pending = PlaidPendingTransactionSchema.parse(snap.data())
   if (pending.status !== "pending") {
+    // The client retries on transient network failures and always resends
+    // the same Idempotency-Key, so a request that actually succeeded here
+    // can still see its own retry land after the status flip. Treat a
+    // repeat of the same decision as a success instead of a false failure —
+    // otherwise a slow-but-successful confirm/dismiss gets reported back to
+    // the review UI as failed and the row bounces back into the list.
+    if (!decision.isBusiness && pending.status === "dismissed") {
+      return {}
+    }
+    if (decision.isBusiness && pending.status === "confirmed") {
+      return { committedExpenseId: pending.committedExpenseId }
+    }
     throw new BadRequestError("This transaction has already been reviewed.")
   }
 

@@ -563,7 +563,7 @@ const handleLogout = async () => {
 	              )}
 	            </div>
 
-	            {activeWorkspace ? (
+	            {activeWorkspace?.type === "independent" ? (
 	              <div className="space-y-3 border-t border-muted pt-4">
 	                <h3 className="font-semibold text-base">Connected Accounts</h3>
 	                <p className="text-sm text-muted-foreground">

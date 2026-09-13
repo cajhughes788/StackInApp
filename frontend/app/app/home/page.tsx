@@ -309,7 +309,9 @@ export default function HomePage() {
           </div>)}
 
         {supportsExpenses ? (<div className="space-y-3">
-            {mode === "expenses" ? <PlaidPendingTransactionsPanel /> : null}
+            <div className={mode === "expenses" ? undefined : "hidden"}>
+              <PlaidPendingTransactionsPanel />
+            </div>
             {showVenmoImportPanel ? <VenmoImportPanel /> : null}
             {/* ReceiptCapturePanel removed — receipt attachment now happens inside ExpenseForm */}
           </div>) : null}

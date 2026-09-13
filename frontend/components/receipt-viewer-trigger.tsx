@@ -26,6 +26,11 @@ type ReceiptViewerTriggerProps = {
   label?: string
   variant?: "link" | "outline" | "ghost"
   className?: string
+  // Fires whenever this trigger's own dialog closes, success or failure —
+  // lets a caller that renders this inside its own popover/bubble (e.g. the
+  // expense grid's notes popover) close that wrapper too, instead of leaving
+  // it open with a stale "View Receipt" button after the viewer is done.
+  onClose?: () => void
 }
 
 type TransformState = {
@@ -65,6 +70,7 @@ export default function ReceiptViewerTrigger({
   label = "View receipt",
   variant = "outline",
   className,
+  onClose,
 }: ReceiptViewerTriggerProps) {
   const isNativeApp = Capacitor.isNativePlatform()
   const [open, setOpen] = useState(false)
@@ -192,6 +198,7 @@ export default function ReceiptViewerTrigger({
     setOpen(nextOpen)
     if (!nextOpen) {
       resetViewer()
+      onClose?.()
     }
     if (!nextOpen || src || loading) {
       return
@@ -219,6 +226,7 @@ export default function ReceiptViewerTrigger({
           window.open(fallbackUrl, "_blank", "noopener,noreferrer")
           resetViewer()
           setOpen(false)
+          onClose?.()
           return
         }
         setError(
@@ -479,7 +487,7 @@ export default function ReceiptViewerTrigger({
               )}
             </div>
 
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+            <Button type="button" variant="outline" onClick={() => void handleOpenChange(false)}>
               Close
             </Button>
           </div>

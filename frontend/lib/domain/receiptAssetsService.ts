@@ -1,6 +1,7 @@
 "use client"
 
 import type { ReceiptAsset } from "@shared/schemas/receiptAsset"
+import type { ReceiptDraft } from "@shared/schemas/receiptDraft"
 
 import { getReceiptAsset } from "@/lib/api/receiptAssetsApi"
 import {
@@ -90,6 +91,33 @@ export async function resolveReceiptMediaSource(
 
   const url = await resolveUrlFromPath(workspaceId, receiptAssetId, variant, storagePath)
   return { src: url, asset: resolvedAsset, fromCache: false }
+}
+
+const WARM_THUMBNAIL_CONCURRENCY = 4
+
+// Each ReceiptThumbnail on the Receipts page only starts resolving its image
+// (asset lookup -> Storage getDownloadURL -> bytes) when it mounts, which is
+// what makes that page feel slow to open. Call this whenever a batch of
+// drafts is freshly fetched anywhere else in the app (e.g. the receipt
+// drafts store's backend refresh) to warm the download-URL cache ahead of
+// time, so the Receipts page's own resolution is a cache hit.
+export function warmReceiptThumbnails(workspaceId: string, drafts: ReceiptDraft[]): void {
+  const candidates = drafts.filter((draft) => draft.receiptAssetId)
+  let index = 0
+  async function next(): Promise<void> {
+    const draft = candidates[index++]
+    if (!draft) return
+    try {
+      await resolveReceiptMediaSource(workspaceId, draft.receiptAssetId, "thumbnail", draft.receiptAsset)
+    } catch {
+      // Best-effort warm-up — the Receipts page still resolves its own
+      // images on visit if this didn't finish or failed.
+    }
+    return next()
+  }
+  void Promise.all(
+    Array.from({ length: Math.min(WARM_THUMBNAIL_CONCURRENCY, candidates.length) }, next)
+  )
 }
 
 export async function resolveReceiptOriginalUrl(

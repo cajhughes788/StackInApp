@@ -74,6 +74,7 @@ export default function ExpensesGrid() {
     field: EditableExpenseField
   } | null>(null)
   const [attachReceiptExpenseId, setAttachReceiptExpenseId] = useState<string | null>(null)
+  const [notesPopoverExpenseId, setNotesPopoverExpenseId] = useState<string | null>(null)
 
   const customExpenseCategories =
     settings?.independent?.customExpenseCategories ?? []
@@ -286,7 +287,10 @@ export default function ExpensesGrid() {
                       how it was created (manual, CSV/Venmo import, or a
                       confirmed Plaid transaction). */}
                   <td className={`${tdBase} w-8 px-1 py-1.5 text-center align-middle`}>
-                    <Popover>
+                    <Popover
+                      open={notesPopoverExpenseId === e.id}
+                      onOpenChange={(open) => setNotesPopoverExpenseId(open ? e.id : null)}
+                    >
                       <PopoverTrigger asChild>
                         <button
                           className="relative inline-flex text-muted-foreground hover:text-foreground"
@@ -343,6 +347,7 @@ export default function ExpensesGrid() {
                               label="View Receipt"
                               variant="outline"
                               className="w-full"
+                              onClose={() => setNotesPopoverExpenseId(null)}
                             />
                           ) : (
                             <div className="space-y-1.5">

@@ -37,6 +37,42 @@ import { waitForPlaidLinkExit } from "@/lib/mobile/plaidLinkDeepLink"
 
 type LinkMetadata = { institutionId: string | null; accounts: Array<{ name: string; mask: string | null }> }
 
+// Mirrors useWorkspaceStore's persisted-snapshot pattern: without this, `items`
+// always starts at [] and every mount of this component (e.g. opening Account
+// Settings) shows "no bank connected" for a beat before loadItems() resolves,
+// even when a connection has existed for months. Cache the last-known list
+// per workspace so the connected-bank cards render immediately, then let
+// loadItems() silently reconcile in the background as before.
+const PLAID_ITEMS_CACHE_PREFIX = "plaid_items_snapshot:"
+const PLAID_ITEMS_CACHE_TTL_MS = 5 * 60 * 1000
+
+function loadCachedPlaidItems(workspaceId: string): PlaidItem[] {
+  if (typeof window === "undefined") return []
+  try {
+    const raw = window.localStorage.getItem(PLAID_ITEMS_CACHE_PREFIX + workspaceId)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as { items?: unknown; writtenAt?: unknown }
+    if (!Array.isArray(parsed.items)) return []
+    const writtenAt = typeof parsed.writtenAt === "number" ? parsed.writtenAt : 0
+    if (Date.now() - writtenAt > PLAID_ITEMS_CACHE_TTL_MS) return []
+    return parsed.items as PlaidItem[]
+  } catch {
+    return []
+  }
+}
+
+function persistCachedPlaidItems(workspaceId: string, items: PlaidItem[]) {
+  if (typeof window === "undefined") return
+  try {
+    window.localStorage.setItem(
+      PLAID_ITEMS_CACHE_PREFIX + workspaceId,
+      JSON.stringify({ items, writtenAt: Date.now() })
+    )
+  } catch {
+    // ignore storage failures — cache is a best-effort convenience
+  }
+}
+
 // window.location.origin inside the native app is Capacitor's internal
 // webview origin (e.g. capacitor://localhost), not a real HTTPS URL —
 // @capacitor/browser's SFSafariViewController-backed Browser.open() can't
@@ -74,7 +110,7 @@ function WebPlaidLink({
 
 export default function PlaidConnectButton({ workspaceId }: { workspaceId: string }) {
   const { toast } = useToast()
-  const [items, setItems] = useState<PlaidItem[]>([])
+  const [items, setItems] = useState<PlaidItem[]>(() => loadCachedPlaidItems(workspaceId))
   const [isConnecting, setIsConnecting] = useState(false)
   const [webLinkToken, setWebLinkToken] = useState<string | null>(null)
   const [webLinkMode, setWebLinkMode] = useState<"connect" | "reconnect">("connect")
@@ -84,7 +120,9 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
 
   const loadItems = useCallback(async () => {
     try {
-      setItems(await getPlaidItems(workspaceId))
+      const fetched = await getPlaidItems(workspaceId)
+      setItems(fetched)
+      persistCachedPlaidItems(workspaceId, fetched)
     } catch {
       // Best-effort — the account page still functions without the list.
     }

@@ -4,6 +4,7 @@ import { db } from "../admin"
 import { storage } from "../admin"
 import {
   BadRequestError,
+  ConflictError,
   NotFoundError,
 } from "../lib/httpErrors"
 import { assertWorkspaceMembership } from "../lib/workspaceMembership"
@@ -180,7 +181,7 @@ export async function deleteReceiptAssetCascade(
   await assertWorkspaceMembership(workspaceId, uid)
 
   const assetRef = db.doc(`workspaces/${workspaceId}/receiptAssets/${receiptAssetId}`)
-  const [draftsSnap, analysesSnap] = await Promise.all([
+  const [draftsSnap, analysesSnap, expensesSnap] = await Promise.all([
     db
       .collection(`workspaces/${workspaceId}/receiptDrafts`)
       .where("receiptAssetId", "==", receiptAssetId)
@@ -189,7 +190,23 @@ export async function deleteReceiptAssetCascade(
       .collection(`workspaces/${workspaceId}/receiptAnalyses`)
       .where("receiptAssetId", "==", receiptAssetId)
       .get(),
+    db
+      .collection(`workspaces/${workspaceId}/expenses`)
+      .where("receiptAssetId", "==", receiptAssetId)
+      .limit(1)
+      .get(),
   ])
+
+  // This is normally only reached for a not-yet-committed draft (see the
+  // dismiss/retry-draft callers), but a slow-syncing second device or a
+  // stale local snapshot merge can still race a draft's commit-to-expense —
+  // deleting here in that case would orphan the expense's receiptAssetId
+  // ("Receipt asset not found" the next time it's viewed) while leaving the
+  // expense itself claiming a receipt still exists. Bail out instead, same
+  // as the scheduled orphan-cleanup job's own expense check.
+  if (!expensesSnap.empty) {
+    throw new ConflictError("This receipt has already been saved to an expense and can't be discarded.")
+  }
 
   const batch = db.batch()
   batch.delete(assetRef)
