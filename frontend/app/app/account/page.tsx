@@ -47,6 +47,7 @@ import {
 import { debugError, debugLog } from "@/lib/debugLoop"
 import { useAppBootstrapState } from "@/contexts/app-bootstrap-context"
 import PlaidConnectButton from "@/components/plaid-connect-button"
+import PlaidMerchantMemoryPanel from "@/components/plaid-merchant-memory-panel"
 
 export default function AccountPage() {
   const router = useRouter()
@@ -572,6 +573,10 @@ const handleLogout = async () => {
 	                </p>
 	                <PlaidConnectButton workspaceId={activeWorkspace.id} />
 	              </div>
+	            ) : null}
+
+	            {activeWorkspace?.type === "independent" ? (
+	              <PlaidMerchantMemoryPanel workspaceId={activeWorkspace.id} />
 	            ) : null}
 
 	            <div className="space-y-3 pt-4 border-t border-muted">

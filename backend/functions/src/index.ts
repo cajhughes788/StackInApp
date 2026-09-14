@@ -58,6 +58,9 @@ export {
   confirmPlaidPendingTransaction,
   updatePlaidAccountDefault,
   linkPlaidMerchantToRecurringRule,
+  getPlaidMerchantMemory,
+  updatePlaidMerchantMemory,
+  resetPlaidMerchantMemory,
   plaidWebhook,
   registerDeviceToken,
 } from "./api"

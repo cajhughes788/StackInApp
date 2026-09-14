@@ -34,7 +34,14 @@ export const PlaidPendingTransactionSchema = z.object({
   // confirm UI warn about double-counting fuel under the standard mileage
   // rate without touching the category-guess logic at all.
   isLikelyFuelPurchase: z.boolean().default(false),
-  status: z.enum(["pending", "confirmed", "dismissed"]),
+  // "processing" is a short-lived claim written atomically by
+  // confirmPendingTransaction before it does any further (non-transactional)
+  // work — it's what keeps two overlapping confirm/dismiss calls on the same
+  // transaction from both reading "pending" and both proceeding. It's never
+  // returned to the client (getPendingTransactions only queries status ==
+  // "pending") and always resolves back to "pending" (on failure) or a
+  // terminal status within the same request.
+  status: z.enum(["pending", "processing", "confirmed", "dismissed"]),
   committedExpenseId: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),

@@ -426,7 +426,7 @@ export async function syncTransactionsForItem(
         if (!removedId) continue
         const hasReplacement = response.data.added.some((added) => added.pending_transaction_id === removedId)
         if (hasReplacement) continue
-        await cleanupRemovedTransaction(workspaceId, removedId)
+        await cleanupRemovedTransaction(workspaceId, itemId, removedId)
       }
       cursor = response.data.next_cursor
       hasMore = response.data.has_more
@@ -534,6 +534,22 @@ async function upsertPendingTransactionFromPlaid(
     return null
   }
 
+  // A re-sync of a transaction_id we've already written — most commonly a
+  // second historical import (importPlaidHistory resets the cursor, so it
+  // re-fetches everything in range again) or a rare Plaid re-delivery —
+  // must not clobber a decision the user already made. Without this check,
+  // the unconditional write below would recompute status fresh from current
+  // merchant memory and reset an already-dismissed or already-confirmed
+  // transaction back to "pending" under a brand-new createdAt, resurrecting
+  // the exact same transaction in the review list.
+  const existingSnap = await pendingTransactionsCol(workspaceId).doc(transaction.transaction_id).get()
+  const existing = existingSnap.exists
+    ? PlaidPendingTransactionSchema.parse(existingSnap.data())
+    : null
+  if (existing && existing.status !== "pending") {
+    return null
+  }
+
   const merchantName = transaction.merchant_name ?? null
   const rawName = transaction.name ?? ""
   const merchantKey = normalizePlaidMerchantKey(merchantName, rawName)
@@ -580,7 +596,7 @@ async function upsertPendingTransactionFromPlaid(
     confidence: classification.confidence,
     isLikelyFuelPurchase: isLikelyFuelPurchase(merchantName ?? rawName),
     status: autoDismiss ? "dismissed" : "pending",
-    createdAt: nowIso,
+    createdAt: existing?.createdAt ?? nowIso,
     updatedAt: nowIso,
   }
   const parsed = PlaidPendingTransactionSchema.parse(pending)
@@ -711,7 +727,7 @@ async function carryForwardTransaction(
   }
 }
 
-async function cleanupRemovedTransaction(workspaceId: string, transactionId: string): Promise<void> {
+async function cleanupRemovedTransaction(workspaceId: string, plaidItemId: string, transactionId: string): Promise<void> {
   const ref = pendingTransactionsCol(workspaceId).doc(transactionId)
   const snap = await ref.get()
   if (!snap.exists) return
@@ -722,14 +738,38 @@ async function cleanupRemovedTransaction(workspaceId: string, transactionId: str
     await ref.delete()
     return
   }
-  // Already confirmed into a real expense with no replacement transaction —
-  // never auto-delete a financial record the user hasn't seen happen.
-  // Reviewing/reversing this is a known follow-up, not handled here.
-  console.warn("plaidService.cleanupRemovedTransaction: a confirmed transaction was removed by Plaid with no replacement", {
-    workspaceId,
-    transactionId,
-    committedExpenseId: existing.committedExpenseId,
-  })
+  if (existing.status !== "confirmed" || !existing.committedExpenseId) {
+    // Dismissed — no financial record exists for this transaction, so
+    // there's nothing to flag. Leave the pending doc as-is.
+    return
+  }
+  // Already confirmed into a real expense, and the bank has since removed
+  // this transaction with no replacement (a reversal, a hold that never
+  // settled, a duplicate the bank itself caught). Never auto-delete the
+  // expense — that destroys the audit trail — but the user has no way to
+  // know their P&L now overstates a deduction that never happened unless
+  // this is surfaced somewhere they'll actually see it.
+  const uid = await getLinkOwnerUid(workspaceId, plaidItemId)
+  if (!uid) {
+    console.warn("plaidService.cleanupRemovedTransaction: no linkOwnerUid, can't flag expense", {
+      workspaceId,
+      transactionId,
+      committedExpenseId: existing.committedExpenseId,
+    })
+    return
+  }
+  try {
+    await expensesSvc.updateExpense(workspaceId, uid, existing.committedExpenseId, {
+      flaggedReason: "bank_reversed",
+    })
+  } catch (error) {
+    console.warn("plaidService.cleanupRemovedTransaction: failed to flag expense after bank reversal", {
+      workspaceId,
+      transactionId,
+      committedExpenseId: existing.committedExpenseId,
+      reason: error instanceof Error ? error.message : String(error),
+    })
+  }
 }
 
 async function getMerchantMemory(workspaceId: string, merchantKey: string): Promise<PlaidMerchantMemoryType | null> {
@@ -748,22 +788,74 @@ async function rememberMerchantDecision(
 ): Promise<void> {
   if (!merchantKey) return
   const ref = merchantMemoryCol(workspaceId).doc(merchantKey)
-  const existing = await ref.get()
-  const nowIso = new Date().toISOString()
-  const canonical: PlaidMerchantMemoryType = {
-    id: merchantKey,
-    workspaceId,
-    merchantKey,
-    displayName,
-    isBusiness,
-    expenseCategory,
-    mode,
-    decisionCount: (existing.data()?.decisionCount ?? 0) + 1,
-    lastDecisionAt: nowIso,
-    createdAt: existing.exists ? (existing.data()?.createdAt ?? nowIso) : nowIso,
-    updatedAt: nowIso,
+  // A bulk dismiss/confirm across several transactions from the same
+  // merchant (e.g. "All Starbucks (8)") runs up to BULK_CONCURRENCY
+  // decisions on this exact doc at once — a plain read-then-write would lose
+  // increments to decisionCount under that concurrency. runTransaction
+  // makes the read-modify-write atomic so nothing gets dropped.
+  await db.runTransaction(async (txn) => {
+    const existing = await txn.get(ref)
+    const nowIso = new Date().toISOString()
+    const canonical: PlaidMerchantMemoryType = {
+      id: merchantKey,
+      workspaceId,
+      merchantKey,
+      displayName,
+      isBusiness,
+      expenseCategory,
+      mode,
+      decisionCount: (existing.data()?.decisionCount ?? 0) + 1,
+      lastDecisionAt: nowIso,
+      createdAt: existing.exists ? (existing.data()?.createdAt ?? nowIso) : nowIso,
+      updatedAt: nowIso,
+    }
+    txn.set(ref, PlaidMerchantMemorySchema.parse(canonical), { merge: true })
+  })
+}
+
+// Lets a user see and correct what's been learned — without this, an
+// accidental "Always treat as personal" (or a merchant that's genuinely
+// mixed-use) had no fix short of a raw Firestore edit.
+export async function listMerchantMemory(workspaceId: string, uid: string): Promise<PlaidMerchantMemoryType[]> {
+  await assertWorkspaceMembership(workspaceId, uid)
+  const snap = await merchantMemoryCol(workspaceId).orderBy("updatedAt", "desc").get()
+  return snap.docs.map((doc) => PlaidMerchantMemorySchema.parse(doc.data()))
+}
+
+export async function updateMerchantMemory(
+  workspaceId: string,
+  uid: string,
+  merchantKey: string,
+  patch: { mode?: "ask_every_time" | "always_personal"; expenseCategory?: string | null }
+): Promise<PlaidMerchantMemoryType> {
+  await assertWorkspaceMembership(workspaceId, uid)
+  const ref = merchantMemoryCol(workspaceId).doc(merchantKey)
+  const snap = await ref.get()
+  if (!snap.exists) throw new NotFoundError("No learned merchant found for this key")
+  // A rule-linked merchant's mode is managed by the recurring-rule lifecycle
+  // (markMerchantCoveredByRecurringRule / the rule being deleted), not this
+  // manual editor — switching it here would silently desync it from the
+  // rule that's actually generating its expenses.
+  const existing = PlaidMerchantMemorySchema.parse(snap.data())
+  if (existing.mode === "covered_by_recurring_rule") {
+    throw new BadRequestError("This merchant is tied to a recurring rule — edit or delete the rule instead")
   }
-  await ref.set(PlaidMerchantMemorySchema.parse(canonical), { merge: true })
+  const nowIso = new Date().toISOString()
+  await ref.set(
+    {
+      ...(patch.mode ? { mode: patch.mode } : {}),
+      ...(patch.expenseCategory !== undefined ? { expenseCategory: patch.expenseCategory } : {}),
+      updatedAt: nowIso,
+    },
+    { merge: true }
+  )
+  const updated = await ref.get()
+  return PlaidMerchantMemorySchema.parse(updated.data())
+}
+
+export async function resetMerchantMemory(workspaceId: string, uid: string, merchantKey: string): Promise<void> {
+  await assertWorkspaceMembership(workspaceId, uid)
+  await merchantMemoryCol(workspaceId).doc(merchantKey).delete()
 }
 
 export async function getPendingTransactions(workspaceId: string, uid: string): Promise<PlaidPendingTransactionType[]> {
@@ -866,30 +958,60 @@ export async function confirmPendingTransaction(
 ): Promise<{ committedExpenseId?: string; recurringSuggestion?: PlaidRecurringSuggestion }> {
   await assertWorkspaceMembership(workspaceId, uid)
   const ref = pendingTransactionsCol(workspaceId).doc(pendingId)
-  const snap = await ref.get()
-  if (!snap.exists) throw new NotFoundError("Pending transaction not found")
-  const pending = PlaidPendingTransactionSchema.parse(snap.data())
-  if (pending.status !== "pending") {
+
+  // Atomically claim the transaction before doing any further work. A plain
+  // read-then-write here would let two overlapping calls — a client retry
+  // racing the still-in-flight original request, or a confirm racing a
+  // dismiss — both read status "pending" before either writes back, and
+  // both proceed: either creating two separate real Expense documents for
+  // the same bank transaction, or leaving a just-created Expense's own
+  // pending record pointing at nothing. Same pattern as
+  // syncTransactionsForItem's sync lock below, just scoped to one doc.
+  const claim = await db.runTransaction(async (txn) => {
+    const snap = await txn.get(ref)
+    if (!snap.exists) return { outcome: "not_found" as const }
+    const current = PlaidPendingTransactionSchema.parse(snap.data())
+    if (current.status !== "pending") {
+      return { outcome: "not_claimable" as const, current }
+    }
+    txn.set(ref, { status: "processing", updatedAt: new Date().toISOString() }, { merge: true })
+    return { outcome: "claimed" as const, current }
+  })
+
+  if (claim.outcome === "not_found") {
+    throw new NotFoundError("Pending transaction not found")
+  }
+  if (claim.outcome === "not_claimable") {
     // The client retries on transient network failures and always resends
     // the same Idempotency-Key, so a request that actually succeeded here
     // can still see its own retry land after the status flip. Treat a
     // repeat of the same decision as a success instead of a false failure —
     // otherwise a slow-but-successful confirm/dismiss gets reported back to
     // the review UI as failed and the row bounces back into the list.
-    if (!decision.isBusiness && pending.status === "dismissed") {
+    const current = claim.current
+    if (!decision.isBusiness && current.status === "dismissed") {
       return {}
     }
-    if (decision.isBusiness && pending.status === "confirmed") {
-      return { committedExpenseId: pending.committedExpenseId }
+    if (decision.isBusiness && current.status === "confirmed") {
+      return { committedExpenseId: current.committedExpenseId }
+    }
+    if (current.status === "processing") {
+      throw new ConflictError("This transaction is already being processed — try again in a moment.")
     }
     throw new BadRequestError("This transaction has already been reviewed.")
   }
 
+  const pending = claim.current
   const merchantKey = normalizePlaidMerchantKey(pending.merchantName, pending.rawName)
   const displayName = pending.merchantName ?? pending.rawName
 
   if (!decision.isBusiness) {
-    await ref.set({ status: "dismissed", updatedAt: new Date().toISOString() }, { merge: true })
+    await ref.set({ status: "dismissed", updatedAt: new Date().toISOString() }, { merge: true }).catch(async (error) => {
+      // Release the claim so a write failure doesn't strand this
+      // transaction in "processing" forever.
+      await ref.set({ status: "pending", updatedAt: new Date().toISOString() }, { merge: true }).catch(() => {})
+      throw error
+    })
     // "always_personal" is an explicit opt-in from the dismiss UI, not
     // inferred from this one dismissal — see createPendingTransactionFromPlaid
     // for what it actually suppresses (the notification, not the record).
@@ -900,23 +1022,37 @@ export async function confirmPendingTransaction(
 
   const account = decision.account ?? pending.suggestedExpenseAccount
   if (!account) {
+    // Nothing was committed — release the claim, or this transaction is
+    // stuck in "processing" until the next re-import happens to touch it.
+    await ref.set({ status: "pending", updatedAt: new Date().toISOString() }, { merge: true }).catch(() => {})
     throw new BadRequestError("An expense category is required to confirm this transaction.")
   }
 
-  const { id: expenseId } = await expensesSvc.createExpense(workspaceId, uid, {
-    date: pending.date,
-    amount: pending.amount,
-    vendor: pending.merchantName ?? pending.rawName,
-    description: pending.rawName,
-    account,
-    clientMutationId: `plaid:${pending.plaidTransactionId}`,
-    receiptAssetId: decision.receiptAssetId,
-  })
-
-  await ref.set(
-    { status: "confirmed", committedExpenseId: expenseId, updatedAt: new Date().toISOString() },
-    { merge: true }
-  )
+  let expenseId: string
+  try {
+    const created = await expensesSvc.createExpense(workspaceId, uid, {
+      date: pending.date,
+      amount: pending.amount,
+      vendor: pending.merchantName ?? pending.rawName,
+      description: pending.rawName,
+      account,
+      clientMutationId: `plaid:${pending.plaidTransactionId}`,
+      receiptAssetId: decision.receiptAssetId,
+    })
+    expenseId = created.id
+    await ref.set(
+      { status: "confirmed", committedExpenseId: expenseId, updatedAt: new Date().toISOString() },
+      { merge: true }
+    )
+  } catch (error) {
+    // Release the claim so a failure here doesn't strand the transaction in
+    // "processing" forever. createExpense's own clientMutationId dedup means
+    // a subsequent retry either creates the expense once or safely reuses
+    // the one that already exists — it never doubles up, since claiming
+    // guarantees retries are sequential rather than overlapping.
+    await ref.set({ status: "pending", updatedAt: new Date().toISOString() }, { merge: true }).catch(() => {})
+    throw error
+  }
   // Confirming as business always resets mode to ask_every_time — if this
   // merchant was previously "always_personal", surfacing this one (which
   // only happened because the user found it some other way, since

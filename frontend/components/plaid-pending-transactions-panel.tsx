@@ -271,6 +271,7 @@ export default function PlaidPendingTransactionsPanel() {
   const [isLoading, setIsLoading] = useState(false)
   const [selectedAccount, setSelectedAccount] = useState<Record<string, string>>({})
   const [dismissPrompt, setDismissPrompt] = useState<PlaidPendingTransaction | null>(null)
+  const [bulkDismissPromptOpen, setBulkDismissPromptOpen] = useState(false)
   const [fuelWarningPrompt, setFuelWarningPrompt] = useState<PlaidPendingTransaction | null>(null)
   const [receiptPrompt, setReceiptPrompt] = useState<PlaidPendingTransaction | null>(null)
   const [recurringPrompt, setRecurringPrompt] = useState<PlaidRecurringSuggestion | null>(null)
@@ -460,7 +461,7 @@ export default function PlaidPendingTransactionsPanel() {
     }
   }
 
-  async function handleBulkDecision(isBusiness: boolean) {
+  async function handleBulkDecision(isBusiness: boolean, alwaysPersonal = false) {
     if (!activeWorkspaceId || selectedIds.size === 0) return
     if (isBusiness && !bulkCategory) {
       toast({ title: "Choose an expense category first", variant: "destructive" })
@@ -482,7 +483,7 @@ export default function PlaidPendingTransactionsPanel() {
         await confirmPlaidPendingTransaction(activeWorkspaceId, transaction.id, {
           isBusiness,
           account: isBusiness ? bulkCategory : undefined,
-          alwaysPersonal: false,
+          alwaysPersonal,
         })
       } catch {
         failed.push(transaction)
@@ -576,7 +577,7 @@ export default function PlaidPendingTransactionsPanel() {
             variant="outline"
             size="sm"
             disabled={isBulkWorking}
-            onClick={() => void handleBulkDecision(false)}
+            onClick={() => setBulkDismissPromptOpen(true)}
           >
             <X className="h-4 w-4 mr-1" /> Not business
           </Button>
@@ -614,7 +615,8 @@ export default function PlaidPendingTransactionsPanel() {
             <AlertDialogDescription>
               Future transactions from this merchant won&apos;t notify you or show up here
               anymore — they&apos;ll still be recorded quietly, in case a purchase from them is
-              ever actually a business expense. You can undo this later.
+              ever actually a business expense. You can edit or undo this later from Account
+              Settings &rarr; Learned Merchants.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -631,6 +633,39 @@ export default function PlaidPendingTransactionsPanel() {
               onClick={() => {
                 if (dismissPrompt) void handleDecision(dismissPrompt, false, true)
                 setDismissPrompt(null)
+              }}
+            >
+              Always
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={bulkDismissPromptOpen} onOpenChange={setBulkDismissPromptOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Always treat these merchants as personal?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Future transactions from the merchants in this batch won&apos;t notify you or show up
+              here anymore if you choose &quot;Always&quot; — they&apos;ll still be recorded quietly,
+              in case a purchase from one of them is ever actually a business expense. You can edit
+              or undo this later from Account Settings &rarr; Learned Merchants.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setBulkDismissPromptOpen(false)
+                void handleBulkDecision(false, false)
+              }}
+            >
+              Just this batch
+            </AlertDialogAction>
+            <AlertDialogAction
+              onClick={() => {
+                setBulkDismissPromptOpen(false)
+                void handleBulkDecision(false, true)
               }}
             >
               Always

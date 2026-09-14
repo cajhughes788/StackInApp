@@ -56,6 +56,13 @@ export const ExpenseInput = z.object({
   receiptDraftId: z.string().optional(),
   ocrProvider: z.enum(["aws_textract", "tesseract_local"]).optional(),
   ocrConfidence: z.number().min(0).max(1).optional(),
+  // Set when a Plaid-confirmed expense's underlying bank transaction was
+  // later removed by the bank (a reversal, a hold that never settled, a
+  // duplicate the bank itself caught) after the expense was already booked —
+  // see plaidService.ts's cleanupRemovedTransaction. Surfaced as a review
+  // badge rather than auto-deleted, since silently removing a financial
+  // record the user hasn't seen happen is riskier than flagging it.
+  flaggedReason: z.enum(["bank_reversed"]).nullable().optional(),
 })
 
 // -------------------------------------------------------------

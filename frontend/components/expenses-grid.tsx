@@ -295,7 +295,9 @@ export default function ExpensesGrid() {
                         <button
                           className="relative inline-flex text-muted-foreground hover:text-foreground"
                           title={
-                            needsReceiptForAuditDefense(e.amount ?? 0, e.receiptAssetId)
+                            e.flaggedReason === "bank_reversed"
+                              ? "Your bank removed this transaction after it was recorded — please review"
+                              : needsReceiptForAuditDefense(e.amount ?? 0, e.receiptAssetId)
                               ? `Missing receipt — expenses over ${formatCurrency(RECEIPT_REQUIRED_THRESHOLD)} generally need one for audit defense`
                               : "View details"
                           }
@@ -309,13 +311,33 @@ export default function ExpensesGrid() {
                             )}
                             aria-hidden="true"
                           />
-                          {needsReceiptForAuditDefense(e.amount ?? 0, e.receiptAssetId) ? (
+                          {e.flaggedReason === "bank_reversed" || needsReceiptForAuditDefense(e.amount ?? 0, e.receiptAssetId) ? (
                             <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-destructive" />
                           ) : null}
                         </button>
                       </PopoverTrigger>
                       <PopoverContent className="max-w-xs rounded-2xl border border-border bg-popover p-3 text-popover-foreground shadow-md">
                         <div className="space-y-3">
+                          {e.flaggedReason === "bank_reversed" && activeWorkspaceId ? (
+                            <div className="space-y-2 rounded-lg border border-destructive/30 bg-destructive/10 p-2.5">
+                              <p className="flex items-start gap-1.5 text-xs text-destructive">
+                                <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                                Your bank removed this transaction after it was recorded — it may have been reversed,
+                                a hold that never settled, or a duplicate. Review it and delete this expense if it
+                                didn&apos;t actually happen.
+                              </p>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="w-full"
+                                onClick={() =>
+                                  void expensesService.updateExpense(activeWorkspaceId, e.id, { flaggedReason: null })
+                                }
+                              >
+                                Got it, clear this flag
+                              </Button>
+                            </div>
+                          ) : null}
                           {e.description ? (
                             <p className="whitespace-pre-wrap text-sm">{e.description}</p>
                           ) : null}

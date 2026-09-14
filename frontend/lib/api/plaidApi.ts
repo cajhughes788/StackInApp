@@ -132,3 +132,44 @@ export async function linkPlaidMerchantToRecurringRule(workspaceId: string, merc
     { merchantKey }
   )
 }
+
+export type PlaidMerchantMemory = {
+  id: string
+  workspaceId: string
+  merchantKey: string
+  displayName: string
+  isBusiness: boolean
+  expenseCategory: string | null
+  mode: "ask_every_time" | "always_personal" | "covered_by_recurring_rule"
+  decisionCount: number
+  lastDecisionAt: string
+  createdAt: string
+  updatedAt: string
+}
+
+export async function getPlaidMerchantMemory(workspaceId: string): Promise<PlaidMerchantMemory[]> {
+  const url = `${API_ENDPOINTS.plaid.merchantMemory}?workspaceId=${encodeURIComponent(workspaceId)}`
+  const res = await apiFetch<{ merchants: PlaidMerchantMemory[] }>(url, { method: "GET" })
+  return res.merchants ?? []
+}
+
+export async function updatePlaidMerchantMemory(
+  workspaceId: string,
+  merchantKey: string,
+  patch: { mode?: "ask_every_time" | "always_personal"; expenseCategory?: string | null }
+): Promise<PlaidMerchantMemory> {
+  const res = await tryWrite<{ merchant: PlaidMerchantMemory }>(
+    `${API_ENDPOINTS.plaid.updateMerchantMemory}?workspaceId=${encodeURIComponent(workspaceId)}&merchantKey=${encodeURIComponent(merchantKey)}`,
+    "POST",
+    patch
+  )
+  return res.merchant
+}
+
+export async function resetPlaidMerchantMemory(workspaceId: string, merchantKey: string): Promise<void> {
+  await tryWrite(
+    `${API_ENDPOINTS.plaid.resetMerchantMemory}?workspaceId=${encodeURIComponent(workspaceId)}&merchantKey=${encodeURIComponent(merchantKey)}`,
+    "DELETE",
+    {}
+  )
+}

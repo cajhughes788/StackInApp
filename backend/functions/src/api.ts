@@ -457,6 +457,21 @@ export const linkPlaidMerchantToRecurringRule = withCorsAuth(async (req, res) =>
   await linkPlaidMerchantToRecurringRuleHandler(req, res)
 })
 
+export const getPlaidMerchantMemory = withCorsAuth(async (req, res) => {
+  const { getPlaidMerchantMemoryHandler } = await import("./routes/getPlaidMerchantMemory.js")
+  await getPlaidMerchantMemoryHandler(req, res)
+})
+
+export const updatePlaidMerchantMemory = withCorsAuth(async (req, res) => {
+  const { updatePlaidMerchantMemoryHandler } = await import("./routes/updatePlaidMerchantMemory.js")
+  await updatePlaidMerchantMemoryHandler(req, res)
+})
+
+export const resetPlaidMerchantMemory = withCorsAuth(async (req, res) => {
+  const { resetPlaidMerchantMemoryHandler } = await import("./routes/resetPlaidMerchantMemory.js")
+  await resetPlaidMerchantMemoryHandler(req, res)
+})
+
 // Bare onRequest like stripeWebhook — Plaid's signature verification needs
 // the raw request body, which withCorsAuth's express.json() parsing would
 // otherwise consume before the handler sees it.

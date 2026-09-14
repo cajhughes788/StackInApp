@@ -116,6 +116,9 @@ export const API_ENDPOINTS = {
     confirmPendingTransaction: "https://confirmplaidpendingtransaction-3lc2fwdgwq-uc.a.run.app",
     updateAccountDefault: "https://updateplaidaccountdefault-3lc2fwdgwq-uc.a.run.app",
     linkMerchantToRecurringRule: "https://linkplaidmerchanttorecurringrule-3lc2fwdgwq-uc.a.run.app",
+    merchantMemory: "https://getplaidmerchantmemory-3lc2fwdgwq-uc.a.run.app",
+    updateMerchantMemory: "https://updateplaidmerchantmemory-3lc2fwdgwq-uc.a.run.app",
+    resetMerchantMemory: "https://resetplaidmerchantmemory-3lc2fwdgwq-uc.a.run.app",
   },
 
   devices: {
