@@ -29,13 +29,16 @@ import { getVisibleExpenseCategoryOptions } from "@/lib/expenseCategories"
 import { formatCurrency } from "@/lib/helpers"
 import { getDefaultVehicleExpenseMode, isVehicleTransportationCategory } from "@shared/vehicleExpenses"
 import { RECEIPT_REQUIRED_THRESHOLD } from "@shared/receiptRequirements"
+import { normalizePlaidMerchantKey } from "@shared/plaidClassification"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import { useSettingsStore } from "@/lib/stores/useSettingsStore"
 import {
   confirmPlaidPendingTransaction,
   getPlaidPendingTransactions,
   linkPlaidMerchantToRecurringRule,
+  updatePlaidMerchantMemory,
   type PlaidPendingTransaction,
+  type PlaidPersonalSuggestion,
   type PlaidRecurringSuggestion,
 } from "@/lib/api/plaidApi"
 import { createRecurringRule } from "@/lib/domain/recurringRulesService"
@@ -87,7 +90,7 @@ function TransactionReviewCard({
   expenseCategoryOptions,
   onCategoryChange,
   onConfirm,
-  onRequestDismiss,
+  onDismiss,
   isReceiptRowOpen,
   onToggleReceiptRow,
   receiptCapture,
@@ -99,7 +102,7 @@ function TransactionReviewCard({
   expenseCategoryOptions: string[]
   onCategoryChange: (value: string) => void
   onConfirm: () => void
-  onRequestDismiss: () => void
+  onDismiss: () => void
   isReceiptRowOpen: boolean
   onToggleReceiptRow: () => void
   receiptCapture: ReturnType<typeof useReceiptCapture>
@@ -127,7 +130,7 @@ function TransactionReviewCard({
     dragRef.current.dragging = false
     const finalX = dragX
     setDragX(0)
-    if (finalX <= -SWIPE_COMMIT_THRESHOLD) onRequestDismiss()
+    if (finalX <= -SWIPE_COMMIT_THRESHOLD) onDismiss()
     else if (finalX >= SWIPE_COMMIT_THRESHOLD) onConfirm()
   }
 
@@ -203,37 +206,34 @@ function TransactionReviewCard({
           </div>
         ) : null}
 
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-muted-foreground">Swipe right to confirm, left to dismiss</span>
-          <div className="flex shrink-0 gap-1" data-no-swipe>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              aria-label="Confirm as business"
-              onClick={onConfirm}
-            >
-              <Check className="h-4 w-4" />
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              aria-label={isReceiptRowOpen ? "Remove receipt" : "Attach receipt"}
-              onClick={onToggleReceiptRow}
-            >
-              <Paperclip className="h-4 w-4" />
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              aria-label="Not business"
-              onClick={onRequestDismiss}
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
+        <div className="flex justify-end gap-1" data-no-swipe>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            aria-label="Confirm as business"
+            onClick={onConfirm}
+          >
+            <Check className="h-4 w-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            aria-label={isReceiptRowOpen ? "Remove receipt" : "Attach receipt"}
+            onClick={onToggleReceiptRow}
+          >
+            <Paperclip className="h-4 w-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            aria-label="Not business"
+            onClick={onDismiss}
+          >
+            <X className="h-4 w-4" />
+          </Button>
         </div>
       </div>
     </div>
@@ -270,7 +270,7 @@ export default function PlaidPendingTransactionsPanel() {
   const [transactions, setTransactions] = useState<PlaidPendingTransaction[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [selectedAccount, setSelectedAccount] = useState<Record<string, string>>({})
-  const [dismissPrompt, setDismissPrompt] = useState<PlaidPendingTransaction | null>(null)
+  const [personalPrompt, setPersonalPrompt] = useState<PlaidPersonalSuggestion | null>(null)
   const [bulkDismissPromptOpen, setBulkDismissPromptOpen] = useState(false)
   const [fuelWarningPrompt, setFuelWarningPrompt] = useState<PlaidPendingTransaction | null>(null)
   const [receiptPrompt, setReceiptPrompt] = useState<PlaidPendingTransaction | null>(null)
@@ -326,6 +326,30 @@ export default function PlaidPendingTransactionsPanel() {
     }
     for (const [category, ids] of groups) {
       if (ids.length < 2) groups.delete(category)
+    }
+    return groups
+  }, [transactions])
+
+  // Same idea as categoryGroups, but for the cold-start case the classifier
+  // has no opinion on at all — a brand-new account (or a merchant nothing's
+  // ever taught the system about) produces transactions with no suggested
+  // category, which categoryGroups above skips entirely. Without this, the
+  // exact case bulk review exists to help with — many repeats of the same
+  // unrecognized merchant right after a historical import — gets none of
+  // that help. Grouped by merchant identity (not category, since there
+  // isn't one yet) so "8 unrecognized Amazon charges" is still one chip.
+  const merchantGroups = useMemo(() => {
+    const groups = new Map<string, { label: string; ids: string[] }>()
+    for (const transaction of transactions) {
+      if (transaction.suggestedExpenseAccount) continue
+      const key = normalizePlaidMerchantKey(transaction.merchantName, transaction.rawName)
+      if (!key) continue
+      const existing = groups.get(key)
+      if (existing) existing.ids.push(transaction.id)
+      else groups.set(key, { label: transaction.merchantName ?? transaction.rawName, ids: [transaction.id] })
+    }
+    for (const [key, group] of groups) {
+      if (group.ids.length < 2) groups.delete(key)
     }
     return groups
   }, [transactions])
@@ -414,11 +438,7 @@ export default function PlaidPendingTransactionsPanel() {
     void handleDecision(transaction, true)
   }
 
-  async function handleDecision(
-    transaction: PlaidPendingTransaction,
-    isBusiness: boolean,
-    alwaysPersonal?: boolean
-  ) {
+  async function handleDecision(transaction: PlaidPendingTransaction, isBusiness: boolean) {
     if (!activeWorkspaceId) return
     const account = selectedAccount[transaction.id] ?? transaction.suggestedExpenseAccount ?? undefined
     if (isBusiness && !account) {
@@ -441,20 +461,20 @@ export default function PlaidPendingTransactionsPanel() {
     if (receiptRowId === transaction.id) closeReceiptRow()
 
     try {
+      // A plain dismiss is never "always personal" here — that choice only
+      // ever comes from the bulk-dismiss dialog now (see handleBulkDecision).
+      // A single dismiss just dismisses, silently; if a real pattern shows
+      // up (the same merchant dismissed a few times), the backend hands back
+      // personalSuggestion below instead of asking up front every time.
       const result = await confirmPlaidPendingTransaction(activeWorkspaceId, transaction.id, {
         isBusiness,
         account,
-        alwaysPersonal,
+        alwaysPersonal: false,
         receiptAssetId,
       })
       if (result.recurringSuggestion) setRecurringPrompt(result.recurringSuggestion)
-      toast({
-        title: isBusiness
-          ? "Added to expenses"
-          : alwaysPersonal
-            ? `Dismissed — won't notify you about ${transaction.merchantName ?? transaction.rawName} again`
-            : "Dismissed",
-      })
+      if (result.personalSuggestion) setPersonalPrompt(result.personalSuggestion)
+      toast({ title: isBusiness ? "Added to expenses" : "Dismissed" })
     } catch {
       setTransactions(previousTransactions)
       toast({ title: "Couldn't save your decision — restored to your review list", variant: "destructive" })
@@ -525,6 +545,12 @@ export default function PlaidPendingTransactionsPanel() {
         {collapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
       </button>
 
+      {!collapsed ? (
+        <p className="px-1 text-xs text-muted-foreground">
+          Swipe a transaction right to confirm as business, left to dismiss — or use the buttons on each row.
+        </p>
+      ) : null}
+
       {!collapsed && transactions.length > 1 ? (
         <div className="flex flex-wrap items-center gap-2 px-1 text-sm">
           <label className="flex items-center gap-2 font-medium">
@@ -544,6 +570,17 @@ export default function PlaidPendingTransactionsPanel() {
               onClick={() => toggleGroupSelected(ids)}
             >
               All {category} ({ids.length})
+            </Button>
+          ))}
+          {Array.from(merchantGroups.entries()).map(([merchantKey, group]) => (
+            <Button
+              key={merchantKey}
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => toggleGroupSelected(group.ids)}
+            >
+              All {group.label} ({group.ids.length})
             </Button>
           ))}
         </div>
@@ -597,7 +634,7 @@ export default function PlaidPendingTransactionsPanel() {
               setSelectedAccount((prev) => ({ ...prev, [transaction.id]: value }))
             }
             onConfirm={() => handleConfirmClick(transaction)}
-            onRequestDismiss={() => setDismissPrompt(transaction)}
+            onDismiss={() => void handleDecision(transaction, false)}
             isReceiptRowOpen={receiptRowId === transaction.id}
             onToggleReceiptRow={() =>
               receiptRowId === transaction.id ? closeReceiptRow() : setReceiptRowId(transaction.id)
@@ -606,36 +643,35 @@ export default function PlaidPendingTransactionsPanel() {
           />
         ))}
 
-      <AlertDialog open={dismissPrompt != null} onOpenChange={(open) => !open && setDismissPrompt(null)}>
+      <AlertDialog open={personalPrompt != null} onOpenChange={(open) => !open && setPersonalPrompt(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Always treat {dismissPrompt?.merchantName ?? dismissPrompt?.rawName} as personal?
+              You&apos;ve dismissed transactions from {personalPrompt?.displayName} {personalPrompt?.dismissCount} times
+              — stop asking about this merchant?
             </AlertDialogTitle>
             <AlertDialogDescription>
               Future transactions from this merchant won&apos;t notify you or show up here
               anymore — they&apos;ll still be recorded quietly, in case a purchase from them is
-              ever actually a business expense. You can edit or undo this later from Account
-              Settings &rarr; Learned Merchants.
+              ever actually a business expense. You can undo this later from Account Settings
+              &rarr; Learned Merchants.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>No, keep asking</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
-                if (dismissPrompt) void handleDecision(dismissPrompt, false, false)
-                setDismissPrompt(null)
+                const suggestion = personalPrompt
+                setPersonalPrompt(null)
+                if (!activeWorkspaceId || !suggestion) return
+                updatePlaidMerchantMemory(activeWorkspaceId, suggestion.merchantKey, {
+                  mode: "always_personal",
+                }).catch(() => {
+                  toast({ title: "Couldn't update this merchant", variant: "destructive" })
+                })
               }}
             >
-              Just this one
-            </AlertDialogAction>
-            <AlertDialogAction
-              onClick={() => {
-                if (dismissPrompt) void handleDecision(dismissPrompt, false, true)
-                setDismissPrompt(null)
-              }}
-            >
-              Always
+              Yes, stop asking
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -692,7 +728,7 @@ export default function PlaidPendingTransactionsPanel() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
-                if (fuelWarningPrompt) void handleDecision(fuelWarningPrompt, false, false)
+                if (fuelWarningPrompt) void handleDecision(fuelWarningPrompt, false)
                 setFuelWarningPrompt(null)
               }}
             >

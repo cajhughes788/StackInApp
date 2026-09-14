@@ -34,6 +34,12 @@ export const PlaidMerchantMemorySchema = z.object({
   mode: z.enum(["ask_every_time", "always_personal", "covered_by_recurring_rule"]),
   decisionCount: z.number(),
   lastDecisionAt: z.string(),
+  // Set the moment the "stop asking about this merchant?" suggestion is
+  // shown (see detectPersonalSuggestion in plaidService.ts) — regardless of
+  // how the user answers. Without this, the suggestion would re-fire on
+  // every dismiss once the pattern threshold is reached instead of asking
+  // once, ever, per merchant.
+  suggestedAlwaysPersonalAt: z.string().nullable().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })

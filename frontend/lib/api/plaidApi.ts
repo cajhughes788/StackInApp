@@ -113,11 +113,21 @@ export type PlaidRecurringSuggestion = {
   amount: number
 }
 
+export type PlaidPersonalSuggestion = {
+  merchantKey: string
+  displayName: string
+  dismissCount: number
+}
+
 export async function confirmPlaidPendingTransaction(
   workspaceId: string,
   pendingId: string,
   decision: { isBusiness: boolean; account?: string; alwaysPersonal?: boolean; receiptAssetId?: string }
-): Promise<{ committedExpenseId?: string; recurringSuggestion?: PlaidRecurringSuggestion }> {
+): Promise<{
+  committedExpenseId?: string
+  recurringSuggestion?: PlaidRecurringSuggestion
+  personalSuggestion?: PlaidPersonalSuggestion
+}> {
   return tryWrite(
     `${API_ENDPOINTS.plaid.confirmPendingTransaction}?workspaceId=${encodeURIComponent(workspaceId)}&pendingId=${encodeURIComponent(pendingId)}`,
     "POST",

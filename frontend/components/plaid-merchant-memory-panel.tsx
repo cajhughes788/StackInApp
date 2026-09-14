@@ -133,10 +133,8 @@ export default function PlaidMerchantMemoryPanel({ workspaceId }: { workspaceId:
     }
   }
 
-  if (!isLoading && merchants.length === 0) return null
-
   return (
-    <div className="space-y-3 border-t border-muted pt-4">
+    <div className="space-y-3">
       <div>
         <h3 className="font-semibold text-base">Learned Merchants</h3>
         <p className="text-sm text-muted-foreground">
@@ -144,6 +142,12 @@ export default function PlaidMerchantMemoryPanel({ workspaceId }: { workspaceId:
           here — it only affects future transactions from that merchant.
         </p>
       </div>
+
+      {!isLoading && merchants.length === 0 ? (
+        <p className="text-sm text-muted-foreground rounded-lg border border-dashed border-muted px-3 py-6 text-center">
+          Nothing learned yet — this fills in as you confirm or dismiss bank transactions.
+        </p>
+      ) : null}
 
       <div className="space-y-2">
         {merchants.map((merchant) => (

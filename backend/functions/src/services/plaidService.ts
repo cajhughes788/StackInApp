@@ -914,6 +914,58 @@ async function detectRecurringSuggestion(
   }
 }
 
+export type PlaidPersonalSuggestion = {
+  merchantKey: string
+  displayName: string
+  dismissCount: number
+}
+
+// Below this, a plain dismiss stays completely silent — no "always vs just
+// once" interruption. Once a merchant has been dismissed this many times,
+// that's a real pattern worth a single, one-time offer to stop asking,
+// instead of guessing "always?" on the very first dismissal the way the old
+// per-dismiss prompt did.
+const PERSONAL_SUGGESTION_DISMISS_THRESHOLD = 3
+
+// Mirrors detectRecurringSuggestion above, but for the opposite signal.
+// Only ever called right after this transaction's own dismiss write, so
+// it's included in the dismissed-count query as one of the occurrences.
+// Skips merchants that have ever been confirmed as business — a mixed-use
+// merchant (sometimes personal, sometimes not) should keep asking every
+// time, not get silenced just because it happens to also have a few
+// personal charges mixed in.
+async function detectPersonalSuggestion(
+  workspaceId: string,
+  merchantKey: string,
+  displayName: string
+): Promise<PlaidPersonalSuggestion | null> {
+  if (!merchantKey) return null
+  const [dismissedSnap, confirmedSnap] = await Promise.all([
+    pendingTransactionsCol(workspaceId)
+      .where("merchantKey", "==", merchantKey)
+      .where("status", "==", "dismissed")
+      .limit(PERSONAL_SUGGESTION_DISMISS_THRESHOLD)
+      .get(),
+    pendingTransactionsCol(workspaceId)
+      .where("merchantKey", "==", merchantKey)
+      .where("status", "==", "confirmed")
+      .limit(1)
+      .get(),
+  ])
+  if (dismissedSnap.size < PERSONAL_SUGGESTION_DISMISS_THRESHOLD) return null
+  if (!confirmedSnap.empty) return null
+  return { merchantKey, displayName, dismissCount: dismissedSnap.size }
+}
+
+// Written the moment the suggestion above is surfaced, regardless of how (or
+// whether) the user answers it — this is what makes it fire once per
+// merchant, ever, instead of on every dismiss once the threshold is met.
+async function markPersonalSuggestionShown(workspaceId: string, merchantKey: string): Promise<void> {
+  await merchantMemoryCol(workspaceId)
+    .doc(merchantKey)
+    .set({ suggestedAlwaysPersonalAt: new Date().toISOString() }, { merge: true })
+}
+
 // A bulk historical import can surface old transactions for confirmation
 // well after the fact — if this merchant's occurrences being detected here
 // are backdated, one cadence step past the last one might still land in the
@@ -955,7 +1007,11 @@ export async function confirmPendingTransaction(
   uid: string,
   pendingId: string,
   decision: { isBusiness: boolean; account?: string; alwaysPersonal?: boolean; receiptAssetId?: string }
-): Promise<{ committedExpenseId?: string; recurringSuggestion?: PlaidRecurringSuggestion }> {
+): Promise<{
+  committedExpenseId?: string
+  recurringSuggestion?: PlaidRecurringSuggestion
+  personalSuggestion?: PlaidPersonalSuggestion
+}> {
   await assertWorkspaceMembership(workspaceId, uid)
   const ref = pendingTransactionsCol(workspaceId).doc(pendingId)
 
@@ -1017,7 +1073,23 @@ export async function confirmPendingTransaction(
     // for what it actually suppresses (the notification, not the record).
     const mode = decision.alwaysPersonal ? "always_personal" : "ask_every_time"
     await rememberMerchantDecision(workspaceId, merchantKey, displayName, false, null, mode)
-    return {}
+
+    // Already explicitly silenced this merchant just now — nothing further
+    // to suggest. Otherwise, check whether a repeated-dismissal pattern has
+    // emerged worth a one-time "stop asking?" offer instead of ever
+    // interrupting on every single dismiss.
+    let personalSuggestion: PlaidPersonalSuggestion | undefined
+    if (!decision.alwaysPersonal) {
+      const memory = await getMerchantMemory(workspaceId, merchantKey)
+      if (memory && !memory.suggestedAlwaysPersonalAt && memory.mode === "ask_every_time") {
+        const suggestion = await detectPersonalSuggestion(workspaceId, merchantKey, displayName)
+        if (suggestion) {
+          await markPersonalSuggestionShown(workspaceId, merchantKey)
+          personalSuggestion = suggestion
+        }
+      }
+    }
+    return { personalSuggestion }
   }
 
   const account = decision.account ?? pending.suggestedExpenseAccount

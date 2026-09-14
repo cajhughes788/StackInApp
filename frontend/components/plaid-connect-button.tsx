@@ -116,15 +116,22 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
   const [webLinkMode, setWebLinkMode] = useState<"connect" | "reconnect">("connect")
   const [reconnectingItemId, setReconnectingItemId] = useState<string | null>(null)
   const [unlinkPromptItem, setUnlinkPromptItem] = useState<PlaidItem | null>(null)
+  // Shown once, immediately after a brand-new link succeeds — see
+  // handleClassifyChoice below for why this is the single highest-leverage
+  // moment to ask, instead of leaving the per-account default buried in a
+  // dropdown someone has to notice on their own.
+  const [classifyPrompt, setClassifyPrompt] = useState<PlaidItem | null>(null)
   const isNative = Capacitor.isNativePlatform()
 
-  const loadItems = useCallback(async () => {
+  const loadItems = useCallback(async (): Promise<PlaidItem[]> => {
     try {
       const fetched = await getPlaidItems(workspaceId)
       setItems(fetched)
       persistCachedPlaidItems(workspaceId, fetched)
+      return fetched
     } catch {
       // Best-effort — the account page still functions without the list.
+      return []
     }
   }, [workspaceId])
 
@@ -135,9 +142,18 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
   const finishExchange = useCallback(
     async (publicToken: string, linkMetadata: LinkMetadata) => {
       try {
-        await exchangePlaidPublicToken(workspaceId, publicToken, linkMetadata)
+        const { itemId } = await exchangePlaidPublicToken(workspaceId, publicToken, linkMetadata)
         toast({ title: "Bank connected" })
-        await loadItems()
+        const fetched = await loadItems()
+        // Ask business-vs-personal right now, while the user is still in the
+        // "I just linked this account" mindset — this is what actually feeds
+        // the classifier from the very first transaction instead of leaving
+        // every one unclassified until someone notices the per-account
+        // default buried in this same settings page.
+        const newItem = fetched.find((item) => item.id === itemId)
+        if (newItem && newItem.linkedAccounts.length > 0) {
+          setClassifyPrompt(newItem)
+        }
       } catch (err) {
         // A 409 here means the duplicate-connection check in
         // exchangePublicToken (plaidService.ts) caught this before it ever
@@ -243,6 +259,39 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
       await updatePlaidAccountDefault(workspaceId, itemId, accountId, defaultBusiness)
     } catch {
       setItems(previousItems)
+      toast({ title: "Couldn't save this account's default", variant: "destructive" })
+    }
+  }
+
+  // "Mix" (defaultBusiness === null) needs no API call at all — a freshly
+  // linked account already starts on auto-detect, so choosing it (or just
+  // dismissing the prompt) simply leaves that alone.
+  async function handleClassifyChoice(defaultBusiness: boolean | null) {
+    const item = classifyPrompt
+    setClassifyPrompt(null)
+    if (!item || defaultBusiness === null) return
+    try {
+      await Promise.all(
+        item.linkedAccounts.map((account) =>
+          updatePlaidAccountDefault(workspaceId, item.id, account.accountId, defaultBusiness)
+        )
+      )
+      setItems((prev) =>
+        prev.map((current) =>
+          current.id === item.id
+            ? {
+                ...current,
+                linkedAccounts: current.linkedAccounts.map((account) => ({ ...account, defaultBusiness })),
+              }
+            : current
+        )
+      )
+      toast({
+        title: defaultBusiness
+          ? "New transactions from this account will default to business"
+          : "New transactions from this account will default to personal",
+      })
+    } catch {
       toast({ title: "Couldn't save this account's default", variant: "destructive" })
     }
   }
@@ -369,6 +418,29 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
             <AlertDialogAction onClick={() => unlinkPromptItem && void handleUnlink(unlinkPromptItem.id)}>
               Disconnect
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={classifyPrompt != null} onOpenChange={(open) => !open && setClassifyPrompt(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Is {classifyPrompt && classifyPrompt.linkedAccounts.length === 1
+                ? classifyPrompt.linkedAccounts[0].name
+                : classifyPrompt?.institutionName ?? "this account"}{" "}
+              personal, business, or a mix?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This helps StackIn guess right from your very first transaction instead of starting
+              from scratch on every one. You can always fine-tune it later per account, or correct
+              any individual transaction when you review it.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => void handleClassifyChoice(false)}>Personal</AlertDialogAction>
+            <AlertDialogAction onClick={() => void handleClassifyChoice(true)}>Business</AlertDialogAction>
+            <AlertDialogAction onClick={() => void handleClassifyChoice(null)}>A mix of both</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
