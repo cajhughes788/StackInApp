@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit",
     "test:settings-sync": "node ./scripts/test-settings-sync.cjs",
     "test:sync": "node ./scripts/test-sync.cjs",
+    "test:signup-attribution": "node ./scripts/test-signup-attribution.cjs",
     "install:all": "npm install --workspaces",
     "verify": "npm ls zod",
     "profile:report": "node ./scripts/profile-report.mjs"

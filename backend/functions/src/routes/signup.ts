@@ -5,6 +5,7 @@ import type { Request, Response } from "express"
 import { FieldValue } from "firebase-admin/firestore"
 import { z } from "zod"
 import { auth, db } from "../admin"
+import { buildContentLogRow, parseSignupAttribution } from "../lib/signupAttribution"
 
 const CURRENT_LEGAL_CONSENT_VERSION = "2026-04-27"
 const CURRENT_TERMS_VERSION = "2026-04-27"
@@ -31,6 +32,9 @@ const SignupSchema = z.object({
   email: z.string().email(),
   phone: z.string().optional(),
   legalConsent: LegalConsentSchema,
+  // Signup attribution (utm_*, signup_platform, plan) is read straight off
+  // req.body by parseSignupAttribution() — it's best-effort, so a malformed
+  // value is dropped instead of failing validation and blocking signup.
 })
 
 // ---------------------------------------------------------------------------
@@ -82,6 +86,13 @@ export async function signupHandler(req: Request, res: Response): Promise<void> 
     const consentRef = userRef.collection("consent").doc("userAgreement")
     const now = FieldValue.serverTimestamp()
 
+    // Attribution is set once, when the user record is first created —
+    // a repeat call for an existing user (e.g. the client's retry after a
+    // commit that did land) never overwrites or re-reports it.
+    const existingUser = await userRef.get()
+    const isNewUser = !existingUser.exists
+    const attribution = parseSignupAttribution(req.body ?? {})
+
     const batch = db.batch()
 
     batch.set(
@@ -90,11 +101,23 @@ export async function signupHandler(req: Request, res: Response): Promise<void> 
         uid,
         email,
         phone: safePhone,
+        ...(isNewUser ? attribution : {}),
         updatedAt: now,
         createdAt: now,
       },
       { merge: true }
     )
+
+    if (isNewUser) {
+      // Queued for the sendContentLogSignupRow trigger, which posts it to
+      // the Content Log sheet in the background so a slow or failing
+      // webhook can never delay or fail signup. Holds only the row's
+      // non-identifying fields.
+      batch.set(db.collection("contentLogSignups").doc(uid), {
+        row: buildContentLogRow(attribution, req.body?.plan, new Date()),
+        createdAt: now,
+      })
+    }
 
     batch.set(
       consentRef,

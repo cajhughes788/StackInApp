@@ -152,6 +152,9 @@ export async function purgeUserData(uid: string): Promise<void> {
   await runLoggedStep("delete_support_reports", { uid }, () =>
     deleteSupportReports(uid)
   )
+  await runLoggedStep("delete_content_log_signup", { uid }, () =>
+    db.collection("contentLogSignups").doc(uid).delete()
+  )
 
   // Recursively delete the user's document tree so legacy or newly added
   // subcollections cannot block account removal.

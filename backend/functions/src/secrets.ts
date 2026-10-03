@@ -30,3 +30,8 @@ export const PLAID_ENV = defineSecret("PLAID_ENV")
 // Encrypts Plaid access tokens at rest in Firestore (see lib/tokenEncryption.ts) —
 // a base64-encoded 32-byte AES-256 key, generated with `openssl rand -base64 32`.
 export const PLAID_TOKEN_ENCRYPTION_KEY = defineSecret("PLAID_TOKEN_ENCRYPTION_KEY")
+
+// StackIn Content Log (Google Sheet) — shared secret the Apps Script web app
+// checks on every signup row. The webhook URL itself is a plain env var
+// (CONTENT_LOG_WEBHOOK_URL in functions/.env; see .env.example).
+export const CONTENT_LOG_SECRET = defineSecret("CONTENT_LOG_SECRET")

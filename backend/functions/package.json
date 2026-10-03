@@ -9,7 +9,8 @@
     "serve": "firebase emulators:start --only functions",
     "deploy": "npm run build && firebase deploy --only functions",
     "lint": "echo \"(lint disabled)\"",
-    "test:sync": "node ../../scripts/test-sync.cjs"
+    "test:sync": "node ../../scripts/test-sync.cjs",
+    "test:signup-attribution": "node ../../scripts/test-signup-attribution.cjs"
   },
   "engines": {
     "node": "22"
