@@ -100,10 +100,6 @@ useEffect(() => {
     try {
       setIsSubmitting(true)
       await confirmPasswordReset(auth, oobCode, newPassword)
-      toast({
-        title: "Password reset successful",
-        description: "You can now log in with your new password.",
-      })
       router.push("/login")
     } catch (err: any) {
       toast({

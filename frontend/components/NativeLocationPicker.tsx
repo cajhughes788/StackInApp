@@ -108,10 +108,6 @@ export function NativeLocationPicker({ value, onSelect, onError, onBeforePick, }
             debugLog("location-picker", "native_picker_opened", {});
             const result = await NativePlacePicker.pickPlace();
             if (!result) {
-                toast({
-                    title: "Location not changed",
-                    description: "No location was selected.",
-                });
                 return;
             }
             onSelect(result);

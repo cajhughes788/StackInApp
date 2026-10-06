@@ -70,7 +70,6 @@ export default function AttachReceiptDialog({
     expensesService
       .updateExpense(workspaceId, targetExpenseId, { receiptAssetId })
       .then(() => {
-        toast({ title: "Receipt attached" })
       })
       .catch((error) => {
         toast({

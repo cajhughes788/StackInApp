@@ -143,7 +143,6 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
     async (publicToken: string, linkMetadata: LinkMetadata) => {
       try {
         const { itemId } = await exchangePlaidPublicToken(workspaceId, publicToken, linkMetadata)
-        toast({ title: "Bank connected" })
         const fetched = await loadItems()
         // Ask business-vs-personal right now, while the user is still in the
         // "I just linked this account" mindset — this is what actually feeds
@@ -199,7 +198,6 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
         }
       } else {
         if (exitResult) {
-          toast({ title: "Bank reconnected" })
           await loadItems()
         }
         setIsConnecting(false)
@@ -286,11 +284,6 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
             : current
         )
       )
-      toast({
-        title: defaultBusiness
-          ? "New transactions from this account will default to business"
-          : "New transactions from this account will default to personal",
-      })
     } catch {
       toast({ title: "Couldn't save this account's default", variant: "destructive" })
     }
@@ -300,7 +293,6 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
     try {
       await unlinkPlaidItem(workspaceId, itemId)
       await loadItems()
-      toast({ title: "Bank disconnected" })
     } catch {
       toast({ title: "Couldn't disconnect this bank", variant: "destructive" })
     } finally {
@@ -390,7 +382,6 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
             if (webLinkMode === "connect") {
               void finishExchange(publicToken, metadata)
             } else {
-              toast({ title: "Bank reconnected" })
               setIsConnecting(false)
               setReconnectingItemId(null)
               void loadItems()

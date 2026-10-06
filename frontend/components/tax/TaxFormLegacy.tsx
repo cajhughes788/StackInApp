@@ -204,10 +204,6 @@ export default function TaxForm({ onClose }: {
         const previousTaxProfile = taxProfile;
         setTaxProfileStore(activeWorkspaceId, parsed);
         onClose?.();
-        toast({
-            title: "Tax profile updated",
-            description: "We saved your tax settings in the background.",
-        });
         void (async () => {
             try {
                 const saved = await taxProfileService.save(activeWorkspaceId, parsed);

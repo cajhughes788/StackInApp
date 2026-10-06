@@ -1285,9 +1285,6 @@ export default function TaxCardFlowForm({ onClose }: { onClose?: () => void }) {
 
   async function persistProfile(options: {
     closeOnSuccess: boolean;
-    successTitle?: string;
-    successDescription?: string;
-    showSuccessToast?: boolean;
   }): Promise<boolean> {
     if (!activeWorkspaceId) {
       toast({
@@ -1352,13 +1349,6 @@ export default function TaxCardFlowForm({ onClose }: { onClose?: () => void }) {
     setTaxProfileStore(activeWorkspaceId, parsed);
     autosaveHashRef.current = JSON.stringify(parsed);
 
-    if (options.showSuccessToast) {
-      toast({
-        title: options.successTitle ?? "Tax profile updated",
-        description: options.successDescription ?? "We saved your tax settings in the background.",
-      });
-    }
-
     if (options.closeOnSuccess) {
       onClose?.();
     }
@@ -1396,7 +1386,6 @@ export default function TaxCardFlowForm({ onClose }: { onClose?: () => void }) {
     autosaveTimerRef.current = setTimeout(() => {
       void persistProfile({
         closeOnSuccess: false,
-        showSuccessToast: false,
       });
     }, 500);
 
@@ -1413,9 +1402,6 @@ export default function TaxCardFlowForm({ onClose }: { onClose?: () => void }) {
     if (nextIndex >= steps.length) {
       await persistProfile({
         closeOnSuccess: true,
-        showSuccessToast: true,
-        successTitle: "Paycheck estimate settings saved",
-        successDescription: "Your paycheck tax setup is ready.",
       });
       return;
     }

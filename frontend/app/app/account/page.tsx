@@ -243,10 +243,6 @@ const handleLogout = async () => {
       }>(API_ENDPOINTS.user.requestDeletion, { method: "POST", body: JSON.stringify({}) })
 
       if (res.deletedImmediately) {
-        toast({
-          title: "Account Deleted",
-          description: "Your account and all data have been permanently removed.",
-        })
         await logout()
         router.push("/login")
         return
@@ -290,12 +286,6 @@ const handleLogout = async () => {
         method: "POST",
         body: JSON.stringify({}),
       })
-      toast({
-        title: "Deletion Request Removed",
-        description: isNativeApp
-          ? "Your account deletion request has been removed and your access will continue."
-          : "Your subscription and account deletion request have been restored.",
-      })
       await refreshAuthority().catch((error) => {
         debugError("account-page", "refresh_authority_after_delete_cancel_failed", {
           message: error instanceof Error ? error.message : String(error),
@@ -326,10 +316,6 @@ const handleLogout = async () => {
     }
 
     if (nextName === activeWorkspace.name) {
-      toast({
-        title: "No changes to save",
-        description: "Your workspace name is already up to date.",
-      })
       return
     }
 
@@ -338,10 +324,6 @@ const handleLogout = async () => {
       const res = await updateWorkspaceAPI(activeWorkspace.id, { name: nextName })
       updateWorkspace(activeWorkspace.id, {
         name: res.workspace?.name ?? nextName,
-      })
-      toast({
-        title: "Workspace updated",
-        description: "Your workspace name has been saved.",
       })
     } catch (err: any) {
       toast({
@@ -453,10 +435,6 @@ const handleLogout = async () => {
         remainingWorkspaceCount: remainingWorkspaces.length,
       })
 
-      toast({
-        title: "Workspace deleted",
-        description: `${deletedWorkspaceName} and its data were permanently removed.`,
-      })
       setWorkspaceDeleteNotice(`${deletedWorkspaceName} was deleted successfully.`)
 
       resetWorkspaceDeleteDialog()
