@@ -371,6 +371,19 @@ export default function SettingsPage() {
             ? ["Fix the errors in Additional Deductions before saving."]
             : [];
     }
+    function validateAdditionalRates(nextFormData: SettingsFormData): string[] {
+        const rates = nextFormData.w2?.additionalRates ?? [];
+        const defaultTitle = (nextFormData.w2?.defaultRateTitle ?? "").trim().toLowerCase() || "default";
+        const seen = new Set<string>([defaultTitle, "custom"]);
+        for (const r of rates) {
+            const title = (r.title ?? "").trim().toLowerCase();
+            if (!title || r.rate == null || Number.isNaN(r.rate) || r.rate < 0 || seen.has(title)) {
+                return ["Fix Additional Rates before saving: each needs a unique job title and a rate."];
+            }
+            seen.add(title);
+        }
+        return [];
+    }
     function validateRequiredSettings(nextFormData: SettingsFormData): string[] {
         // Only enforce W2-specific required fields during initial setup, when
         // the user is actively filling in the W2 section. After setup, autosave
@@ -405,6 +418,7 @@ export default function SettingsPage() {
     function getSettingsValidationErrors(nextFormData: SettingsFormData): string[] {
         return [
             ...validateCustomDeductions(nextFormData),
+            ...validateAdditionalRates(nextFormData),
             ...validateRequiredSettings(nextFormData),
         ];
     }

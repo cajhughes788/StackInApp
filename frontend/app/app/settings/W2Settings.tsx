@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, } from "
 import { Switch } from "@/components/ui/switch";
 import { Info } from "lucide-react";
 import NextDynamic from "next/dynamic";
+import { v4 as uuid } from "uuid";
 import { useTaxProfileStore } from "@/lib/stores/useTaxProfileStore";
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore";
 const TaxForm = NextDynamic(() => import("@/components/tax/TaxForm"), {
@@ -23,6 +24,7 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
 }) {
     const [local, setLocal] = useState<Partial<W2SettingsType>>(data ?? {});
     const [editingRow, setEditingRow] = useState<number | null>(null);
+    const [editingRateId, setEditingRateId] = useState<string | null>(null);
     const [showTaxForm, setShowTaxForm] = useState(false);
     const [isHourInputModeOpen, setIsHourInputModeOpen] = useState(false);
     const hourInputModeRef = useRef<HTMLDivElement | null>(null);
@@ -53,6 +55,9 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
     }
     function updateDeductions(list: W2SettingsType["customDeductions"], behavior: "immediate" | "deferred" = "deferred") {
         update("customDeductions", list, behavior);
+    }
+    function updateAdditionalRates(list: NonNullable<W2SettingsType["additionalRates"]>, behavior: "immediate" | "deferred" = "deferred") {
+        update("additionalRates", list, behavior);
     }
     function promptForHourInputMode() {
         if (!isInitialSetup || !local.useHours || !local.defaultHourlyRate || local.defaultHourlyRate <= 0 || local.workInputMode) {
@@ -131,6 +136,77 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
                     !local.workInputMode ? (<p className="text-sm font-medium text-emerald-700">
                     Next: choose how you want to enter your hours below.
                   </p>) : null}
+                <div className="space-y-1 pt-1">
+                  <Label htmlFor="defaultRateTitle" className="text-sm font-normal text-muted-foreground">
+                    Default rate title
+                  </Label>
+                  <Input id="defaultRateTitle" placeholder="Default" maxLength={60} value={local.defaultRateTitle ?? ""} onChange={(e) => {
+                const raw = e.target.value;
+                update("defaultRateTitle", raw.trim() === "" ? undefined : raw, "deferred");
+            }}/>
+                </div>
+              </div>
+
+              {/* Additional Rates */}
+              <div className="space-y-3">
+                <Label>Additional Rates</Label>
+                <p className="text-xs text-muted-foreground">
+                  Add other positions you work (like bartender or trainer). New
+                  entries use your default rate, and you can pick one of these
+                  from a dropdown when adding an entry.
+                </p>
+
+                {(local.additionalRates ?? []).map((r) => {
+                const isEditing = editingRateId === r.id;
+                const list = local.additionalRates ?? [];
+                if (!isEditing) {
+                    return (<div key={r.id} className="flex items-center justify-between rounded-md border bg-secondary/70 px-4 py-3">
+                        <div className="flex min-w-0 items-center space-x-3">
+                          <Label className="truncate">{r.title}</Label>
+                          <span className="text-sm text-muted-foreground">
+                            ${r.rate.toFixed(2)}/hr
+                          </span>
+                        </div>
+
+                        <div className="flex items-center space-x-2">
+                          <Button size="sm" variant="outline" onClick={() => setEditingRateId(r.id)}>
+                            Edit
+                          </Button>
+                          <Button size="sm" variant="destructive" onClick={() => updateAdditionalRates(list.filter((x) => x.id !== r.id), "immediate")}>
+                            Remove
+                          </Button>
+                        </div>
+                      </div>);
+                }
+                const patchRate = (next: Partial<typeof r>) => updateAdditionalRates(list.map((x) => x.id === r.id ? { ...x, ...next } : x), "deferred");
+                return (<Card key={r.id} className="p-4 space-y-3">
+                      <Input placeholder="Job title (e.g. Bartender)" maxLength={60} value={r.title} onChange={(e) => patchRate({ title: e.target.value })}/>
+                      <Input placeholder="Hourly rate ($)" type="number" step="0.01" min="0" value={r.rate === 0 ? "" : r.rate} onChange={(e) => patchRate({ rate: e.target.value === "" ? 0 : Number(e.target.value) })}/>
+
+                      <div className="flex justify-end space-x-2">
+                        <Button variant="secondary" onClick={() => {
+                        if (r.title.trim() === "" && r.rate === 0) {
+                            updateAdditionalRates(list.filter((x) => x.id !== r.id), "immediate");
+                        }
+                        setEditingRateId(null);
+                    }}>
+                          Cancel
+                        </Button>
+
+                        <Button onClick={() => setEditingRateId(null)}>
+                          Save
+                        </Button>
+                      </div>
+                    </Card>);
+            })}
+
+                <Button type="button" variant="outline" onClick={() => {
+                const id = uuid();
+                updateAdditionalRates([...(local.additionalRates ?? []), { id, title: "", rate: 0 }], "immediate");
+                setEditingRateId(id);
+            }}>
+                  + Add Rate
+                </Button>
               </div>
 
               {/* Hour Input Mode */}

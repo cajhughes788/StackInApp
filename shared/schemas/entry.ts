@@ -70,6 +70,11 @@ const all = z.object({
 const W2Entry = z.object({
   hours: z.coerce.number().nullable().optional(),
   rate: z.coerce.number().nullable().optional(),
+  // Which settings rate this entry used: absent/null = default rate,
+  // "custom" = rate typed or edited by hand, otherwise an additionalRates id.
+  // positionTitle is a snapshot so renames/deletes don't touch history.
+  positionId: z.string().nullable().optional(),
+  positionTitle: z.string().nullable().optional(),
 
   tips: z.coerce.number().default(0),
   reportedCash: z.coerce.number().default(0),

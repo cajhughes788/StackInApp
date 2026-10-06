@@ -28,6 +28,8 @@ import StackInHeader from "@/components/stackin-header";
 import YearlyEarningsGaugeCard from "@/components/yearly-earnings-gauge-card";
 import HoursWorkedCard from "@/components/hours-worked-card";
 import HoursGoalCard from "@/components/hours-goal-card";
+import EarningsPositionBreakdown, { buildPositionBreakdown } from "@/components/earnings-position-breakdown";
+import { getEntryPositionTitle } from "@shared/hourlyRates";
 import { useRouteScrollReset } from "@/hooks/useRouteScrollReset";
 // Simple pure-React dropdown replacement
 function SimpleMenu({ onPrint, onDownload, onShare }: {
@@ -240,6 +242,8 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
         return Math.max(getRowGross(row) - getRowTips(row) - getRowReportedCash(row), 0);
     }
 
+    const positionCalc = { paidHours: getRowPaidHours, hourlyPay: getRowHourlyGross };
+
     function getSocialSecurityDeduction(breakdown: Record<string, any>) {
         if (breakdown.socialSecurity != null) {
             return Number(breakdown.socialSecurity);
@@ -315,8 +319,10 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
             ["Other", breakdown.other ?? 0],
         ].filter(([, amount]) => Number(amount) > 0);
 
-        const csvRows = [
-            ["Section", "Date", "Label", "Amount", "Hours", "Rate"],
+        // "Position" is appended last so existing column positions stay put
+        // for anyone with formulas/imports built on the old layout.
+        const csvRows: (string | number)[][] = [
+            ["Section", "Date", "Label", "Amount", "Hours", "Rate", "Position"],
             ["Summary", "", "Gross Income", Number(stub.grossIncome), "", ""],
             ["Summary", "", "Net Income", Number(stub.netIncome), "", ""],
             ...(stub.totalUnreported !== undefined
@@ -329,6 +335,18 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
                 getRowGross(row),
                 getRowPaidHours(row),
                 getRowRate(row) ?? "",
+                getRowRate(row) != null ? getEntryPositionTitle(row.w2, settings) : "",
+            ]),
+            // Hourly pay per position/rate, same math as the rest of
+            // earnings; tips and cash stay in Entry Details.
+            ...buildPositionBreakdown(rows, settings, positionCalc).map((line) => [
+                "Hourly by Position",
+                "",
+                line.title,
+                Math.round(line.pay * 100) / 100,
+                Math.round(line.hours * 100) / 100,
+                line.rate,
+                line.title,
             ]),
             ...rows.map((row) => ["Entry Details", row.date ?? "", "Tips", getRowTips(row), "", ""]),
             ...rows
@@ -341,7 +359,7 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
         ];
 
         return csvRows
-            .map((row) => row.map(escapeCsvField).join(","))
+            .map((row) => [...row, ...Array(7 - row.length).fill("")].map(escapeCsvField).join(","))
             .join("\n");
     }
     const yearlyGaugeSummary = useMemo(() => {
@@ -651,6 +669,8 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
             acc.reported += getRowReportedCash(r);
             return acc;
         }, { tips: 0, paidHours: 0, gross: 0, unreported: 0, reported: 0 });
+        const positionLines = buildPositionBreakdown(rows, settings, positionCalc);
+        const showPositions = positionLines.length > 1;
         const hasReportedCash = rows.some((r) => getRowReportedCash(r) > 0);
         const hasUnreportedCash = rows.some((r) => getRowUnreportedCash(r) > 0);
         const breakdown = (selected.breakdown ?? selected) as Record<string, any>;
@@ -775,6 +795,8 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
               </div>
             </div>
 
+            <EarningsPositionBreakdown lines={positionLines}/>
+
             <section className="rounded-[1.75rem] border border-slate-200 bg-slate-50/70 p-4 md:p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -801,6 +823,7 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
                     const detailRows = [
                         ...(tips > 0 ? [{ label: "Tips", value: formatCurrency(tips) }] : []),
                         ...(paidHours > 0 ? [{ label: "Paid Hours", value: paidHours.toFixed(2) }] : []),
+                        ...(showPositions && rate != null ? [{ label: "Position", value: getEntryPositionTitle(row.w2, settings) }] : []),
                         ...(rate != null ? [{ label: "Hourly Rate", value: formatCurrency(rate) }] : []),
                         ...(reportedCash > 0 ? [{ label: "Reported Cash", value: formatCurrency(reportedCash) }] : []),
                         ...(unreportedCash > 0 ? [{ label: "Personal Cash", value: formatCurrency(unreportedCash), subtle: true }] : []),

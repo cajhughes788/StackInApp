@@ -34,6 +34,7 @@ import { SettingsDocSchema } from "@shared/schemas/settings";
 import { debugLog, debugRender } from "@/lib/debugLoop";
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore";
 import { useSelectedPeriod } from "@/lib/stores/usePeriodSelectionStore";
+import { CUSTOM_POSITION_ID, CUSTOM_POSITION_TITLE, getRateOptions } from "@shared/hourlyRates";
 function enforceHHMM(raw: string): string {
     const digits = raw.replace(/\D/g, "");
     if (digits.length === 1)
@@ -75,6 +76,21 @@ function writeStoredTimePeriods(inPeriod: string, outPeriod: string) {
         // storage unavailable — non-fatal, selection just won't persist
     }
 }
+/** Rate + position for a picked position id (null = default). Hand-typed
+ * ("custom") rates are kept as-is; an id that no longer exists in settings
+ * (position deleted) falls back to the default rate. */
+function resolvePositionRate(settings: Parameters<typeof getRateOptions>[0], positionId: string | null, currentRate: string): {
+    positionId: string | null;
+    rate: string;
+} {
+    if (positionId === CUSTOM_POSITION_ID)
+        return { positionId, rate: currentRate };
+    const options = getRateOptions(settings);
+    const option = options.find((o) => o.id === positionId) ?? options[0];
+    if (option.id === null)
+        return { positionId: null, rate: settings?.w2?.defaultHourlyRate?.toString() ?? currentRate };
+    return { positionId: option.id, rate: option.rate.toString() };
+}
 const PAYMENT_REPEAT_FIELDS = ["venmo", "appleCash", "zelle", "posSales", "cashSales"] as const;
 export default function EntryForm() {
     const workspaceState = useWorkspaceStore((s) => s.state);
@@ -101,6 +117,7 @@ export default function EntryForm() {
      * intentionally won't touch the currently-loaded period's in-memory
      * list for a foreign periodId, so the visible grid/gauge silently
      * doesn't reflect it until the user actually navigates to that period. */
+    const rateOptions = useMemo(() => getRateOptions(settings), [settings]);
     const currentEntryPeriodBounds = useMemo(() => {
         if (!settings || !activeWorkspace)
             return null;
@@ -122,6 +139,8 @@ export default function EntryForm() {
         // W2 hours/manual
         hours: "",
         rate: settings?.w2?.defaultHourlyRate?.toString() ?? "",
+        // null = default rate, CUSTOM_POSITION_ID = hand-typed, else additionalRates id
+        positionId: null as string | null,
         // W2 in/out mode
         inTime: "",
         inPeriod: "AM",
@@ -172,7 +191,10 @@ export default function EntryForm() {
         });
         setForm((prev) => ({
             ...prev,
-            rate: settings.w2?.defaultHourlyRate?.toString() ?? prev.rate,
+            // Re-resolve against the (possibly edited) settings instead of
+            // always snapping back to the default: a background settings
+            // refresh must not clobber a picked position or a typed rate.
+            ...resolvePositionRate(settings, prev.positionId, prev.rate),
             breakDeduction: settings.w2?.autoBreakDeduction ?? prev.breakDeduction,
             breakMinutes: settings.w2?.breakMinutesDefault ?? prev.breakMinutes,
         }));
@@ -433,6 +455,7 @@ export default function EntryForm() {
             outTime: "",
             outPeriod: prev.outPeriod,
             rate: settings?.w2?.defaultHourlyRate?.toString() ?? "",
+            positionId: null,
             notes: "",
             appliedCustomDeductions: settings?.w2?.customDeductions
                 ? settings.w2?.customDeductions.map((d: { label: string; amount: number }) => d.label)
@@ -541,6 +564,12 @@ export default function EntryForm() {
                     appliedCustomDeductions,
                     ...(visibility.mode === "w2" && visibility.showHoursManual && { hours }),
                     ...(visibility.mode === "w2" && visibility.showRate && { rate }),
+                    ...(visibility.mode === "w2" && visibility.showRate && form.positionId && {
+                        positionId: form.positionId,
+                        positionTitle: form.positionId === CUSTOM_POSITION_ID
+                            ? CUSTOM_POSITION_TITLE
+                            : rateOptions.find((o) => o.id === form.positionId)?.title ?? CUSTOM_POSITION_TITLE,
+                    }),
                     ...(visibility.mode === "w2" && visibility.showInOutTimes && {
                         inTime: `${form.inTime} ${form.inPeriod}`,
                         outTime: `${form.outTime} ${form.outPeriod}`,
@@ -712,7 +741,7 @@ export default function EntryForm() {
             submitTraceRef.current?.mark("entry_create.complete");
             setSubmitting(false);
         }
-    }, [form, submitting, visibility, settings, activeWorkspace, activeWorkspaceId, repeatSourceField, repeatCadence, repeatEndDate, getRecurringIneligibilityReason, buildClearedFormState]);
+    }, [form, submitting, visibility, settings, activeWorkspace, activeWorkspaceId, repeatSourceField, repeatCadence, repeatEndDate, getRecurringIneligibilityReason, buildClearedFormState, rateOptions]);
     /** ------------------------------------------------
      * FORM UI
      * ------------------------------------------------ */
@@ -817,9 +846,23 @@ export default function EntryForm() {
                   </div>
                 </div>)}
 
+              {visibility.showRate && rateOptions.length > 1 && (<div>
+                  <Label htmlFor="position">Position</Label>
+                  <select id="position" value={form.positionId ?? ""} onChange={(e) => setForm({
+                        ...form,
+                        ...resolvePositionRate(settings, e.target.value === "" ? null : e.target.value, form.rate),
+                    })} className="mt-1 w-full rounded-md border border-border bg-secondary px-3 py-2 text-sm">
+                    {rateOptions.map((o) => (<option key={o.id ?? ""} value={o.id ?? ""}>
+                        {o.title} – ${o.rate.toFixed(2)}/hr
+                      </option>))}
+                    {form.positionId === CUSTOM_POSITION_ID && (<option value={CUSTOM_POSITION_ID}>{CUSTOM_POSITION_TITLE}</option>)}
+                  </select>
+                </div>)}
+
               {visibility.showRate && (<div>
                   <Label htmlFor="rate">Hourly Rate</Label>
-                  <Input id="rate" type="number" step="0.01" value={form.rate} onChange={(e) => setForm({ ...form, rate: e.target.value })} required/>
+                  {/* Typing a rate by hand marks the entry Custom */}
+                  <Input id="rate" type="number" step="0.01" value={form.rate} onChange={(e) => setForm({ ...form, rate: e.target.value, positionId: CUSTOM_POSITION_ID })} required/>
                 </div>)}
             </>)}
 

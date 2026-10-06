@@ -21,6 +21,7 @@ import {
 } from "@/lib/stores/useSettingsStore";
 import * as entriesService from "@/lib/domain/entriesService";
 import { computeIncomeGaugeForEntry } from "@shared/computeIncomeGauge";
+import { CUSTOM_POSITION_ID, CUSTOM_POSITION_TITLE } from "@shared/hourlyRates";
 import { debugRender } from "@/lib/debugLoop";
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore";
 import { aggregateIncomeBreakdowns, getIncomeBreakdownTotalForPaymentMethod, getIncomeBreakdownTotalForPaymentMethodAndCategory, getIndependentCashSalesTotal, } from "@shared/independentIncome";
@@ -383,8 +384,15 @@ export default function EntriesGrid() {
             try {
                 if (field.includes(".")) {
                     const [root, key] = field.split(".");
+                    // A hand-edited rate no longer matches the position it was
+                    // entered under, so the entry becomes Custom.
+                    const rateChanged = field === "w2.rate" &&
+                        Number(parsed.data) !== Number(entryRef.current.w2?.rate ?? NaN);
                     await entriesService.updateEntry(activeWorkspaceId, entryRef.current.id, {
-                        [root]: { [key]: parsed.data },
+                        [root]: {
+                            [key]: parsed.data,
+                            ...(rateChanged && { positionId: CUSTOM_POSITION_ID, positionTitle: CUSTOM_POSITION_TITLE }),
+                        },
                     });
                 } else {
                     await entriesService.updateEntry(activeWorkspaceId, entryRef.current.id, {

@@ -70,6 +70,22 @@ export const W2Settings = z.object({
   // These are optional user preferences
   useHours: z.boolean().optional(),
   defaultHourlyRate: z.number().optional(),
+  // Display name for the default rate in the entry form's position picker;
+  // absent/blank renders as "Default".
+  defaultRateTitle: z.string().max(60).optional(),
+  // Extra job positions selectable per entry. `id` is the stable identity
+  // (titles can be renamed or repeat); entries snapshot title + rate, so
+  // editing or deleting a position never rewrites past entries.
+  additionalRates: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        title: z.string().max(60),
+        rate: z.number().min(0),
+      })
+    )
+    .max(20)
+    .optional(),
   autoBreakDeduction: z.boolean().optional(),
   breakMinutesDefault: z.number().optional(),
 
