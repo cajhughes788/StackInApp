@@ -100,8 +100,9 @@ export async function getPayStubsHandler(req: Request, res: Response): Promise<v
                 periodEnd: stub.periodEnd,
             })),
         }));
-        // modest client-side caching; safe because pay stubs are user-private
-        res.setHeader("Cache-Control", "private, max-age=60");
+        // No HTTP caching: stubs are regenerated on every entry write, and the
+        // client manages its own freshness (payStubsService TTL + invalidate).
+        res.setHeader("Cache-Control", "private, no-store");
         res.status(200).json({
             ok: true,
             paystubs,

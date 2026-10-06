@@ -38,8 +38,8 @@ export async function deleteEntryHandler(req: Request, res: Response): Promise<v
         }
         const { workspaceId, entryId } = parsedParams.data;
         // Perform deletion via service
-        await entriesSvc.deleteEntry(workspaceId, uid, entryId);
-        res.status(200).json({ ok: true, entryId });
+        const result = await entriesSvc.deleteEntry(workspaceId, uid, entryId);
+        res.status(200).json({ ok: true, entryId, payStubs: result.payStubs });
     }
     catch (err: any) {
         sendHttpError(res, err, "deleteEntry");

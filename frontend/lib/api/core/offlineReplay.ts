@@ -22,6 +22,7 @@ import { toast } from "@/hooks/use-toast";
 import { deleteEntry as deleteEntryApi } from "@/lib/api/entriesApi";
 import * as entryDeletionGuards from "@/lib/storage/entryDeletionGuards";
 import * as taxProfileService from "@/lib/domain/taxProfileService";
+import { syncPayStubsFromMutation } from "@/lib/domain/payStubsMutationSync";
 let replayInFlight: Promise<void> | null = null;
 export async function replayPending() {
     if (replayInFlight)
@@ -338,6 +339,9 @@ async function reconcileSuccessfulReplay(op: offlineQueue.OfflineMutation, domai
     if (!workspaceId) {
         return;
     }
+    // Replayed writes regenerate stubs server-side just like live ones; apply
+    // them so earnings reflect entries saved while offline.
+    syncPayStubsFromMutation(workspaceId, response?.payStubs, response?.entry?.workspace === "w2");
     if (op.method === "DELETE") {
         await entryDeletionGuards.clearDeletedEntryGuard(workspaceId, {
             id: op.id,
@@ -357,6 +361,7 @@ async function reconcileSuccessfulReplay(op: offlineQueue.OfflineMutation, domai
         try {
             const deleteResponse = await deleteEntryApi(workspaceId, canonical.id);
             if (deleteResponse.ok) {
+                syncPayStubsFromMutation(workspaceId, deleteResponse.payStubs, canonical.workspace === "w2");
                 await entryDeletionGuards.clearDeletedEntryGuard(workspaceId, canonical);
             }
         }

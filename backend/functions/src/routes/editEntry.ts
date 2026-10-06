@@ -47,6 +47,7 @@ export async function editEntryHandler(req: Request, res: Response): Promise<voi
             ok: true,
             id: result.id,
             entry: result.entry,
+            payStubs: result.payStubs,
         });
         return;
     }

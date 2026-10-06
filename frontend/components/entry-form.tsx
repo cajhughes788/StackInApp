@@ -178,18 +178,15 @@ export default function EntryForm() {
         }));
     }, [settings]);
     /** restore last-used AM/PM selections after mount (not in the useState
-     * initializer, so the prerendered markup and first client render match) */
-    const timePeriodsHydratedRef = useRef(false);
+     * initializer, so the prerendered markup and first client render match).
+     * Saving happens only in the selects' onChange — an effect keyed on the
+     * form values would fire on the first commit with the AM/PM defaults
+     * and overwrite the stored choice before this restore lands. */
     useEffect(() => {
         const stored = readStoredTimePeriods();
-        timePeriodsHydratedRef.current = true;
         if (stored.inPeriod || stored.outPeriod)
             setForm((prev) => ({ ...prev, ...stored }));
     }, []);
-    useEffect(() => {
-        if (timePeriodsHydratedRef.current)
-            writeStoredTimePeriods(form.inPeriod, form.outPeriod);
-    }, [form.inPeriod, form.outPeriod]);
     /** keep the entry date inside the viewed (possibly past) period's bounds.
      * selectedPeriod is null when the period selector is back on "current" —
      * that's not "no period", it means today's period, so the date should
@@ -795,7 +792,10 @@ export default function EntryForm() {
                             ...form,
                             inTime: enforceHHMM(e.target.value),
                         })} className="w-24 text-center" required/>
-                      <select value={form.inPeriod} onChange={(e) => setForm({ ...form, inPeriod: e.target.value })} className="ml-2 rounded border border-border bg-secondary px-2 py-1">
+                      <select value={form.inPeriod} onChange={(e) => {
+                            setForm({ ...form, inPeriod: e.target.value });
+                            writeStoredTimePeriods(e.target.value, form.outPeriod);
+                        }} className="ml-2 rounded border border-border bg-secondary px-2 py-1">
                         <option>AM</option>
                         <option>PM</option>
                       </select>
@@ -806,7 +806,10 @@ export default function EntryForm() {
                             ...form,
                             outTime: enforceHHMM(e.target.value),
                         })} className="w-24 text-center" required/>
-                      <select value={form.outPeriod} onChange={(e) => setForm({ ...form, outPeriod: e.target.value })} className="ml-2 rounded border border-border bg-secondary px-2 py-1">
+                      <select value={form.outPeriod} onChange={(e) => {
+                            setForm({ ...form, outPeriod: e.target.value });
+                            writeStoredTimePeriods(form.inPeriod, e.target.value);
+                        }} className="ml-2 rounded border border-border bg-secondary px-2 py-1">
                         <option>AM</option>
                         <option>PM</option>
                       </select>

@@ -12,7 +12,10 @@ export async function getPayStubs(workspaceId: string): Promise<PayStub.Type[]> 
   })
   const data = await apiFetch<PayStubsResponse>(
     `${API_ENDPOINTS.paystubs.get}?workspaceId=${encodeURIComponent(workspaceId)}`,
-    { method: "GET" }
+    // Bypass the HTTP cache: a stub can change seconds after the last fetch
+    // (every entry write regenerates it server-side), and a cached response
+    // would get re-stamped as a fresh sync by payStubsService.
+    { method: "GET", cache: "no-store" }
   )
   debugLog("paystubs-api", "get_paystubs_success", {
     workspaceId,

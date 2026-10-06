@@ -36,13 +36,15 @@ export async function createEntryHandler(req: Request, res: Response): Promise<v
             return;
         }
         const { workspaceId } = parsedQuery.data;
-        const { id, entry: canonical } = await withBackendProfileStep(trace, "entry_create.service_create", () => entriesSvc.createEntry(workspaceId, uid, req.body, trace), {
+        const { id, entry: canonical, payStubs } = await withBackendProfileStep(trace, "entry_create.service_create", () => entriesSvc.createEntry(workspaceId, uid, req.body, trace), {
             workspaceId,
         });
         res.status(201).json({
             ok: true,
             id,
             entry: canonical,
+            // Regenerated stubs for W2 entries (null = sync failed, client refetches)
+            payStubs,
         });
         trace.mark("entry_create.response_sent", {
             workspaceId,

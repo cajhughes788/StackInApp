@@ -31,6 +31,7 @@ import { toast } from "@/hooks/use-toast";
 import { useEntriesStore } from "@/lib/stores/useEntriesStore";
 import * as profitLossService from "@/lib/domain/profitLossService";
 import * as payStubsService from "@/lib/domain/payStubsService";
+import { syncPayStubsFromMutation } from "@/lib/domain/payStubsMutationSync";
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore";
 import { syncWorkspaceGeofenceEntryStatus } from "@/lib/mobile/geofenceReminderSync";
 import { syncWorkspaceTimeEntryReminderForDate } from "@/lib/mobile/timeEntryReminderSync";
@@ -302,6 +303,7 @@ async function reconcileOptimisticEntry(workspaceId: string, settings: SettingsT
                 const deleteResponse = await deleteEntry(workspaceId, canonical.id);
                 if (deleteResponse.ok) {
                     void useEntriesStore.getState().refreshFromBackend(workspaceId, optimistic.periodId, { force: true });
+                    syncPayStubsFromMutation(workspaceId, deleteResponse.payStubs, canonical.workspace === "w2");
                 }
             }
             catch (error) {
@@ -342,7 +344,7 @@ async function reconcileOptimisticEntry(workspaceId: string, settings: SettingsT
             invalidateProfitLossView(workspaceId);
         }
         else if (canonical.workspace === "w2") {
-            invalidatePayStubsView(workspaceId);
+            syncPayStubsFromMutation(workspaceId, res.payStubs, true);
         }
         const postWriteEntries =
             useEntriesStore.getState().byWorkspaceId[workspaceId]?.entries ?? [];
@@ -439,7 +441,7 @@ async function reconcileOptimisticEntryUpdate(
         invalidateProfitLossView(workspaceId);
     }
     else if (canonical.workspace === "w2") {
-        invalidatePayStubsView(workspaceId);
+        syncPayStubsFromMutation(workspaceId, res.payStubs, true);
     }
     const postWriteEntries =
         useEntriesStore.getState().byWorkspaceId[workspaceId]?.entries ?? [];
@@ -915,7 +917,7 @@ export async function removeEntry(workspaceId: string, entryId: string): Promise
             invalidateProfitLossView(workspaceId);
         }
         else if (removedEntry.workspace === "w2") {
-            invalidatePayStubsView(workspaceId);
+            syncPayStubsFromMutation(workspaceId, res.payStubs, true);
         }
         void useEntriesStore.getState().refreshFromBackend(workspaceId, visiblePeriodId, { force: true });
     }

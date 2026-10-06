@@ -8,6 +8,9 @@ export type CanonicalEntryResponse = {
   id: string
   entry: EntryType
   error?: string
+  /** W2 only: stubs the backend regenerated for this write (unvalidated —
+   * see syncPayStubsFromMutation). null/absent means refetch instead. */
+  payStubs?: unknown
 }
 
 type EntriesResponse = { entries: EntryType[] }
@@ -41,6 +44,7 @@ export async function postEntry(
     ok: true,
     id: (res as any).id,
     entry: (res as any).entry,
+    payStubs: (res as any).payStubs,
   }
 }
 
@@ -59,6 +63,7 @@ export async function editEntry(
     ok: true,
     id: (res as any).id,
     entry: (res as any).entry,
+    payStubs: (res as any).payStubs,
   }
 }
 
@@ -82,7 +87,7 @@ export async function getEntriesForPeriod(
 export async function deleteEntry(
   workspaceId: string,
   entryId: string
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; payStubs?: unknown }> {
   const res = (await tryWrite(
     `${API_ENDPOINTS.entries.delete}?workspaceId=${encodeURIComponent(workspaceId)}&entryId=${encodeURIComponent(entryId)}`,
     "DELETE",
@@ -92,5 +97,6 @@ export async function deleteEntry(
   return {
     ok: res?.ok ?? true,
     error: res?.error,
+    payStubs: res?.payStubs,
   }
 }

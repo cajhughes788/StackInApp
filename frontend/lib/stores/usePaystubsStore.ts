@@ -41,6 +41,7 @@ type PayStubsStoreState = {
     opts?: { force?: boolean }
   ) => Promise<void>;
   setPayStubs: (workspaceId: WorkspaceId, list: PayStub.Type[]) => void;
+  applyServerPayStubs: (workspaceId: WorkspaceId, stubs: PayStub.Type[]) => Promise<void>;
   clear: (workspaceId?: WorkspaceId) => Promise<void>;
 };
 
@@ -243,9 +244,21 @@ export const usePayStubsStore = create<PayStubsStoreState>((set, get) => ({
 
       set((state) => {
         const currentEntry = getWorkspaceEntry(state.byWorkspaceId, workspaceId);
+        // A stub applied from an entry-mutation response while this fetch
+        // was in flight is newer than what the fetch returned — keep it.
+        const reconciled = payStubsService.reconcileFetchedPayStubs(
+          fresh.data,
+          currentEntry.payStubs
+        );
+        if (reconciled !== fresh.data) {
+          payStubsService.prime(workspaceId, reconciled, {
+            lastSuccessfulSyncAt: fresh.lastSuccessfulSyncAt,
+            localUpdatedAt: fresh.localUpdatedAt,
+          });
+        }
         const nextPayStubs = preserveStableReference(
           currentEntry.payStubs,
-          fresh.data
+          reconciled
         );
         const resolvedSource =
           fresh.didFetch || !preserveCachedView
@@ -333,6 +346,46 @@ export const usePayStubsStore = create<PayStubsStoreState>((set, get) => ({
                   localUpdatedAt: primed.localUpdatedAt,
                 })
             ),
+          },
+        },
+      };
+    });
+  },
+
+  /**
+   * Merges stubs the backend regenerated and returned from an entry
+   * create/edit/delete. These are authoritative for their periods and the
+   * rest of the list is unaffected by that write, so the existing sync
+   * timestamp is kept (no refetch needed or forced).
+   */
+  async applyServerPayStubs(workspaceId, stubs) {
+    if (stubs.length === 0) return;
+    const current = getWorkspaceEntry(get().byWorkspaceId, workspaceId);
+    if (!current.hasHydrated && current.payStubs.length === 0) {
+      // Not loaded this session — patch the cache the next load reads from.
+      await payStubsService.mergeIntoCache(workspaceId, stubs);
+      return;
+    }
+    const merged = payStubsService.mergePayStubs(current.payStubs, stubs);
+    const localUpdatedAt = Date.now();
+    payStubsService.prime(workspaceId, merged, {
+      lastSuccessfulSyncAt: current.lastSuccessfulSyncAt,
+      localUpdatedAt,
+    });
+    debugLog("paystubs-store", "apply_server_paystubs", {
+      workspaceId,
+      periodIds: stubs.map((stub) => stub.periodId),
+    });
+    set((state) => {
+      const currentEntry = getWorkspaceEntry(state.byWorkspaceId, workspaceId);
+      return {
+        byWorkspaceId: {
+          ...state.byWorkspaceId,
+          [workspaceId]: {
+            ...currentEntry,
+            payStubs: preserveStableReference(currentEntry.payStubs, merged),
+            status: "ready",
+            localUpdatedAt,
           },
         },
       };

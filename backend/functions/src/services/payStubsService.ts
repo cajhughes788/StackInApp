@@ -289,6 +289,13 @@ function buildPayStubDocument(params: {
     } as any);
     return stub;
 }
+/** Same shape getPayStubs returns, so clients can merge either source. */
+function parsePayStubDoc(doc: FirebaseFirestore.DocumentSnapshot): PayStub.Type | null {
+    if (!doc.exists)
+        return null;
+    const parsed = PayStub.Schema.safeParse({ id: doc.id, ...doc.data() });
+    return parsed.success ? parsed.data : null;
+}
 function isStubStale(existing: any, entries: EntryType[]) {
     const latestSourceUpdatedAt = entries.reduce<string | null>((latest, entry) => maxIso(latest, getEntryUpdatedAt(entry)), null);
     return (existing?.sourceUpdatedThrough ?? null) !== latestSourceUpdatedAt;
@@ -322,13 +329,7 @@ export async function listPayStubs(workspaceId: string, uid: string, opts?: {
     }
     const snap = await q.get();
     const paystubs = snap.docs
-        .map((doc) => {
-        const parsed = PayStub.Schema.safeParse({ id: doc.id, ...doc.data() });
-        if (!parsed.success) {
-            return null;
-        }
-        return parsed.data;
-    })
+        .map(parsePayStubDoc)
         .filter((item): item is PayStub.Type => item !== null)
         .filter((item) => isEligiblePayStubPeriod(item.periodEnd, earliestEligiblePeriodEnd));
     console.log("[payStubsService.listPayStubs] result", JSON.stringify({
@@ -440,10 +441,16 @@ export async function generateMostRecentlyClosedPayStub(workspaceId: string, uid
         force,
     });
 }
-export async function syncPayStubForDates(workspaceId: string, uid: string, dates: Array<string | null | undefined>): Promise<void> {
+/**
+ * Regenerates the stubs covering `dates` and returns them as persisted, so
+ * entry mutation responses can hand the client the exact stubs that changed
+ * (no follow-up getPayStubs round trip). Ineligible periods are omitted,
+ * matching listPayStubs.
+ */
+export async function syncPayStubForDates(workspaceId: string, uid: string, dates: Array<string | null | undefined>): Promise<PayStub.Type[]> {
     const normalizedDates = dates.filter((date): date is string => typeof date === "string" && date.length > 0);
     if (normalizedDates.length === 0) {
-        return;
+        return [];
     }
     const settings = await getWorkspaceSettings(workspaceId);
     const targetsByPeriodId = new Map<string, { start: string; end: string; periodId: string }>();
@@ -451,12 +458,21 @@ export async function syncPayStubForDates(workspaceId: string, uid: string, date
         const period = getCurrentPayPeriodAt(settings, date);
         targetsByPeriodId.set(period.periodId, period);
     }
+    const synced: PayStub.Type[] = [];
     for (const period of targetsByPeriodId.values()) {
-        await generatePayStub(workspaceId, uid, {
+        const result = await generatePayStub(workspaceId, uid, {
             start: period.start,
             end: period.end,
             periodId: period.periodId,
             force: false,
         });
+        if ("skipped" in result && result.skipped)
+            continue;
+        // Read back rather than reuse the built object: the write merges into
+        // the existing doc, and the client needs exactly what's stored.
+        const stub = parsePayStubDoc(await db.collection(`workspaces/${workspaceId}/payStubs`).doc(period.periodId).get());
+        if (stub)
+            synced.push(stub);
     }
+    return synced;
 }

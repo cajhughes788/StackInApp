@@ -12,6 +12,7 @@ import type { BackendProfileTrace } from "../lib/profileTrace";
 import { withBackendProfileStep } from "../lib/profileTrace";
 import { syncProfitLossForFinancialDates } from "./profitLossService";
 import { syncPayStubForDates } from "./payStubsService";
+import type { PayStub } from "@shared/schemas";
 const noopTrace: BackendProfileTrace = {
     traceId: "entry-create-no-trace",
     flow: "entry_create",
@@ -36,13 +37,15 @@ async function syncIndependentProfitLossDates(workspaceId: string, dates: Array<
         });
     }
 }
-async function syncW2PayStubDates(workspaceId: string, uid: string, dates: Array<string | null | undefined>) {
+/** Returns the regenerated stubs for the mutation response, or null when the
+ * sync failed — the client then falls back to refetching the full list. */
+async function syncW2PayStubDates(workspaceId: string, uid: string, dates: Array<string | null | undefined>): Promise<PayStub.Type[] | null> {
     const normalizedDates = dates.filter((date): date is string => typeof date === "string" && date.length > 0);
     if (normalizedDates.length === 0) {
-        return;
+        return [];
     }
     try {
-        await syncPayStubForDates(workspaceId, uid, normalizedDates);
+        return await syncPayStubForDates(workspaceId, uid, normalizedDates);
     }
     catch (error) {
         console.warn("pay stub sync failed after entry mutation", {
@@ -50,6 +53,7 @@ async function syncW2PayStubDates(workspaceId: string, uid: string, dates: Array
             dates: normalizedDates,
             reason: error instanceof Error ? error.message : String(error),
         });
+        return null;
     }
 }
 async function assertWorkspaceMembership(workspaceId: string, uid: string): Promise<void> {
@@ -243,16 +247,18 @@ export async function createEntry(workspaceId: string, uid: string, input: unkno
         }
         throw err;
     }
+    let payStubs: PayStub.Type[] | null | undefined;
     if (canonical.workspace === "independent") {
         await syncIndependentProfitLossDates(workspaceId, [canonical.date]);
     }
     else if (canonical.workspace === "w2") {
-        await syncW2PayStubDates(workspaceId, uid, [canonical.date]);
+        payStubs = await syncW2PayStubDates(workspaceId, uid, [canonical.date]);
     }
     return {
         ok: true,
         id: docRef.id,
         entry: canonical,
+        payStubs,
     };
 }
 export async function updateEntry(workspaceId: string, uid: string, entryId: string, patch: unknown) {
@@ -350,11 +356,12 @@ export async function updateEntry(workspaceId: string, uid: string, entryId: str
     if (!updatedEntry) {
         throw new Error("Entry update failed");
     }
+    let payStubs: PayStub.Type[] | null | undefined;
     if (priorEntry?.workspace === "independent" || updatedEntry.workspace === "independent") {
         await syncIndependentProfitLossDates(workspaceId, [priorEntry?.date, updatedEntry.date]);
     }
     else if (priorEntry?.workspace === "w2" || updatedEntry.workspace === "w2") {
-        await syncW2PayStubDates(workspaceId, uid, [priorEntry?.date, updatedEntry.date]);
+        payStubs = await syncW2PayStubDates(workspaceId, uid, [priorEntry?.date, updatedEntry.date]);
     }
     // ---------------------------
     // 7. Return canonical entry
@@ -363,6 +370,7 @@ export async function updateEntry(workspaceId: string, uid: string, entryId: str
         ok: true,
         id: entryId,
         entry: updatedEntry,
+        payStubs,
     };
 }
 /**
@@ -397,15 +405,17 @@ export async function deleteEntry(workspaceId: string, uid: string, entryId: str
         });
     });
     const removedEntry = deletedEntry as EntryType | null;
+    let payStubs: PayStub.Type[] | null | undefined;
     if (removedEntry?.workspace === "independent") {
         await syncIndependentProfitLossDates(workspaceId, [removedEntry.date]);
     }
     else if (removedEntry?.workspace === "w2") {
-        await syncW2PayStubDates(workspaceId, uid, [removedEntry.date]);
+        payStubs = await syncW2PayStubDates(workspaceId, uid, [removedEntry.date]);
     }
     return {
         ok: true,
         id: entryId,
         deleted,
+        payStubs,
     };
 }
