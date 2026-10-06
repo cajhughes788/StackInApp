@@ -5,13 +5,17 @@
  * cash, with an unpaid break subtracted later as a deduction. v2 stores
  * totals.hourlyPay = paid hours × rate and a dayTotal that already excludes
  * the break. This script:
- *   1. Upgrades every v1 W-2 entry's stored totals to v2. Hours are taken
- *      from the entry's own stored totals.paidHours — never re-derived from
- *      today's settings — so nothing but the break treatment changes.
- *      Entries without a break keep identical dollar amounts.
- *   2. Force-rebuilds the pay stubs of every workspace whose gross changed,
- *      from the earliest affected period onward in date order (YTD totals
- *      carry from one stub to the next).
+ *   1. Upgrades every v1 W-2 entry's stored totals to v2 by transforming
+ *      its own stored figures — never re-deriving hours or rates from
+ *      today's settings, and never re-rounding:
+ *        dayTotal  = old dayTotal − old breakDeductionAmount
+ *        hourlyPay = dayTotal − tips − reported cash
+ *      so only the break treatment changes. Entries without a break keep
+ *      byte-identical dollar amounts (no penny drift from re-rounding).
+ *   2. Force-rebuilds only the pay stubs whose periods contain an entry
+ *      whose gross changed, then re-chains ytdTotals on later stubs (YTD
+ *      carries from one stub to the next). Later stubs are NOT fully
+ *      rebuilt, so their tax estimates are left exactly as they were.
  *
  * Safety: each upgrade is checked against the v1 numbers it replaces
  * (new dayTotal must equal old dayTotal − break; the home "Day Total"
@@ -61,16 +65,19 @@ function planEntryUpgrade(doc: FirebaseFirestore.QueryDocumentSnapshot): Upgrade
     const reportedCash = num(e.w2?.reportedCash);
     const custom = num(t.customDeductionsAmount);
     const breakAmount = num(t.breakDeductionAmount);
+    const oldDayTotal = num(t.dayTotal);
 
-    const hourlyPay = round2(paidHours * rate);
-    const dayTotal = round2(hourlyPay + tips + reportedCash);
-    const taxableTotal = round2(Math.max(dayTotal - custom, 0));
+    const dayTotal = breakAmount > 0 ? round2(oldDayTotal - breakAmount) : oldDayTotal;
+    const hourlyPay = round2(dayTotal - tips - reportedCash);
+    const taxableTotal = num(t.taxableTotal); // v1 already = gross − break − custom
 
-    const expectedDayTotal = num(t.dayTotal) - breakAmount;
-    if (Math.abs(dayTotal - expectedDayTotal) > TOLERANCE)
-        return { skip: `dayTotal check: new ${dayTotal} vs old ${num(t.dayTotal)} − break ${breakAmount}` };
-    if (Math.abs(taxableTotal - num(t.taxableTotal)) > TOLERANCE)
-        return { skip: `Day Total (taxableTotal) would change: ${num(t.taxableTotal)} → ${taxableTotal}` };
+    // Sanity checks against an independent derivation (paid hours × rate).
+    if (hourlyPay < -TOLERANCE)
+        return { skip: `negative hourly pay ${hourlyPay}` };
+    if (Math.abs(hourlyPay - paidHours * rate) > TOLERANCE)
+        return { skip: `hourly pay ${hourlyPay} ≠ paid hours ${paidHours} × rate ${rate} (${round2(paidHours * rate)})` };
+    if (Math.abs(round2(Math.max(dayTotal - custom, 0)) - taxableTotal) > TOLERANCE)
+        return { skip: `Day Total (taxableTotal) inconsistent: stored ${taxableTotal}, new gross ${dayTotal} − deductions ${custom}` };
 
     return {
         ref: doc.ref,
@@ -94,16 +101,16 @@ async function processWorkspace(workspaceId: string, execute: boolean) {
         else upgrades.push(plan);
     }
     const changed = upgrades.filter((u) => Math.abs(u.grossChange) > 0.001);
-    const earliestChangedDate = changed.map((u) => u.date).sort()[0] ?? null;
+    const changedDates = [...new Set(changed.map((u) => u.date))].sort();
 
-    // Stubs to rebuild: every stub whose period ends on/after the earliest
-    // changed entry, oldest first, so each picks up the corrected YTD chain.
-    const stubsSnap = earliestChangedDate
-        ? await db.collection(`workspaces/${workspaceId}/payStubs`).orderBy("periodStart", "asc").get()
+    // Stubs to fully rebuild: only periods containing a changed entry.
+    const stubsSnap = changedDates.length > 0
+        ? await db.collection(`workspaces/${workspaceId}/payStubs`).get()
         : null;
-    const stubsToRebuild = (stubsSnap?.docs ?? []).filter((s) => String(s.get("periodEnd") ?? "") >= earliestChangedDate!);
+    const stubsToRebuild = (stubsSnap?.docs ?? []).filter((s) => changedDates.some((d) => d >= String(s.get("periodStart")) && d <= String(s.get("periodEnd"))));
+    const stubUid = String(stubsSnap?.docs[0]?.get("uid") ?? "");
 
-    console.log(`\n[${workspaceId}] W-2 entries: ${entriesSnap.size} · to upgrade: ${upgrades.length} · gross changes (break shifts): ${changed.length} · total gross change: ${round2(changed.reduce((s, u) => s + u.grossChange, 0))} · skipped: ${skipped.length} · stubs to rebuild: ${stubsToRebuild.length}`);
+    console.log(`\n[${workspaceId}] W-2 entries: ${entriesSnap.size} · to upgrade: ${upgrades.length} · gross changes (break shifts only): ${changed.length} · total gross change: ${round2(changed.reduce((s, u) => s + u.grossChange, 0))} · skipped: ${skipped.length} · stubs to fully rebuild: ${stubsToRebuild.length} (+ YTD re-chain on later stubs)`);
     for (const line of skipped) console.log(`  SKIPPED ${line}`);
     for (const u of changed.slice(0, 20)) console.log(`  ${u.date} gross ${u.grossChange} → dayTotal ${u.totals.dayTotal}, hourlyPay ${u.totals.hourlyPay}`);
     if (changed.length > 20) console.log(`  … and ${changed.length - 20} more`);
@@ -123,20 +130,19 @@ async function processWorkspace(workspaceId: string, execute: boolean) {
         }
         await batch.commit();
     }
-    for (const stub of stubsToRebuild) {
-        const uid = String(stub.get("uid") ?? "");
-        if (!uid) {
-            console.log(`  stub ${stub.id}: no uid, not rebuilt`);
-            continue;
+    let touchedStubs = 0;
+    if (changedDates.length > 0) {
+        if (!stubUid) {
+            console.log("  no pay stubs with a uid found; stubs not rebuilt");
         }
-        await payStubsSvc.generatePayStub(workspaceId, uid, {
-            start: String(stub.get("periodStart")),
-            end: String(stub.get("periodEnd")),
-            periodId: stub.id,
-            force: true,
-        });
+        else {
+            // Rebuilds the changed periods (force: entry timestamps are
+            // untouched by this backfill) and re-chains YTD after them.
+            const synced = await payStubsSvc.syncPayStubForDates(workspaceId, stubUid, changedDates, { force: true });
+            touchedStubs = synced.length;
+        }
     }
-    console.log(`  ✓ upgraded ${upgrades.length} entries, rebuilt ${stubsToRebuild.length} stubs`);
+    console.log(`  ✓ upgraded ${upgrades.length} entries; rebuilt ${stubsToRebuild.length} stub(s), ${touchedStubs} stub(s) updated incl. YTD re-chain`);
     return { upgrades: upgrades.length, changed: changed.length, skipped: skipped.length, stubs: stubsToRebuild.length };
 }
 

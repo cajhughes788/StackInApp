@@ -496,7 +496,10 @@ async function cascadeYtdAfter(workspaceId: string, settings: SettingsType, afte
  * (no follow-up getPayStubs round trip). Ineligible periods are omitted,
  * matching listPayStubs.
  */
-export async function syncPayStubForDates(workspaceId: string, uid: string, dates: Array<string | null | undefined>): Promise<PayStub.Type[]> {
+export async function syncPayStubForDates(workspaceId: string, uid: string, dates: Array<string | null | undefined>, options: {
+    /** Rebuild target stubs even when their entries look unchanged (backfills). */
+    force?: boolean;
+} = {}): Promise<PayStub.Type[]> {
     const normalizedDates = dates.filter((date): date is string => typeof date === "string" && date.length > 0);
     if (normalizedDates.length === 0) {
         return [];
@@ -515,7 +518,7 @@ export async function syncPayStubForDates(workspaceId: string, uid: string, date
             start: period.start,
             end: period.end,
             periodId: period.periodId,
-            force: false,
+            force: options.force === true,
         });
         if ("skipped" in result && result.skipped)
             continue;
