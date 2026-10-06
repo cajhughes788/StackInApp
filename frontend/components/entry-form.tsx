@@ -46,6 +46,35 @@ function enforceHHMM(raw: string): string {
         return `${digits.slice(0, 2)}:${digits.slice(2, 4)}`;
     return "";
 }
+/** Last-used in/out AM/PM selections, remembered per device (not per
+ * workspace) so a regular PM→PM or AM→PM shift doesn't need re-selecting
+ * every time the form mounts, across app restarts and workspace switches. */
+const TIME_PERIODS_STORAGE_KEY = "trackd:entry-form:time-periods";
+type TimePeriod = "AM" | "PM";
+const isTimePeriod = (value: unknown): value is TimePeriod => value === "AM" || value === "PM";
+function readStoredTimePeriods(): { inPeriod?: TimePeriod; outPeriod?: TimePeriod } {
+    try {
+        const raw = window.localStorage.getItem(TIME_PERIODS_STORAGE_KEY);
+        if (!raw)
+            return {};
+        const parsed = JSON.parse(raw);
+        return {
+            ...(isTimePeriod(parsed?.inPeriod) && { inPeriod: parsed.inPeriod }),
+            ...(isTimePeriod(parsed?.outPeriod) && { outPeriod: parsed.outPeriod }),
+        };
+    }
+    catch {
+        return {};
+    }
+}
+function writeStoredTimePeriods(inPeriod: string, outPeriod: string) {
+    try {
+        window.localStorage.setItem(TIME_PERIODS_STORAGE_KEY, JSON.stringify({ inPeriod, outPeriod }));
+    }
+    catch {
+        // storage unavailable — non-fatal, selection just won't persist
+    }
+}
 const PAYMENT_REPEAT_FIELDS = ["venmo", "appleCash", "zelle", "posSales", "cashSales"] as const;
 export default function EntryForm() {
     const workspaceState = useWorkspaceStore((s) => s.state);
@@ -148,6 +177,19 @@ export default function EntryForm() {
             breakMinutes: settings.w2?.breakMinutesDefault ?? prev.breakMinutes,
         }));
     }, [settings]);
+    /** restore last-used AM/PM selections after mount (not in the useState
+     * initializer, so the prerendered markup and first client render match) */
+    const timePeriodsHydratedRef = useRef(false);
+    useEffect(() => {
+        const stored = readStoredTimePeriods();
+        timePeriodsHydratedRef.current = true;
+        if (stored.inPeriod || stored.outPeriod)
+            setForm((prev) => ({ ...prev, ...stored }));
+    }, []);
+    useEffect(() => {
+        if (timePeriodsHydratedRef.current)
+            writeStoredTimePeriods(form.inPeriod, form.outPeriod);
+    }, [form.inPeriod, form.outPeriod]);
     /** keep the entry date inside the viewed (possibly past) period's bounds.
      * selectedPeriod is null when the period selector is back on "current" —
      * that's not "no period", it means today's period, so the date should
