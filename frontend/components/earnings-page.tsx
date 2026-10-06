@@ -30,6 +30,7 @@ import HoursWorkedCard from "@/components/hours-worked-card";
 import HoursGoalCard from "@/components/hours-goal-card";
 import EarningsPositionBreakdown, { buildPositionBreakdown } from "@/components/earnings-position-breakdown";
 import { getEntryPositionTitle } from "@shared/hourlyRates";
+import { getEntryGross, getEntryHourlyPay } from "@shared/entryPay";
 import { useRouteScrollReset } from "@/hooks/useRouteScrollReset";
 // Simple pure-React dropdown replacement
 function SimpleMenu({ onPrint, onDownload, onShare }: {
@@ -235,11 +236,11 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
     }
 
     function getRowGross(row: Record<string, any>) {
-        return Number(row.totals?.dayTotal ?? row.dayTotal ?? 0);
+        return getEntryGross(row);
     }
 
     function getRowHourlyGross(row: Record<string, any>) {
-        return Math.max(getRowGross(row) - getRowTips(row) - getRowReportedCash(row), 0);
+        return getEntryHourlyPay(row);
     }
 
     const positionCalc = { paidHours: getRowPaidHours, hourlyPay: getRowHourlyGross };

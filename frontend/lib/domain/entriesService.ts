@@ -7,14 +7,13 @@
 // Responsibilities:
 // • Accept raw input from UI
 // • Load settings → derive periodId
-// • Run optimistic computeWorkTime + computeTotals (MUST MATCH BACKEND)
+// • Run optimistic computeEntry — shared with the backend, so totals match
 // • Insert optimistic entry into period-scoped cache (domainEntries)
 // • If offline → enqueue mutation (offlineQueue)
 // • If online  → send rawInput + clientMutationId → backend
 // • On backend response → replace optimistic with canonical
 //
 // ------------------------------------------------------------
-import { computeWorkTime } from "@shared/computeWorkTime";
 import { computeEntry } from "@shared/computeEntry";
 import * as domainEntries from "@/lib/storage/domainEntries";
 import * as offlineQueue from "@/lib/storage/offlineQueue";
@@ -171,38 +170,12 @@ function invalidateProfitLossView(workspaceId: string) {
 function invalidatePayStubsView(workspaceId: string) {
     void payStubsService.invalidate(workspaceId).catch(() => {});
 }
-// CHANGE: Replaced flat-field optimistic computation with workspace-aware, nested-schema-compatible logic.
-// - Workspace type is derived from authoritative settings (not raw input)
-// - Computes totalHours from raw.w2 clock or manual hours
-// - Delegates totals to computeEntry(raw, settings) using the full entry object
-// - Returns totals inside a totals block to match entry.totals shape
+// Optimistic totals come straight from computeEntry — the same shared code
+// the backend runs for the canonical entry. (A separate clocked-hours
+// override used to live here; it duplicated computeEntry's hours logic and
+// could silently drift from paidHours/hourlyPay.)
 function computeOptimistic(settings: SettingsType, raw: any) {
-    const isW2 = raw.workspace === "w2";
-    // ------------------------------------------------------------
-    // 1. Compute totalHours (universal)
-    // ------------------------------------------------------------
-    let totalHours = 0;
-    if (isW2) {
-        const w2 = raw.w2 ?? {};
-        const hasClockFields = w2.inTime &&
-            w2.outTime &&
-            w2.inTime !== "" &&
-            w2.outTime !== "";
-        const hasManualHours = w2.hours != null && !Number.isNaN(Number(w2.hours));
-        if (hasClockFields) {
-            const result = computeWorkTime(w2.inTime, w2.outTime, raw.date);
-            totalHours = result.totalHours;
-        }
-        else if (hasManualHours) {
-            totalHours = Number(w2.hours);
-        }
-    }
-    // ------------------------------------------------------------
-    // 2. Compute totals using computeEntry (backend-aligned)
-    // ------------------------------------------------------------
-    const totals = computeEntry(raw, settings);
-    // attach universal totalHours override:
-    return { totals: { ...totals, totalHours } };
+    return { totals: computeEntry(raw, settings) };
 }
 async function resyncWorkspaceReminders(workspaceId: string, settings: SettingsType) {
     const workspaceState = useWorkspaceStore.getState().state;

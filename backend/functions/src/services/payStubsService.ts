@@ -5,6 +5,7 @@ import { PayStub, TaxProfile } from "@shared/schemas";
 import { EntrySchema, type EntryType } from "@shared/schemas/entry";
 import { SettingsDocSchema, type SettingsType, } from "@shared/schemas/settings";
 import { calculateNetPay } from "@shared/tax/engine";
+import { getEntryGross } from "@shared/entryPay";
 import { buildTaxProfileInput } from "@shared/tax/buildTaxProfileInput";
 import { getCurrentPayPeriodAt, getMostRecentlyClosedPayPeriod, getEarliestEligiblePeriodEnd } from "@shared/payPeriods";
 const DEFAULT_TIME_ZONE = "America/Los_Angeles";
@@ -12,7 +13,8 @@ function round2(value: number) {
     return Math.round((Number(value) || 0) * 100) / 100;
 }
 function sumEntryGross(entry: EntryType) {
-    return round2(Number(entry.totals?.dayTotal ?? 0));
+    // Paid hours × rate + tips + reported cash, for v1 and v2 entries alike.
+    return round2(getEntryGross(entry));
 }
 function sumEntryTips(entry: EntryType) {
     return round2(Number(entry.w2?.tips ?? 0));
@@ -25,9 +27,6 @@ function sumEntryUnreportedCash(entry: EntryType) {
 }
 function sumEntryCustomDeductions(entry: EntryType) {
     return round2(Number(entry.totals?.customDeductionsAmount ?? 0));
-}
-function sumEntryBreakDeductions(entry: EntryType) {
-    return round2(Number(entry.totals?.breakDeductionAmount ?? 0));
 }
 function getEntryUpdatedAt(entry: EntryType): string | null {
     return entry.updatedAtLocal ?? entry.createdAtLocal ?? null;
@@ -231,12 +230,12 @@ function buildPayStubDocument(params: {
     }));
     const grossIncome = round2(entries.reduce((sum, entry) => sum + sumEntryGross(entry), 0));
     const customDeductions = round2(entries.reduce((sum, entry) => sum + sumEntryCustomDeductions(entry), 0));
-    const breakDeductions = round2(entries.reduce((sum, entry) => sum + sumEntryBreakDeductions(entry), 0));
     const totalUnreported = round2(entries.reduce((sum, entry) => sum + sumEntryUnreportedCash(entry), 0));
     // Without auto tax calculation there are no taxes to withhold, but meal
-    // (custom) and break deductions still come out of pay — mirror the tax
-    // path, where calculateNetPay subtracts them after taxes.
-    const nonTaxDeductions = round2(customDeductions + breakDeductions);
+    // (custom) deductions still come out of pay — mirror the tax path, where
+    // calculateNetPay subtracts them after taxes. Unpaid breaks are never
+    // deducted: gross is already paid hours × rate (see shared/entryPay).
+    const nonTaxDeductions = customDeductions;
     let netIncome = round2(Math.max(grossIncome - nonTaxDeductions, 0));
     let breakdown: Record<string, number> = nonTaxDeductions > 0
         ? { customDeductions: nonTaxDeductions }
@@ -447,6 +446,50 @@ export async function generateMostRecentlyClosedPayStub(workspaceId: string, uid
         force,
     });
 }
+const YTD_FIELDS = ["grossIncome", "netIncome", "totalDeductions", "tips", "reportedCash", "unreportedCash"] as const;
+function sameYtd(a: any, b: any): boolean {
+    return YTD_FIELDS.every((k) => Math.abs(Number(a?.[k] ?? 0) - Number(b?.[k] ?? 0)) < 0.005);
+}
+/**
+ * Each stub's YTD is its predecessor's YTD plus its own period, so changing
+ * an earlier period leaves every later stub's ytdTotals stale. Re-chain them
+ * in order. Only ytdTotals depend on the predecessor (the tax estimate is
+ * per-period), so each later stub is recomputed from its own stored gross,
+ * net and entry snapshot — no entry re-reads. Stops at the first stub whose
+ * YTD is already correct: everything after it is unaffected.
+ */
+async function cascadeYtdAfter(workspaceId: string, settings: SettingsType, afterPeriodEnd: string): Promise<PayStub.Type[]> {
+    const later = await db
+        .collection(`workspaces/${workspaceId}/payStubs`)
+        .where("periodStart", ">", afterPeriodEnd)
+        .orderBy("periodStart", "asc")
+        .get();
+    if (later.empty)
+        return [];
+    let previous = await getPreviousPayStub(workspaceId, String(later.docs[0].get("periodStart")));
+    const updated: PayStub.Type[] = [];
+    for (const doc of later.docs) {
+        const data = doc.data();
+        const ytdTotals = computeYtdTotals({
+            currentGrossIncome: Number(data.grossIncome ?? 0),
+            currentNetIncome: Number(data.netIncome ?? 0),
+            currentEntries: (data.entries ?? []) as EntryType[],
+            previousStub: previous,
+            periodStart: String(data.periodStart),
+            settings,
+        });
+        if (sameYtd(ytdTotals, data.ytdTotals))
+            break;
+        const updatedAt = new Date().toISOString();
+        await doc.ref.update({ ytdTotals, updatedAt });
+        const next = { ...data, ytdTotals, updatedAt };
+        const parsed = PayStub.Schema.safeParse({ id: doc.id, ...next });
+        if (parsed.success)
+            updated.push(parsed.data);
+        previous = next;
+    }
+    return updated;
+}
 /**
  * Regenerates the stubs covering `dates` and returns them as persisted, so
  * entry mutation responses can hand the client the exact stubs that changed
@@ -465,7 +508,9 @@ export async function syncPayStubForDates(workspaceId: string, uid: string, date
         targetsByPeriodId.set(period.periodId, period);
     }
     const synced: PayStub.Type[] = [];
-    for (const period of targetsByPeriodId.values()) {
+    // Oldest first, so each target builds on an already-updated predecessor.
+    const targets = [...targetsByPeriodId.values()].sort((a, b) => a.start.localeCompare(b.start));
+    for (const period of targets) {
         const result = await generatePayStub(workspaceId, uid, {
             start: period.start,
             end: period.end,
@@ -479,6 +524,14 @@ export async function syncPayStubForDates(workspaceId: string, uid: string, date
         const stub = parsePayStubDoc(await db.collection(`workspaces/${workspaceId}/payStubs`).doc(period.periodId).get());
         if (stub)
             synced.push(stub);
+    }
+    // Re-chain YTD for every later stub (covers later targets too).
+    if (targets.length > 0) {
+        const cascaded = await cascadeYtdAfter(workspaceId, settings, targets[0].end);
+        const byPeriodId = new Map(synced.map((stub) => [stub.periodId, stub]));
+        for (const stub of cascaded)
+            byPeriodId.set(stub.periodId, stub);
+        return [...byPeriodId.values()];
     }
     return synced;
 }

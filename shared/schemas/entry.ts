@@ -128,6 +128,10 @@ const DerivedTotals = z.object({
 
   dayTotal: z.coerce.number().default(0),              // both
   taxableTotal: z.coerce.number().default(0),          // w2 only
+  // v2+ only (see W2_CALC_VERSION in computeEntry). No defaults: absent
+  // means the entry predates them and must be read via shared/entryPay.
+  hourlyPay: z.coerce.number().optional(),            // w2 only
+  calcVersion: z.coerce.number().int().optional(),    // w2 only
 })
 
 /* --------------------------------------------------------

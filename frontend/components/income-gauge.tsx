@@ -20,6 +20,7 @@ import { computeIncomeGaugeForEntries } from "@shared/computeIncomeGauge";
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore";
 import SyncStatusIndicator from "@/components/sync-status-indicator";
 import PeriodSelector from "@/components/period-selector";
+import { getEntryGross } from "@shared/entryPay";
 export default function IncomeGauge() {
     const workspaceState = useWorkspaceStore((s) => s.state);
     const activeWorkspace = workspaceState.status === "ready"
@@ -61,7 +62,7 @@ export default function IncomeGauge() {
         });
     }, [entries, settings, activeWorkspace]);
     const previewGrossIncome = useMemo(() => entries.reduce((sum, entry) => {
-        return sum + Number(entry.totals?.dayTotal ?? 0);
+        return sum + getEntryGross(entry);
     }, 0), [entries]);
     const previewCustomDeductions = useMemo(() => entries.reduce((sum, entry) => {
         return sum + Number(entry.totals?.customDeductionsAmount ?? 0);

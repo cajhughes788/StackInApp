@@ -30,6 +30,12 @@ import { computeWorkTime } from "./computeWorkTime"
 //
 // ------------------------------------------------------------
 
+/** Bumped whenever W-2 totals math changes; stored on totals.calcVersion so
+ * entries computed under an older formula can be found and recalculated.
+ * v1 (absent): dayTotal = clocked hours × rate, break subtracted later.
+ * v2: hourlyPay = paid hours × rate; dayTotal already excludes the break. */
+export const W2_CALC_VERSION = 2
+
 export function computeEntry(entry: any, settings: any) {
   const workspace = entry?.workspace
 
@@ -78,15 +84,20 @@ export function computeEntry(entry: any, settings: any) {
       })
     }
 
+    // W2 hourly pay — paid hours only. Unpaid break time is never paid, so
+    // it is excluded here rather than deducted later; breakDeductionAmount
+    // stays as an informational value and must NOT be subtracted again.
+    const hourlyPay = paidHours * rate
+
     // W2 Day Total (gross)
     const dayTotal =
-      totalHours * rate +
+      hourlyPay +
       (Number(tips) || 0) +
       (Number(reportedCash) || 0)
 
     // W2 Taxable Total
     const taxableTotal = Math.max(
-      dayTotal - breakDeductionAmount - customDeductionsAmount,
+      dayTotal - customDeductionsAmount,
       0
     )
 
@@ -95,8 +106,10 @@ export function computeEntry(entry: any, settings: any) {
       paidHours: round4(paidHours),
       breakDeductionAmount: round2(breakDeductionAmount),
       customDeductionsAmount: round2(customDeductionsAmount),
+      hourlyPay: round2(hourlyPay),
       dayTotal: round2(dayTotal),
       taxableTotal: round2(taxableTotal),
+      calcVersion: W2_CALC_VERSION,
     }
   }
 
