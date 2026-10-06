@@ -117,20 +117,33 @@ export function useAppBootstrap() {
         startupTraceRef.current.mark("startup.auth_resolved", {
             userId: user.uid,
         });
-        debugLog("bootstrap", "workspace_hydrate_request", {
-            uid: user.uid,
-        });
-        setStatus("workspace-loading");
-        void measureAsync("app_bootstrap.workspace_hydrate", () => withProfileStep(startupTraceRef.current, "startup.workspace_hydrate", () => hydrate(user.uid, {
-            traceId: startupTraceRef.current?.traceId,
-            flow: startupTraceRef.current?.flow,
-        }), { userId: user.uid }), { userId: user.uid })
-            .finally(() => {
-            if (hydratedUserIdRef.current !== user.uid) {
-                return;
-            }
+        // If another part of the app (e.g. workspace creation during onboarding)
+        // already populated the store as "ready" for this uid in this session,
+        // re-hydrating would clobber it with the (possibly stale/empty)
+        // localStorage snapshot before Firestore catches up — see the redirect
+        // race this guarded against. Trust the live state instead of re-fetching.
+        const workspaceStore = useWorkspaceStore.getState();
+        if (workspaceStore.state.status === "ready" && workspaceStore.ownerUid === user.uid) {
+            debugLog("bootstrap", "workspace_hydrate_skipped_already_ready", {
+                uid: user.uid,
+            });
             setWorkspaceHydrateSettled(true);
-        });
+        } else {
+            debugLog("bootstrap", "workspace_hydrate_request", {
+                uid: user.uid,
+            });
+            setStatus("workspace-loading");
+            void measureAsync("app_bootstrap.workspace_hydrate", () => withProfileStep(startupTraceRef.current, "startup.workspace_hydrate", () => hydrate(user.uid, {
+                traceId: startupTraceRef.current?.traceId,
+                flow: startupTraceRef.current?.flow,
+            }), { userId: user.uid }), { userId: user.uid })
+                .finally(() => {
+                if (hydratedUserIdRef.current !== user.uid) {
+                    return;
+                }
+                setWorkspaceHydrateSettled(true);
+            });
+        }
         // hydrate() sets workspace state synchronously from the localStorage
         // snapshot before starting any Firestore reads. Use that to:
         //   1. Seed settings from localStorage hint (sync, zero latency) so

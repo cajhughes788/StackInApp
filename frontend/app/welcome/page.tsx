@@ -55,13 +55,6 @@ export default function WelcomePage() {
           silent: options.silent,
         })
 
-        if (!isNativeApp && options.showActivatedToast && refreshedAuthority?.isSubscriptionActive) {
-          toast({
-            title: "Subscription active",
-            description: "Your billing is active. You can set up your workspace now.",
-          })
-        }
-
         return refreshedAuthority
       } catch (err: any) {
         toast({
@@ -232,6 +225,7 @@ export default function WelcomePage() {
       }
 
       addWorkspace(
+        user.uid,
         {
           id: res.workspace.id,
           name: res.workspace.name,

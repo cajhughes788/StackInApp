@@ -216,6 +216,13 @@ interface WorkspaceStore {
   state: WorkspaceState
 
   /**
+   * The user whose workspaces `state` holds (set by hydrate/addWorkspace,
+   * cleared on logout). Lets bootstrap trust a "ready" state only when it
+   * belongs to the user now signing in.
+   */
+  ownerUid: string | null
+
+  /**
    * Explicitly hydrate workspace context after auth resolves.
    * Called from (app)/layout.tsx
    */
@@ -227,7 +234,7 @@ interface WorkspaceStore {
     }
   ) => Promise<void>
   setActiveWorkspace: (workspaceId: WorkspaceId) => void
-  addWorkspace: (workspace: WorkspaceSummary, makeActive?: boolean) => void
+  addWorkspace: (uid: string, workspace: WorkspaceSummary, makeActive?: boolean) => void
   updateWorkspace: (
     workspaceId: WorkspaceId,
     patch: Partial<Pick<WorkspaceSummary, "name" | "type" | "status">>
@@ -245,6 +252,7 @@ interface WorkspaceStore {
 // ------------------------------------------------------------
 export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
   state: { status: "loading" },
+  ownerUid: null,
 
   hydrate: async (uid: string, options) => {
     const sessionVersion = getAuthSessionVersion()
@@ -267,7 +275,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
       })
     }
     if (isAuthSessionCurrent(sessionVersion)) {
-      set({ state: cachedState ?? { status: "loading" } })
+      set({ state: cachedState ?? { status: "loading" }, ownerUid: uid })
     }
 
     if (cachedSnapshot.isFresh && cachedState !== null) {
@@ -456,10 +464,12 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
     })
   },
 
-  addWorkspace: (workspace: WorkspaceSummary, makeActive = true) => {
+  addWorkspace: (uid: string, workspace: WorkspaceSummary, makeActive = true) => {
+    set({ ownerUid: uid })
     set((current) => {
       if (current.state.status === "loading" || current.state.status === "no-workspace") {
         if (makeActive) persistActiveWorkspaceId(workspace.id)
+        persistWorkspaceSnapshot(uid, [workspace], workspace.id)
         return {
           state: {
             status: "ready",
@@ -568,6 +578,6 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
     debugLog("workspace-store", "clear")
     clearPersistedActiveWorkspaceId()
     clearPersistedWorkspaceSnapshot()
-    set({ state: { status: "loading" } })
+    set({ state: { status: "loading" }, ownerUid: null })
   },
 }))
