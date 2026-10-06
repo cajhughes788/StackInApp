@@ -69,13 +69,21 @@ function planEntryUpgrade(doc: FirebaseFirestore.QueryDocumentSnapshot): Upgrade
 
     const dayTotal = breakAmount > 0 ? round2(oldDayTotal - breakAmount) : oldDayTotal;
     const hourlyPay = round2(dayTotal - tips - reportedCash);
-    const taxableTotal = num(t.taxableTotal); // v1 already = gross − break − custom
+    // v1 taxableTotal was rounded from the unrounded clocked gross, so on a
+    // break shift it can sit a cent off the re-derived gross (half-cent
+    // pay). Re-derive it from the new gross so it always equals
+    // dayTotal − custom deductions, exactly as computeEntry v2 does.
+    const taxableTotal = breakAmount > 0
+        ? round2(Math.max(dayTotal - custom, 0))
+        : num(t.taxableTotal);
 
     // Sanity checks against an independent derivation (paid hours × rate).
     if (hourlyPay < -TOLERANCE)
         return { skip: `negative hourly pay ${hourlyPay}` };
     if (Math.abs(hourlyPay - paidHours * rate) > TOLERANCE)
         return { skip: `hourly pay ${hourlyPay} ≠ paid hours ${paidHours} × rate ${rate} (${round2(paidHours * rate)})` };
+    if (Math.abs(taxableTotal - num(t.taxableTotal)) > TOLERANCE)
+        return { skip: `Day Total (taxableTotal) would change: ${num(t.taxableTotal)} → ${taxableTotal}` };
     if (Math.abs(round2(Math.max(dayTotal - custom, 0)) - taxableTotal) > TOLERANCE)
         return { skip: `Day Total (taxableTotal) inconsistent: stored ${taxableTotal}, new gross ${dayTotal} − deductions ${custom}` };
 

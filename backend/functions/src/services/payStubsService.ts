@@ -38,7 +38,7 @@ function maxIso(a: string | null, b: string | null) {
         return a;
     return a > b ? a : b;
 }
-async function getWorkspaceSettings(workspaceId: string): Promise<SettingsType> {
+export async function getWorkspaceSettings(workspaceId: string): Promise<SettingsType> {
     const snap = await db.doc(`workspaces/${workspaceId}/settings/current`).get();
     if (!snap.exists) {
         throw new Error("Settings not found");
@@ -459,6 +459,11 @@ function sameYtd(a: any, b: any): boolean {
  * YTD is already correct: everything after it is unaffected.
  */
 async function cascadeYtdAfter(workspaceId: string, settings: SettingsType, afterPeriodEnd: string): Promise<PayStub.Type[]> {
+    return rechainYtdAfter(workspaceId, settings, afterPeriodEnd, { write: true });
+}
+/** Exposed for maintenance (scripts/rechainPayStubYtd): with write=false it
+ * reports which stubs would change without writing. */
+export async function rechainYtdAfter(workspaceId: string, settings: SettingsType, afterPeriodEnd: string, options: { write: boolean }): Promise<PayStub.Type[]> {
     const later = await db
         .collection(`workspaces/${workspaceId}/payStubs`)
         .where("periodStart", ">", afterPeriodEnd)
@@ -481,7 +486,8 @@ async function cascadeYtdAfter(workspaceId: string, settings: SettingsType, afte
         if (sameYtd(ytdTotals, data.ytdTotals))
             break;
         const updatedAt = new Date().toISOString();
-        await doc.ref.update({ ytdTotals, updatedAt });
+        if (options.write)
+            await doc.ref.update({ ytdTotals, updatedAt });
         const next = { ...data, ytdTotals, updatedAt };
         const parsed = PayStub.Schema.safeParse({ id: doc.id, ...next });
         if (parsed.success)
