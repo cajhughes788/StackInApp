@@ -233,13 +233,19 @@ function buildPayStubDocument(params: {
     const customDeductions = round2(entries.reduce((sum, entry) => sum + sumEntryCustomDeductions(entry), 0));
     const breakDeductions = round2(entries.reduce((sum, entry) => sum + sumEntryBreakDeductions(entry), 0));
     const totalUnreported = round2(entries.reduce((sum, entry) => sum + sumEntryUnreportedCash(entry), 0));
-    let netIncome = grossIncome;
-    let breakdown: Record<string, number> = {};
+    // Without auto tax calculation there are no taxes to withhold, but meal
+    // (custom) and break deductions still come out of pay — mirror the tax
+    // path, where calculateNetPay subtracts them after taxes.
+    const nonTaxDeductions = round2(customDeductions + breakDeductions);
+    let netIncome = round2(Math.max(grossIncome - nonTaxDeductions, 0));
+    let breakdown: Record<string, number> = nonTaxDeductions > 0
+        ? { customDeductions: nonTaxDeductions }
+        : {};
     if (settings.w2?.autoTaxCalculation && taxProfile) {
         const result = calculateNetPay(buildTaxProfileInput(taxProfile, {
             grossIncome,
             payFrequency: settings.w2?.payFrequency ?? "biweekly",
-            customDeductions: customDeductions + breakDeductions,
+            customDeductions: nonTaxDeductions,
         }));
         console.log("[payStubsService.buildPayStubDocument] tax_result", JSON.stringify({
             workspaceId,
