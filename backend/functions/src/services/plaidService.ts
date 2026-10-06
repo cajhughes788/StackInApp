@@ -8,6 +8,8 @@ import { PlaidMerchantMemorySchema, type PlaidMerchantMemoryType } from "@shared
 import {
   classifyPlaidTransaction,
   normalizePlaidMerchantKey,
+  legacyPlaidMerchantKey,
+  resolvePlaidDisplayName,
   detectRecurringCadence,
   isSimilarRecurringAmount,
   type PlaidClassificationResult,
@@ -552,7 +554,7 @@ async function upsertPendingTransactionFromPlaid(
 
   const merchantName = transaction.merchant_name ?? null
   const rawName = transaction.name ?? ""
-  const merchantKey = normalizePlaidMerchantKey(merchantName, rawName)
+  const merchantKey = await resolveMerchantKey(workspaceId, merchantName, rawName)
 
   // A learned decision from a past confirm/dismiss on this same merchant
   // takes priority over the generic rule-based guess — see
@@ -625,7 +627,7 @@ async function notifyForSyncResults(
   if (notifiable.length === 1) {
     const parsed = notifiable[0]
     await sendTransactionNotification(uid, {
-      title: parsed.merchantName ?? parsed.rawName,
+      title: resolvePlaidDisplayName(parsed.merchantName, parsed.rawName),
       body: `New transaction: $${parsed.amount.toFixed(2)}${parsed.suggestedExpenseAccount ? ` • ${parsed.suggestedExpenseAccount}` : ""}`,
       data: { deepLink: `stackin://plaid/pending/${parsed.id}` },
     })
@@ -772,7 +774,26 @@ async function cleanupRemovedTransaction(workspaceId: string, plaidItemId: strin
   }
 }
 
+/**
+ * The merchant key to use for a transaction. Raw (un-enriched) descriptors
+ * used to have their digits stripped; they now keep them. A merchant whose
+ * memory was saved under the old key keeps using it, so earlier decisions
+ * ("always personal", recurring-rule links, categories) still apply and
+ * no migration is needed. Only costs extra reads when the two keys differ.
+ */
+async function resolveMerchantKey(workspaceId: string, merchantName: string | null, rawName: string): Promise<string> {
+  const key = normalizePlaidMerchantKey(merchantName, rawName)
+  const legacyKey = legacyPlaidMerchantKey(merchantName, rawName)
+  if (!legacyKey || legacyKey === key) return key
+  if (key && (await merchantMemoryCol(workspaceId).doc(key).get()).exists) return key
+  if ((await merchantMemoryCol(workspaceId).doc(legacyKey).get()).exists) return legacyKey
+  return key
+}
+
 async function getMerchantMemory(workspaceId: string, merchantKey: string): Promise<PlaidMerchantMemoryType | null> {
+  // Some descriptors normalize to an empty key (e.g. a masked "****1234"
+  // raw name); Firestore throws on .doc(""), so there's no memory to find.
+  if (!merchantKey) return null
   const snap = await merchantMemoryCol(workspaceId).doc(merchantKey).get()
   if (!snap.exists) return null
   return PlaidMerchantMemorySchema.parse(snap.data())
@@ -1058,8 +1079,10 @@ export async function confirmPendingTransaction(
   }
 
   const pending = claim.current
-  const merchantKey = normalizePlaidMerchantKey(pending.merchantName, pending.rawName)
-  const displayName = pending.merchantName ?? pending.rawName
+  // Reuse the key chosen at ingestion (it may be a legacy key with existing
+  // memory); only very old records without one are resolved again here.
+  const merchantKey = pending.merchantKey || await resolveMerchantKey(workspaceId, pending.merchantName, pending.rawName)
+  const displayName = resolvePlaidDisplayName(pending.merchantName, pending.rawName)
 
   if (!decision.isBusiness) {
     await ref.set({ status: "dismissed", updatedAt: new Date().toISOString() }, { merge: true }).catch(async (error) => {
@@ -1072,22 +1095,31 @@ export async function confirmPendingTransaction(
     // inferred from this one dismissal — see createPendingTransactionFromPlaid
     // for what it actually suppresses (the notification, not the record).
     const mode = decision.alwaysPersonal ? "always_personal" : "ask_every_time"
-    await rememberMerchantDecision(workspaceId, merchantKey, displayName, false, null, mode)
 
-    // Already explicitly silenced this merchant just now — nothing further
-    // to suggest. Otherwise, check whether a repeated-dismissal pattern has
-    // emerged worth a one-time "stop asking?" offer instead of ever
-    // interrupting on every single dismiss.
+    // Best-effort from here on — the dismissal itself is already saved, so a
+    // failure in merchant bookkeeping must not be reported back as a failed
+    // dismiss (the row would bounce back into the review list even though
+    // it's gone on the next refresh).
     let personalSuggestion: PlaidPersonalSuggestion | undefined
-    if (!decision.alwaysPersonal) {
-      const memory = await getMerchantMemory(workspaceId, merchantKey)
-      if (memory && !memory.suggestedAlwaysPersonalAt && memory.mode === "ask_every_time") {
-        const suggestion = await detectPersonalSuggestion(workspaceId, merchantKey, displayName)
-        if (suggestion) {
-          await markPersonalSuggestionShown(workspaceId, merchantKey)
-          personalSuggestion = suggestion
+    try {
+      await rememberMerchantDecision(workspaceId, merchantKey, displayName, false, null, mode)
+
+      // Already explicitly silenced this merchant just now — nothing further
+      // to suggest. Otherwise, check whether a repeated-dismissal pattern has
+      // emerged worth a one-time "stop asking?" offer instead of ever
+      // interrupting on every single dismiss.
+      if (!decision.alwaysPersonal) {
+        const memory = await getMerchantMemory(workspaceId, merchantKey)
+        if (memory && !memory.suggestedAlwaysPersonalAt && memory.mode === "ask_every_time") {
+          const suggestion = await detectPersonalSuggestion(workspaceId, merchantKey, displayName)
+          if (suggestion) {
+            await markPersonalSuggestionShown(workspaceId, merchantKey)
+            personalSuggestion = suggestion
+          }
         }
       }
+    } catch (error) {
+      console.error("plaidService.confirmPendingTransaction: post-dismiss merchant bookkeeping failed", error)
     }
     return { personalSuggestion }
   }
@@ -1105,7 +1137,7 @@ export async function confirmPendingTransaction(
     const created = await expensesSvc.createExpense(workspaceId, uid, {
       date: pending.date,
       amount: pending.amount,
-      vendor: pending.merchantName ?? pending.rawName,
+      vendor: displayName,
       description: pending.rawName,
       account,
       clientMutationId: `plaid:${pending.plaidTransactionId}`,
@@ -1130,7 +1162,9 @@ export async function confirmPendingTransaction(
   // only happened because the user found it some other way, since
   // always_personal transactions don't notify) means it's a mixed-use
   // merchant after all, so go back to asking each time.
-  await rememberMerchantDecision(workspaceId, merchantKey, displayName, true, account, "ask_every_time")
+  await rememberMerchantDecision(workspaceId, merchantKey, displayName, true, account, "ask_every_time").catch((error) => {
+    console.error("plaidService.confirmPendingTransaction: rememberMerchantDecision failed", error)
+  })
 
   // Best-effort — the expense is already committed and the pending record
   // already marked confirmed above, so a failure here (e.g. a transient

@@ -1,11 +1,12 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Check, ChevronDown, ChevronUp, Paperclip, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Select,
   SelectContent,
@@ -29,7 +30,7 @@ import { getVisibleExpenseCategoryOptions } from "@/lib/expenseCategories"
 import { formatCurrency } from "@/lib/helpers"
 import { getDefaultVehicleExpenseMode, isVehicleTransportationCategory } from "@shared/vehicleExpenses"
 import { RECEIPT_REQUIRED_THRESHOLD } from "@shared/receiptRequirements"
-import { normalizePlaidMerchantKey } from "@shared/plaidClassification"
+import { normalizePlaidMerchantKey, resolvePlaidDisplayName } from "@shared/plaidClassification"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import { useSettingsStore } from "@/lib/stores/useSettingsStore"
 import {
@@ -77,11 +78,6 @@ async function runWithConcurrency<T>(
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, runNext))
 }
 
-// How far (px) the card has to travel before release commits to an action
-// instead of springing back. Also used to fade in the reveal panel underneath.
-const SWIPE_COMMIT_THRESHOLD = 88
-const SWIPE_MAX_DRAG = 132
-
 function TransactionReviewCard({
   transaction,
   isSelected,
@@ -107,134 +103,82 @@ function TransactionReviewCard({
   onToggleReceiptRow: () => void
   receiptCapture: ReturnType<typeof useReceiptCapture>
 }) {
-  const [dragX, setDragX] = useState(0)
-  const dragRef = useRef<{ startX: number; pointerId: number; dragging: boolean } | null>(null)
-
-  function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
-    // Don't start a swipe from inside the checkbox/select/receipt/icon controls —
-    // those need their own click/drag handling (Radix's Select in particular
-    // does its own pointer capture).
-    if ((event.target as HTMLElement).closest("[data-no-swipe]")) return
-    dragRef.current = { startX: event.clientX, pointerId: event.pointerId, dragging: true }
-    event.currentTarget.setPointerCapture(event.pointerId)
-  }
-
-  function handlePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!dragRef.current?.dragging) return
-    const delta = event.clientX - dragRef.current.startX
-    setDragX(Math.max(-SWIPE_MAX_DRAG, Math.min(SWIPE_MAX_DRAG, delta)))
-  }
-
-  function endDrag() {
-    if (!dragRef.current?.dragging) return
-    dragRef.current.dragging = false
-    const finalX = dragX
-    setDragX(0)
-    if (finalX <= -SWIPE_COMMIT_THRESHOLD) onDismiss()
-    else if (finalX >= SWIPE_COMMIT_THRESHOLD) onConfirm()
-  }
-
-  const revealStrength = Math.min(Math.abs(dragX) / SWIPE_COMMIT_THRESHOLD, 1)
+  const displayName = resolvePlaidDisplayName(transaction.merchantName, transaction.rawName)
 
   return (
-    <div className="relative overflow-hidden rounded-xl">
-      <div
-        className="absolute inset-0 flex items-center justify-between px-4 text-sm font-semibold"
-        style={{ opacity: revealStrength }}
-        aria-hidden="true"
-      >
-        <span className={`flex items-center gap-1 text-emerald-700 dark:text-emerald-400 ${dragX > 0 ? "" : "invisible"}`}>
-          <Check className="h-4 w-4" /> Confirm as business
-        </span>
-        <span className={`flex items-center gap-1 text-destructive ${dragX < 0 ? "" : "invisible"}`}>
-          Not business <X className="h-4 w-4" />
-        </span>
+    <div className="space-y-3 rounded-xl border border-muted bg-card p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-2">
+          <Checkbox
+            className="mt-1"
+            checked={isSelected}
+            onCheckedChange={onToggleSelected}
+            aria-label={`Select ${displayName}`}
+          />
+          <div>
+            <div className="font-medium">{displayName}</div>
+            <div className="text-sm text-muted-foreground">{transaction.date}</div>
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="font-semibold">{formatCurrency(transaction.amount)}</div>
+          {transaction.suggestedExpenseAccount ? (
+            <Badge variant="secondary" className="mt-1">
+              {transaction.suggestedExpenseAccount}
+            </Badge>
+          ) : null}
+        </div>
       </div>
 
-      <div
-        className="relative touch-pan-y space-y-3 rounded-xl border border-muted bg-card p-4"
-        style={{
-          transform: `translateX(${dragX}px)`,
-          transition: dragRef.current?.dragging ? "none" : "transform 0.2s ease",
-        }}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-start gap-2" data-no-swipe>
-            <Checkbox
-              className="mt-1"
-              checked={isSelected}
-              onCheckedChange={onToggleSelected}
-              aria-label={`Select ${transaction.merchantName ?? transaction.rawName}`}
-            />
-            <div>
-              <div className="font-medium">{transaction.merchantName ?? transaction.rawName}</div>
-              <div className="text-sm text-muted-foreground">{transaction.date}</div>
-            </div>
-          </div>
-          <div className="text-right">
-            <div className="font-semibold">{formatCurrency(transaction.amount)}</div>
-            {transaction.suggestedExpenseAccount ? (
-              <Badge variant="secondary" className="mt-1">
-                {transaction.suggestedExpenseAccount}
-              </Badge>
-            ) : null}
-          </div>
-        </div>
+      <div>
+        <Select value={categoryValue} onValueChange={onCategoryChange}>
+          <SelectTrigger>
+            <SelectValue placeholder="Choose expense category" />
+          </SelectTrigger>
+          <SelectContent>
+            {expenseCategoryOptions.map((category) => (
+              <SelectItem key={category} value={category}>
+                {category}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
 
-        <div data-no-swipe>
-          <Select value={categoryValue} onValueChange={onCategoryChange}>
-            <SelectTrigger>
-              <SelectValue placeholder="Choose expense category" />
-            </SelectTrigger>
-            <SelectContent>
-              {expenseCategoryOptions.map((category) => (
-                <SelectItem key={category} value={category}>
-                  {category}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      {isReceiptRowOpen ? (
+        <div>
+          <ReceiptCaptureField capture={receiptCapture} />
         </div>
+      ) : null}
 
-        {isReceiptRowOpen ? (
-          <div data-no-swipe>
-            <ReceiptCaptureField capture={receiptCapture} />
-          </div>
-        ) : null}
-
-        <div className="flex justify-end gap-1" data-no-swipe>
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            aria-label="Confirm as business"
-            onClick={onConfirm}
-          >
-            <Check className="h-4 w-4" />
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            aria-label={isReceiptRowOpen ? "Remove receipt" : "Attach receipt"}
-            onClick={onToggleReceiptRow}
-          >
-            <Paperclip className="h-4 w-4" />
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            aria-label="Not business"
-            onClick={onDismiss}
-          >
-            <X className="h-4 w-4" />
-          </Button>
-        </div>
+      <div className="flex justify-end gap-1">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          aria-label="Confirm as business"
+          onClick={onConfirm}
+        >
+          <Check className="h-4 w-4" />
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          aria-label={isReceiptRowOpen ? "Remove receipt" : "Attach receipt"}
+          onClick={onToggleReceiptRow}
+        >
+          <Paperclip className="h-4 w-4" />
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          aria-label="Not business"
+          onClick={onDismiss}
+        >
+          <X className="h-4 w-4" />
+        </Button>
       </div>
     </div>
   )
@@ -342,11 +286,13 @@ export default function PlaidPendingTransactionsPanel() {
     const groups = new Map<string, { label: string; ids: string[] }>()
     for (const transaction of transactions) {
       if (transaction.suggestedExpenseAccount) continue
-      const key = normalizePlaidMerchantKey(transaction.merchantName, transaction.rawName)
+      // Prefer the server's key so grouping matches merchant memory exactly
+      // (a merchant may still live under its legacy key).
+      const key = transaction.merchantKey || normalizePlaidMerchantKey(transaction.merchantName, transaction.rawName)
       if (!key) continue
       const existing = groups.get(key)
       if (existing) existing.ids.push(transaction.id)
-      else groups.set(key, { label: transaction.merchantName ?? transaction.rawName, ids: [transaction.id] })
+      else groups.set(key, { label: resolvePlaidDisplayName(transaction.merchantName, transaction.rawName), ids: [transaction.id] })
     }
     for (const [key, group] of groups) {
       if (group.ids.length < 2) groups.delete(key)
@@ -410,7 +356,6 @@ export default function PlaidPendingTransactionsPanel() {
       // just won't auto-suppress and the user may see this suggestion again
       // (a re-ask, not a duplicate charge, so failing quietly here is fine).
       await linkPlaidMerchantToRecurringRule(activeWorkspaceId, suggestion.merchantKey).catch(() => {})
-      toast({ title: "Recurring rule created", description: `${suggestion.vendor} will be added automatically from now on.` })
     } catch {
       toast({ title: "Couldn't create the recurring rule", variant: "destructive" })
     } finally {
@@ -474,9 +419,19 @@ export default function PlaidPendingTransactionsPanel() {
       })
       if (result.recurringSuggestion) setRecurringPrompt(result.recurringSuggestion)
       if (result.personalSuggestion) setPersonalPrompt(result.personalSuggestion)
-      toast({ title: isBusiness ? "Added to expenses" : "Dismissed" })
     } catch {
-      setTransactions(previousTransactions)
+      // Put back only this row, in its original position, on top of the
+      // current list — restoring the earlier snapshot would resurrect rows
+      // dismissed since then and drop rows that arrived since then.
+      setTransactions((prev) => {
+        if (prev.some((p) => p.id === transaction.id)) return prev
+        const originalIndex = previousTransactions.findIndex((t) => t.id === transaction.id)
+        const laterIds = new Set(previousTransactions.slice(originalIndex + 1).map((t) => t.id))
+        const insertAt = prev.findIndex((p) => laterIds.has(p.id))
+        const next = [...prev]
+        next.splice(insertAt === -1 ? next.length : insertAt, 0, transaction)
+        return next
+      })
       toast({ title: "Couldn't save your decision — restored to your review list", variant: "destructive" })
     }
   }
@@ -545,10 +500,21 @@ export default function PlaidPendingTransactionsPanel() {
         {collapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
       </button>
 
-      {!collapsed ? (
-        <p className="px-1 text-xs text-muted-foreground">
-          Swipe a transaction right to confirm as business, left to dismiss — or use the buttons on each row.
-        </p>
+      {!collapsed && isLoading && transactions.length === 0 ? (
+        <div className="space-y-3" aria-hidden="true">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="space-y-3 rounded-xl border border-muted bg-card p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-2">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-3 w-20" />
+                </div>
+                <Skeleton className="h-4 w-16" />
+              </div>
+              <Skeleton className="h-9 w-full" />
+            </div>
+          ))}
+        </div>
       ) : null}
 
       {!collapsed && transactions.length > 1 ? (

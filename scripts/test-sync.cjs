@@ -149,4 +149,19 @@ run("rate options and position titles", () => {
   assert.equal(getEntryPositionTitle({ positionId: "b", positionTitle: "Bartender (old)" }, settings), "Bartender (old)");
 });
 
+// ------------------------------------------------------------
+// Plaid merchant keys: raw descriptors keep digits now; the legacy key
+// (digits stripped) must still be derivable so old merchant memory resolves.
+// ------------------------------------------------------------
+const { normalizePlaidMerchantKey, legacyPlaidMerchantKey, resolvePlaidDisplayName } = require("../shared/plaidClassification.ts");
+
+run("plaid merchant keys: enriched names unchanged, raw descriptors keep digits", () => {
+  assert.equal(normalizePlaidMerchantKey("Target 1147", "TARGET 1147 SEATTLE"), "target");
+  assert.equal(legacyPlaidMerchantKey("Target 1147", "TARGET 1147 SEATTLE"), "target");
+  assert.equal(normalizePlaidMerchantKey(null, "ZELLE TO J SMITH 88213"), "zelle to j smith 88213");
+  assert.equal(legacyPlaidMerchantKey(null, "ZELLE TO J SMITH 88213"), "zelle to j smith");
+  assert.equal(resolvePlaidDisplayName(null, "POS DEBIT ************1234"), "Unknown merchant");
+  assert.equal(resolvePlaidDisplayName(null, "Joe's Diner"), "Joe's Diner");
+});
+
 process.stdout.write("sync behavior checks passed\n");

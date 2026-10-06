@@ -31,6 +31,8 @@ export type PlaidPendingTransaction = {
   amount: number
   merchantName: string | null
   rawName: string
+  /** Server-resolved merchant identity (may be a legacy key); absent on very old records. */
+  merchantKey?: string
   suggestedExpenseAccount: string | null
   isBusinessGuess: boolean | null
   confidence: number

@@ -18,13 +18,66 @@ export type PlaidClassificationResult = {
 // shared/schemas/plaidMerchantMemory.ts — lowercased, punctuation and
 // digit-runs stripped (store numbers like "Target 1147" or "Shell #4021"
 // would otherwise create a separate memory entry per store location).
+//
+// Digit-stripping only happens when Plaid has already identified a real,
+// named merchant (`merchantName` present) — in that case any leftover
+// digits genuinely are just store-number noise. When there's no enriched
+// merchant name and this falls back to the raw, unenriched bank descriptor,
+// embedded digits are far more likely to be a per-transaction reference (a
+// Zelle/Venmo transfer, an order or invoice number) that actually
+// distinguishes one real transaction or counterparty from another —
+// stripping those would wrongly collapse unrelated transfers into a single
+// inflated "merchant" (surfacing as an inaccurate "seen N times" count for
+// something that only happened once).
 export function normalizePlaidMerchantKey(merchantName: string | null, rawName: string): string {
-  const source = (merchantName ?? rawName).toLowerCase()
-  return source
+  const hasEnrichedName = Boolean(merchantName && merchantName.trim().length > 0)
+  const source = (hasEnrichedName ? merchantName! : rawName).toLowerCase()
+  let normalized = source.replace(/[^a-z0-9\s]/g, " ")
+  if (hasEnrichedName) {
+    normalized = normalized.replace(/\b\d+\b/g, " ")
+  }
+  return normalized.replace(/\s+/g, " ").trim()
+}
+
+// The key format used before raw descriptors kept their digits: digit-runs
+// were always stripped. Merchant memory (and pending transactions) written
+// back then are stored under this key, so lookups for un-enriched merchants
+// fall back to it — see resolveMerchantKey in backend plaidService. Only
+// differs from normalizePlaidMerchantKey when there's no merchantName.
+export function legacyPlaidMerchantKey(merchantName: string | null, rawName: string): string {
+  return (merchantName ?? rawName)
+    .toLowerCase()
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\b\d+\b/g, " ")
     .replace(/\s+/g, " ")
     .trim()
+}
+
+// Some banks/card networks mask an embedded account or card number directly
+// in their own raw transaction descriptor (e.g. "POS DEBIT ************1234").
+// When Plaid's merchant enrichment (merchant_name) comes back empty for a
+// transaction like that, falling back to the raw descriptor as-is means the
+// user sees a wall of asterisks instead of a name. Treat a string with too
+// few real letters, or dominated by mask characters, as unusable.
+function isUnhelpfulPlaidName(value: string): boolean {
+  const trimmed = value.trim()
+  if (!trimmed) return true
+  const letters = trimmed.replace(/[^a-zA-Z]/g, "")
+  if (letters.length < 2) return true
+  const maskChars = (trimmed.match(/\*/g) ?? []).length
+  return maskChars / trimmed.length > 0.4
+}
+
+// The single place that decides what a human sees for a Plaid transaction's
+// name — used anywhere a merchant/vendor name is shown or stored for
+// display (the review card, push notifications, merchant memory, the
+// confirmed expense's own vendor field). Prefers the enriched merchant
+// name, falls back to the raw descriptor, and only resorts to a plain
+// placeholder when both are unhelpful.
+export function resolvePlaidDisplayName(merchantName: string | null, rawName: string): string {
+  if (merchantName && !isUnhelpfulPlaidName(merchantName)) return merchantName
+  if (!isUnhelpfulPlaidName(rawName)) return rawName
+  return "Unknown merchant"
 }
 
 // Maps Plaid's Personal Finance Category taxonomy (primary tier) to the
