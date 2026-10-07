@@ -1,14 +1,19 @@
 "use client"
 
-import { Camera, ImagePlus, Paperclip, X } from "lucide-react"
+import { Camera, ImagePlus, Loader2, Paperclip, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import type { ReceiptCapture } from "@/hooks/use-receipt-capture"
+
+// Every state (picker buttons, processing, attached) renders in a row of this
+// same fixed height, so picking a photo never shifts the fields below.
+const ROW_CLASS = "flex h-14 items-center gap-2"
 
 export default function ReceiptCaptureField({ capture }: { capture: ReceiptCapture }) {
   const {
     attachedReceiptAsset,
     receiptUploading,
+    pendingReceiptPreview,
     receiptError,
     isNativeCamera,
     receiptFileInputRef,
@@ -28,7 +33,7 @@ export default function ReceiptCaptureField({ capture }: { capture: ReceiptCaptu
       </div>
 
       {attachedReceiptAsset ? (
-        <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2">
+        <div className={`${ROW_CLASS} rounded-lg border border-border bg-muted/20 px-3`}>
           {attachedReceiptAsset.dataUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -57,9 +62,33 @@ export default function ReceiptCaptureField({ capture }: { capture: ReceiptCaptu
           </button>
         </div>
       ) : receiptUploading ? (
-        <p className="text-sm text-muted-foreground">Uploading receipt...</p>
+        <div className={`${ROW_CLASS} rounded-lg border border-border bg-muted/20 px-3`}>
+          {pendingReceiptPreview ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={pendingReceiptPreview.url}
+              alt="Receipt preview"
+              className="h-10 w-10 rounded object-cover opacity-70"
+              onError={(event) => {
+                // e.g. HEIC outside Safari — fall back to just the label
+                event.currentTarget.style.display = "none"
+              }}
+            />
+          ) : null}
+          <div className="min-w-0 flex-1">
+            {pendingReceiptPreview ? (
+              <span className="block truncate text-sm text-foreground">
+                {pendingReceiptPreview.fileName}
+              </span>
+            ) : null}
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Processing receipt...
+            </span>
+          </div>
+        </div>
       ) : (
-        <div className="flex flex-wrap gap-2">
+        <div className={ROW_CLASS}>
           <input
             ref={receiptFileInputRef}
             type="file"

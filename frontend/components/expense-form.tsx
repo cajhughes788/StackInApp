@@ -927,14 +927,13 @@ export default function ExpenseForm() {
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Receipt attachment — placed first so the user can kick off the
                 upload immediately while filling in the rest of the form.
-                Hidden during the brief decode/quality-check/create-doc
-                window (receiptUploading) rather than showing a "processing"
-                state — it reappears once that settles (as either the
-                attached preview or, on failure, the picker buttons plus an
-                inline error), and the rest of the form — including
-                submitting it — was never blocked on this in the first
-                place; see handleSubmit's pendingReceiptCapture handling. */}
-            {receiptUploading ? null : <ReceiptCaptureField capture={receiptCapture} />}
+                Stays mounted at a fixed height through the brief
+                decode/quality-check/create-doc window (showing the picked
+                photo with a "Processing" label) so the fields below never
+                shift. The rest of the form — including submitting it — is
+                never blocked on this; see handleSubmit's
+                pendingReceiptCapture handling. */}
+            <ReceiptCaptureField capture={receiptCapture} />
 
             <div>
               <Label htmlFor="date">Date</Label>

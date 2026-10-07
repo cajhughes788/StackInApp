@@ -25,6 +25,15 @@ export function useReceiptCapture(workspaceId: string | null) {
   const [attachedReceiptAsset, setAttachedReceiptAsset] = useState<ReceiptAsset | null>(null)
   const [receiptUploading, setReceiptUploading] = useState(false)
   const [receiptError, setReceiptError] = useState<string | null>(null)
+  // Local blob: preview of the picked/captured image, shown while
+  // processReceiptFile is still decoding/checking/creating the doc so the
+  // field can show the photo immediately instead of a blank gap. On success
+  // the same URL is handed to the asset as its dataUrl (not revoked); on
+  // failure it's revoked.
+  const [pendingReceiptPreview, setPendingReceiptPreview] = useState<{
+    url: string
+    fileName: string
+  } | null>(null)
   const [isNativeCamera, setIsNativeCamera] = useState(false)
   const receiptFileInputRef = useRef<HTMLInputElement | null>(null)
   // Lets a caller (ExpenseForm) that doesn't want to block its own submit on
@@ -70,6 +79,8 @@ export function useReceiptCapture(workspaceId: string | null) {
       return null
     }
 
+    const previewUrl = URL.createObjectURL(file)
+    setPendingReceiptPreview({ url: previewUrl, fileName: file.name })
     setReceiptUploading(true)
     setReceiptError(null)
 
@@ -131,9 +142,10 @@ export function useReceiptCapture(workspaceId: string | null) {
         qualityStatus: quality.qualityStatus,
         qualityWarnings: quality.warnings,
         uploadStatus: "uploading",
-        dataUrl: URL.createObjectURL(file),
+        dataUrl: previewUrl,
       }
       setAttachedReceiptAsset(asset)
+      setPendingReceiptPreview(null)
       setReceiptUploading(false)
 
       // Background: upload the original + preview + thumbnail bytes. The
@@ -176,6 +188,8 @@ export function useReceiptCapture(workspaceId: string | null) {
       return asset
     } catch (err) {
       setReceiptError(err instanceof Error ? err.message : "Failed to attach receipt.")
+      URL.revokeObjectURL(previewUrl)
+      setPendingReceiptPreview(null)
       setReceiptUploading(false)
       return null
     } finally {
@@ -219,6 +233,7 @@ export function useReceiptCapture(workspaceId: string | null) {
   return {
     attachedReceiptAsset,
     receiptUploading,
+    pendingReceiptPreview,
     receiptError,
     isNativeCamera,
     receiptFileInputRef,
