@@ -1028,9 +1028,10 @@ export default function ExpenseForm() {
                         id="vehicleMileageVendor"
                         type="text"
                         value={form.vehicle.mileage.vendor}
-                        onChange={(event) =>
+                        onChange={(event) => {
                           updateVehicleMileageField("vendor", event.target.value)
-                        }
+                          setVendorFocused(true)
+                        }}
                         onFocus={() => setVendorFocused(true)}
                         onBlur={() => {
                           window.setTimeout(() => setVendorFocused(false), 100)
@@ -1047,6 +1048,7 @@ export default function ExpenseForm() {
                               onMouseDown={(event) => {
                                 event.preventDefault()
                                 updateVehicleMileageField("vendor", vendor)
+                                setVendorFocused(false)
                               }}
                             >
                               {vendor}
@@ -1144,9 +1146,10 @@ export default function ExpenseForm() {
                         id="vehicleMileageDescription"
                         type="text"
                         value={form.vehicle.mileage.description}
-                        onChange={(event) =>
+                        onChange={(event) => {
                           updateVehicleMileageField("description", event.target.value)
-                        }
+                          setDescriptionFocused(true)
+                        }}
                         onFocus={() => setDescriptionFocused(true)}
                         onBlur={() => {
                           window.setTimeout(() => setDescriptionFocused(false), 100)
@@ -1164,6 +1167,7 @@ export default function ExpenseForm() {
                               onMouseDown={(event) => {
                                 event.preventDefault()
                                 updateVehicleMileageField("description", description)
+                                setDescriptionFocused(false)
                               }}
                             >
                               {description}
@@ -1181,9 +1185,10 @@ export default function ExpenseForm() {
                         id="vehicleDirectVendor"
                         type="text"
                         value={form.vehicle.directExpense.vendor}
-                        onChange={(event) =>
+                        onChange={(event) => {
                           updateVehicleDirectField("vendor", event.target.value)
-                        }
+                          setVendorFocused(true)
+                        }}
                         onFocus={() => setVendorFocused(true)}
                         onBlur={() => {
                           window.setTimeout(() => setVendorFocused(false), 100)
@@ -1201,6 +1206,7 @@ export default function ExpenseForm() {
                               onMouseDown={(event) => {
                                 event.preventDefault()
                                 updateVehicleDirectField("vendor", vendor)
+                                setVendorFocused(false)
                               }}
                             >
                               {vendor}
@@ -1230,9 +1236,10 @@ export default function ExpenseForm() {
                         id="vehicleDirectDescription"
                         type="text"
                         value={form.vehicle.directExpense.description}
-                        onChange={(event) =>
+                        onChange={(event) => {
                           updateVehicleDirectField("description", event.target.value)
-                        }
+                          setDescriptionFocused(true)
+                        }}
                         onFocus={() => setDescriptionFocused(true)}
                         onBlur={() => {
                           window.setTimeout(() => setDescriptionFocused(false), 100)
@@ -1250,6 +1257,7 @@ export default function ExpenseForm() {
                               onMouseDown={(event) => {
                                 event.preventDefault()
                                 updateVehicleDirectField("description", description)
+                                setDescriptionFocused(false)
                               }}
                             >
                               {description}
@@ -1283,9 +1291,10 @@ export default function ExpenseForm() {
                     id="vendor"
                     type="text"
                     value={form.generic.vendor}
-                    onChange={(event) =>
+                    onChange={(event) => {
                       updateGenericField("vendor", event.target.value)
-                    }
+                      setVendorFocused(true)
+                    }}
                     onFocus={() => setVendorFocused(true)}
                     onBlur={() => {
                       window.setTimeout(() => setVendorFocused(false), 100)
@@ -1303,6 +1312,7 @@ export default function ExpenseForm() {
                           onMouseDown={(event) => {
                             event.preventDefault()
                             updateGenericField("vendor", vendor)
+                            setVendorFocused(false)
                           }}
                         >
                           {vendor}
@@ -1318,9 +1328,10 @@ export default function ExpenseForm() {
                     id="description"
                     type="text"
                     value={form.generic.description}
-                    onChange={(event) =>
+                    onChange={(event) => {
                       updateGenericField("description", event.target.value)
-                    }
+                      setDescriptionFocused(true)
+                    }}
                     onFocus={() => setDescriptionFocused(true)}
                     onBlur={() => {
                       window.setTimeout(() => setDescriptionFocused(false), 100)
@@ -1338,6 +1349,7 @@ export default function ExpenseForm() {
                           onMouseDown={(event) => {
                             event.preventDefault()
                             updateGenericField("description", description)
+                            setDescriptionFocused(false)
                           }}
                         >
                           {description}

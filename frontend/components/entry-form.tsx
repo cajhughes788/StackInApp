@@ -92,6 +92,7 @@ function resolvePositionRate(settings: Parameters<typeof getRateOptions>[0], pos
     return { positionId: option.id, rate: option.rate.toString() };
 }
 const PAYMENT_REPEAT_FIELDS = ["venmo", "appleCash", "zelle", "posSales", "cashSales"] as const;
+type PaymentField = (typeof PAYMENT_REPEAT_FIELDS)[number];
 export default function EntryForm() {
     const workspaceState = useWorkspaceStore((s) => s.state);
     const activeWorkspace = workspaceState.status === "ready"
@@ -243,6 +244,28 @@ export default function EntryForm() {
     const [repeatCadence, setRepeatCadence] = useState<RecurringCadence>({ freq: "monthly" });
     const [repeatEndDate, setRepeatEndDate] = useState("");
     const submitTraceRef = useRef<ReturnType<typeof createProfileTrace> | null>(null);
+    // Only the payment field being worked on shows its full category split;
+    // the rest collapse to a one-line summary so the form stays readable.
+    const [openBreakdownField, setOpenBreakdownField] = useState<PaymentField | null>(null);
+    useEffect(() => {
+        if (!openBreakdownField)
+            return;
+        // pointerdown as well as focusin: iOS WebKit doesn't focus buttons
+        // (the category checkboxes) on tap, so focus alone can't tell a tap
+        // inside the panel from one outside it.
+        const collapseIfOutside = (event: Event) => {
+            const target = event.target as Element | null;
+            if (target?.closest?.(`[data-breakdown-field="${openBreakdownField}"]`))
+                return;
+            setOpenBreakdownField(null);
+        };
+        document.addEventListener("pointerdown", collapseIfOutside);
+        document.addEventListener("focusin", collapseIfOutside);
+        return () => {
+            document.removeEventListener("pointerdown", collapseIfOutside);
+            document.removeEventListener("focusin", collapseIfOutside);
+        };
+    }, [openBreakdownField]);
     debugRender("entry-form", {
         workspaceId: activeWorkspaceId,
         workspaceType: activeWorkspace?.type ?? null,
@@ -317,6 +340,15 @@ export default function EntryForm() {
         const draft = form.paymentBreakdowns[field];
         if (total <= 0)
             return null;
+        if (openBreakdownField !== field) {
+            const summary = draft.selected
+                .map((category) => `${categoryLabels[category]} ${formatCurrency(parseMoney(draft[category]))}`)
+                .join(" · ");
+            return (<button type="button" onClick={() => setOpenBreakdownField(field)} className="mt-2 flex w-full items-center justify-between gap-2 rounded-md border bg-secondary/50 px-3 py-2 text-left text-xs text-muted-foreground">
+          <span className="truncate">{summary || "No categories selected"}</span>
+          <span className="shrink-0 font-medium text-foreground">Edit split</span>
+        </button>);
+        }
         return (<div className="mt-3 space-y-3 rounded-md border bg-secondary/80 p-3">
         <div className="text-sm font-medium">
           Split {config.label} into categories
@@ -944,39 +976,39 @@ export default function EntryForm() {
                 </div>)}
 
               {/* Venmo */}
-              {visibility.showVenmo && showIncomeSource("venmo") && (<div>
+              {visibility.showVenmo && showIncomeSource("venmo") && (<div data-breakdown-field="venmo">
                   <Label htmlFor="venmo">Venmo</Label>
-                  <Input id="venmo" type="number" step="0.01" value={form.venmo} onChange={(e) => updateCategorizedPaymentAmount("venmo", e.target.value)}/>
+                  <Input id="venmo" type="number" step="0.01" value={form.venmo} onFocus={() => setOpenBreakdownField("venmo")} onChange={(e) => updateCategorizedPaymentAmount("venmo", e.target.value)}/>
                   {renderPaymentBreakdownFields("venmo")}
                   {renderRepeatSwitch("venmo")}
                 </div>)}
 
               {/* Apple Pay */}
-              {visibility.showAppleCash && showIncomeSource("appleCash") && (<div>
+              {visibility.showAppleCash && showIncomeSource("appleCash") && (<div data-breakdown-field="appleCash">
                   <Label htmlFor="appleCash">Apple Pay</Label>
-                  <Input id="appleCash" type="number" step="0.01" value={form.appleCash} onChange={(e) => updateCategorizedPaymentAmount("appleCash", e.target.value)}/>
+                  <Input id="appleCash" type="number" step="0.01" value={form.appleCash} onFocus={() => setOpenBreakdownField("appleCash")} onChange={(e) => updateCategorizedPaymentAmount("appleCash", e.target.value)}/>
                   {renderPaymentBreakdownFields("appleCash")}
                   {renderRepeatSwitch("appleCash")}
                 </div>)}
 
-              {visibility.showZelle && showIncomeSource("zelle") && (<div>
+              {visibility.showZelle && showIncomeSource("zelle") && (<div data-breakdown-field="zelle">
                   <Label htmlFor="zelle">Zelle</Label>
-                  <Input id="zelle" type="number" step="0.01" value={form.zelle} onChange={(e) => updateCategorizedPaymentAmount("zelle", e.target.value)}/>
+                  <Input id="zelle" type="number" step="0.01" value={form.zelle} onFocus={() => setOpenBreakdownField("zelle")} onChange={(e) => updateCategorizedPaymentAmount("zelle", e.target.value)}/>
                   {renderPaymentBreakdownFields("zelle")}
                   {renderRepeatSwitch("zelle")}
                 </div>)}
 
               {/* POS Sales */}
-              {visibility.showPosSales && showIncomeSource("posSales") && (<div>
+              {visibility.showPosSales && showIncomeSource("posSales") && (<div data-breakdown-field="posSales">
                   <Label htmlFor="posSales">POS Sales</Label>
-                  <Input id="posSales" type="number" step="0.01" value={form.posSales} onChange={(e) => updateCategorizedPaymentAmount("posSales", e.target.value)}/>
+                  <Input id="posSales" type="number" step="0.01" value={form.posSales} onFocus={() => setOpenBreakdownField("posSales")} onChange={(e) => updateCategorizedPaymentAmount("posSales", e.target.value)}/>
                   {renderPaymentBreakdownFields("posSales")}
                   {renderRepeatSwitch("posSales")}
                 </div>)}
 
-              {visibility.showCashSales && showIncomeSource("cashSales") && (<div>
+              {visibility.showCashSales && showIncomeSource("cashSales") && (<div data-breakdown-field="cashSales">
                   <Label htmlFor="cashSales">Cash Sales</Label>
-                  <Input id="cashSales" type="number" step="0.01" value={form.cashSales} onChange={(e) => updateCategorizedPaymentAmount("cashSales", e.target.value)}/>
+                  <Input id="cashSales" type="number" step="0.01" value={form.cashSales} onFocus={() => setOpenBreakdownField("cashSales")} onChange={(e) => updateCategorizedPaymentAmount("cashSales", e.target.value)}/>
                   {renderPaymentBreakdownFields("cashSales")}
                   {renderRepeatSwitch("cashSales")}
                 </div>)}

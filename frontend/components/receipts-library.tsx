@@ -219,7 +219,7 @@ export default function ReceiptsLibrary() {
           draft,
         }
       })
-  }, [draftsByCommittedExpenseId, draftsByReceiptAssetId, monthExpenses, selectedMonth])
+  }, [draftsByCommittedExpenseId, draftsByReceiptAssetId, effectiveExpenses, selectedMonth])
 
   const monthLabel = useMemo(() => {
     const [year, month] = selectedMonth.split("-")
