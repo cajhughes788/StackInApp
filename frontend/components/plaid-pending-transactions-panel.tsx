@@ -46,6 +46,30 @@ import { createRecurringRule } from "@/lib/domain/recurringRulesService"
 import { cadenceLabel } from "@shared/recurringSchedule"
 import { useToast } from "@/hooks/use-toast"
 
+// Remembers, per workspace on this device, whether the last load found
+// anything to review. The loading skeleton only shows for a workspace that
+// had pending transactions last time — otherwise every workspace (including
+// ones with no bank linked) would flash the panel while its request is in
+// flight, then hide it when the empty result lands.
+const HAD_PENDING_KEY_PREFIX = "trackd:plaid-review:had-pending:"
+
+function readHadPending(workspaceId: string): boolean {
+  try {
+    return window.localStorage.getItem(HAD_PENDING_KEY_PREFIX + workspaceId) === "1"
+  } catch {
+    return false
+  }
+}
+
+function writeHadPending(workspaceId: string, hadPending: boolean) {
+  try {
+    if (hadPending) window.localStorage.setItem(HAD_PENDING_KEY_PREFIX + workspaceId, "1")
+    else window.localStorage.removeItem(HAD_PENDING_KEY_PREFIX + workspaceId)
+  } catch {
+    // storage unavailable — non-fatal, skeleton just won't show
+  }
+}
+
 // Above this count the review list defaults to collapsed (once, on first
 // load) so a bulk import doesn't bury the manual add-expense form below it —
 // unless the user arrived via a "new transactions to review" push
@@ -213,6 +237,10 @@ export default function PlaidPendingTransactionsPanel() {
   const { toast } = useToast()
   const [transactions, setTransactions] = useState<PlaidPendingTransaction[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const [expectsPending, setExpectsPending] = useState(false)
+  // Workspace whose transactions are currently loaded — null mid-load, so the
+  // had-pending flag isn't written from a previous workspace's list.
+  const loadedWorkspaceIdRef = useRef<string | null>(null)
   const [selectedAccount, setSelectedAccount] = useState<Record<string, string>>({})
   const [personalPrompt, setPersonalPrompt] = useState<PlaidPersonalSuggestion | null>(null)
   const [bulkDismissPromptOpen, setBulkDismissPromptOpen] = useState(false)
@@ -237,10 +265,18 @@ export default function PlaidPendingTransactionsPanel() {
   const loadTransactions = useCallback(async () => {
     if (!activeWorkspaceId) return
     const requestId = ++activeRequestIdRef.current
+    // Drop the previous workspace's list right away — this component isn't
+    // remounted on a workspace switch, so it would otherwise stay on screen
+    // until the new request lands.
+    loadedWorkspaceIdRef.current = null
+    setTransactions([])
+    setSelectedIds(new Set())
+    setExpectsPending(readHadPending(activeWorkspaceId))
     setIsLoading(true)
     try {
       const results = await getPlaidPendingTransactions(activeWorkspaceId)
       if (activeRequestIdRef.current !== requestId) return
+      loadedWorkspaceIdRef.current = activeWorkspaceId
       setTransactions(results)
       setSelectedIds(new Set())
       if (!didAutoCollapseRef.current && results.length > AUTO_COLLAPSE_THRESHOLD) {
@@ -330,6 +366,14 @@ export default function PlaidPendingTransactionsPanel() {
   useEffect(() => {
     void loadTransactions()
   }, [loadTransactions])
+
+  // Keep the had-pending flag current as rows are confirmed/dismissed, so
+  // clearing the last one also stops the skeleton on the next visit.
+  useEffect(() => {
+    if (activeWorkspaceId && loadedWorkspaceIdRef.current === activeWorkspaceId) {
+      writeHadPending(activeWorkspaceId, transactions.length > 0)
+    }
+  }, [activeWorkspaceId, transactions])
 
   function closeReceiptRow() {
     setReceiptRowId(null)
@@ -485,7 +529,7 @@ export default function PlaidPendingTransactionsPanel() {
   }
 
   if (!activeWorkspaceId) return null
-  if (!isLoading && transactions.length === 0) return null
+  if (transactions.length === 0 && !(isLoading && expectsPending)) return null
 
   return (
     <div className="space-y-3">
