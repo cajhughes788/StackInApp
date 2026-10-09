@@ -20,7 +20,7 @@ export default function AppLoader({
     <div
       className={cn(
         fullscreen
-          ? "min-h-screen bg-[#020402] px-6 py-10"
+          ? "min-h-screen bg-[#0E1A2B] px-6 py-10"
           : "min-h-[16rem] bg-transparent px-4 py-6",
         "flex items-center justify-center",
         className,

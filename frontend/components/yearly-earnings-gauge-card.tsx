@@ -104,8 +104,8 @@ export default function YearlyEarningsGaugeCard({
         id: "cash",
         label: "Cash",
         value: breakdown.cash,
-        color: "#16A34A",
-        iconColor: "#15803D",
+        color: "#2BAE8A",
+        iconColor: "#26755E",
         icon: Banknote,
         note: "Reported and personal cash earnings",
       },
@@ -197,7 +197,7 @@ export default function YearlyEarningsGaugeCard({
           <h2 className="mt-1 whitespace-nowrap text-[clamp(1.35rem,4.2vw,2.35rem)] font-semibold tracking-tight text-slate-950 dark:text-white">
             Yearly Earnings Overview
           </h2>
-          <div className="mt-2 text-[clamp(2.05rem,5vw,3.3rem)] font-semibold tracking-tight text-[#19d86b] [text-shadow:0_0_12px_rgba(25,216,107,0.18)]">
+          <div className="mt-2 text-[clamp(2.05rem,5vw,3.3rem)] font-semibold tracking-tight text-[#2BAE8A] [text-shadow:0_0_12px_rgba(43,174,138,0.18)]">
             {formatCurrency(totalGross)}
           </div>
         </div>
@@ -352,7 +352,7 @@ export default function YearlyEarningsGaugeCard({
                           {SelectedIcon ? <SelectedIcon className="h-4 w-4" /> : null}
                         </div>
                       </div>
-                      <div className="mt-2 text-2xl font-semibold tabular-nums text-[#19d86b] [text-shadow:0_0_10px_rgba(25,216,107,0.16)]">
+                      <div className="mt-2 text-2xl font-semibold tabular-nums text-[#2BAE8A] [text-shadow:0_0_10px_rgba(43,174,138,0.16)]">
                         {formatCurrency(selectedSegment.value)}
                       </div>
                       {selectedSegment.id === "cash" ? (

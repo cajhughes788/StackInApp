@@ -740,7 +740,7 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
               <SimpleMenu onPrint={handlePrint} onDownload={handleDownloadPDF} onShare={handleShare}/>
             </div>
 
-            <div className="rounded-[1.75rem] border border-slate-200 bg-[linear-gradient(135deg,rgba(16,185,129,0.12),rgba(255,255,255,0.98)_42%,rgba(15,23,42,0.04))] p-5">
+            <div className="rounded-[1.75rem] border border-slate-200 bg-[linear-gradient(135deg,rgba(43,174,138,0.12),rgba(255,255,255,0.98)_42%,rgba(15,23,42,0.04))] p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="space-y-2">
                   <Badge variant="secondary" className="rounded-full border border-emerald-200 bg-white/80 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-emerald-800">

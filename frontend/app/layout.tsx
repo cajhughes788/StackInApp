@@ -21,11 +21,12 @@ export const metadata: Metadata = {
   description: "Track your income across pay periods",
   icons: {
     icon: [
+      { url: "/favicon.svg", type: "image/svg+xml" },
       { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
       { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
     ],
-    apple: [{ url: "/icon-192.png", sizes: "192x192", type: "image/png" }],
-    shortcut: ["/icon-192.png"],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+    shortcut: ["/favicon.ico"],
   },
   openGraph: {
     title: "StackIn",
@@ -33,10 +34,10 @@ export const metadata: Metadata = {
     url: metadataBase,
     images: [
       {
-        url: "/stackin-share.jpeg",
-        width: 892,
-        height: 396,
-        alt: "StackIn logo artwork",
+        url: "/stackin-share.png",
+        width: 1200,
+        height: 630,
+        alt: "StackIn logo",
       },
     ],
   },
@@ -44,12 +45,12 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "StackIn",
     description: "Track your income across pay periods",
-    images: ["/stackin-share.jpeg"],
+    images: ["/stackin-share.png"],
   },
 }
 
 export const viewport = {
-  themeColor: "#0d1b2a",
+  themeColor: "#0E1A2B",
   viewportFit: "cover" as const,
   width: "device-width",
   initialScale: 1,

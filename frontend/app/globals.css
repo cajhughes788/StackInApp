@@ -47,7 +47,7 @@
   --popover: oklch(0.99 0.003 260);
   --popover-foreground: oklch(0.18 0.01 260);
 
-  --primary: oklch(0.75 0.18 145);
+  --primary: #2BAE8A;
   --primary-foreground: oklch(0.08 0.01 260);
 
   --secondary: oklch(0.92 0.006 260);
@@ -56,15 +56,15 @@
   --muted: oklch(0.93 0.004 260);
   --muted-foreground: oklch(0.65 0 0);
 
-  --accent: oklch(0.95 0.02 145);
+  --accent: oklch(0.95 0.02 169.64);
   --accent-foreground: oklch(0.18 0.01 260);
 
   --destructive: oklch(0.62 0.23 25);
   --destructive-foreground: oklch(0.98 0 0);
 
-  --border: oklch(0.75 0.18 145);
+  --border: #2BAE8A;
   --input: oklch(0.84 0.008 260);
-  --ring: oklch(0.75 0.18 145);
+  --ring: #2BAE8A;
   --soft-surface: oklch(0.84 0.008 260);
   --soft-surface-foreground: oklch(0.18 0.01 260);
   --soft-surface-muted: oklch(0.55 0 0);
@@ -79,12 +79,12 @@
 
   --sidebar: oklch(0.92 0.006 260);
   --sidebar-foreground: oklch(0.18 0.01 260);
-  --sidebar-primary: oklch(0.75 0.18 145);
+  --sidebar-primary: #2BAE8A;
   --sidebar-primary-foreground: oklch(0.08 0.01 260);
-  --sidebar-accent: oklch(0.95 0.02 145);
+  --sidebar-accent: oklch(0.95 0.02 169.64);
   --sidebar-accent-foreground: oklch(0.18 0.01 260);
-  --sidebar-border: oklch(0.75 0.18 145);
-  --sidebar-ring: oklch(0.75 0.18 145);
+  --sidebar-border: #2BAE8A;
+  --sidebar-ring: #2BAE8A;
 }
 
 .dark {
@@ -97,7 +97,7 @@
   --popover: oklch(0.30 0.01 260);
   --popover-foreground: oklch(0.98 0 0);
 
-  --primary: oklch(0.79 0.2 145);
+  --primary: #2BAE8A;
   --primary-foreground: oklch(0.08 0.01 260);
 
   --secondary: oklch(0.32 0.01 260);
@@ -106,15 +106,15 @@
   --muted: oklch(0.33 0.01 260);
   --muted-foreground: oklch(0.78 0 0);
 
-  --accent: oklch(0.34 0.03 145);
+  --accent: oklch(0.34 0.03 169.64);
   --accent-foreground: oklch(0.98 0 0);
 
   --destructive: oklch(0.58 0.23 25);
   --destructive-foreground: oklch(0.98 0 0);
 
-  --border: oklch(0.81 0.2 145);
+  --border: #2BAE8A;
   --input: oklch(0.84 0.008 260);
-  --ring: oklch(0.81 0.2 145);
+  --ring: #2BAE8A;
   --soft-surface: oklch(0.84 0.008 260);
   --soft-surface-foreground: oklch(0.18 0.01 260);
   --soft-surface-muted: oklch(0.55 0 0);
@@ -127,12 +127,27 @@
 
   --sidebar: oklch(0.26 0.01 260);
   --sidebar-foreground: oklch(0.98 0 0);
-  --sidebar-primary: oklch(0.79 0.2 145);
+  --sidebar-primary: #2BAE8A;
   --sidebar-primary-foreground: oklch(0.08 0.01 260);
   --sidebar-accent: oklch(0.32 0.01 260);
   --sidebar-accent-foreground: oklch(0.98 0 0);
-  --sidebar-border: oklch(0.81 0.2 145);
-  --sidebar-ring: oklch(0.81 0.2 145);
+  --sidebar-border: #2BAE8A;
+  --sidebar-ring: #2BAE8A;
+}
+
+/* StackIn green (#2BAE8A at 500) replaces Tailwind's emerald scale app-wide */
+@theme {
+  --color-emerald-50: #EFFCF6;
+  --color-emerald-100: #D7F7EA;
+  --color-emerald-200: #B4EFD9;
+  --color-emerald-300: #8BE0C2;
+  --color-emerald-400: #59CBA7;
+  --color-emerald-500: #2BAE8A;
+  --color-emerald-600: #2A9375;
+  --color-emerald-700: #26755E;
+  --color-emerald-800: #215C4A;
+  --color-emerald-900: #1F4B3D;
+  --color-emerald-950: #102A22;
 }
 
 @theme inline {
@@ -409,142 +424,43 @@
   border-radius: 4px;
 }
 
-.stackin-loader-dollar {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: stackin-pulse 0.9s linear infinite;
-}
-
-.stackin-photo-loader-dollar {
+/* StackIn mark loader: the three ledger books settle onto the stack in turn */
+.stackin-mark-book {
   transform-box: view-box;
-  transform-origin: 23% 58%;
-  animation: stackin-pulse 0.9s linear infinite;
+  animation: stackin-book-settle 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite both;
 }
 
-.stackin-loader-coin-stack {
-  transform-box: fill-box;
-  transform-origin: center top;
-  animation: stackin-stack-bounce 1.8s ease-in-out infinite;
+.stackin-mark-book-bottom {
+  animation-delay: 0s;
 }
 
-.stackin-photo-loader-coin-stack {
-  transform-box: view-box;
-  transform-origin: 80% 67%;
-  animation: stackin-stack-bounce 1.8s ease-in-out infinite;
+.stackin-mark-book-middle {
+  animation-delay: 0.18s;
 }
 
-.stackin-loader-coin {
-  opacity: 0;
-  transform-box: fill-box;
-  transform-origin: center;
+.stackin-mark-book-top {
+  animation-delay: 0.36s;
 }
 
-.stackin-photo-loader-coin {
-  opacity: 0;
-  transform-box: view-box;
-  transform-origin: 80% 24%;
-}
-
-.stackin-loader-coin-a {
-  animation: stackin-coin-drop 1.8s linear infinite;
-}
-
-.stackin-photo-loader-coin-a {
-  animation: stackin-coin-drop 1.8s linear infinite;
-}
-
-.stackin-loader-coin-b {
-  animation: stackin-coin-drop 1.8s linear infinite 0.6s;
-}
-
-.stackin-photo-loader-coin-b {
-  animation: stackin-coin-drop 1.8s linear infinite 0.6s;
-}
-
-.stackin-loader-coin-c {
-  animation: stackin-coin-drop 1.8s linear infinite 1.2s;
-}
-
-.stackin-photo-loader-coin-c {
-  animation: stackin-coin-drop 1.8s linear infinite 1.2s;
-}
-
-@keyframes stackin-pulse {
-  0% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(1.14);
-  }
-  100% {
-    transform: scale(1);
-  }
-}
-
-
-@keyframes stackin-coin-drop {
+@keyframes stackin-book-settle {
   0% {
     opacity: 0;
-    transform: translateY(-132px);
+    transform: translateY(-10px);
   }
-  6% {
+  22%,
+  78% {
     opacity: 1;
-    transform: translateY(-132px);
-  }
-  39% {
-    opacity: 1;
-    transform: translateY(72px);
-  }
-  40% {
-    opacity: 0;
-    transform: translateY(72px);
+    transform: translateY(0);
   }
   100% {
     opacity: 0;
-    transform: translateY(72px);
+    transform: translateY(0);
   }
 }
 
-@keyframes stackin-stack-bounce {
-  0% {
-    transform: translateY(0) scale(1);
-  }
-  6% {
-    transform: translateY(0) scale(1);
-  }
-  9% {
-    transform: translateY(4px) scale(1.02, 0.97);
-  }
-  15% {
-    transform: translateY(-1px) scale(0.995, 1.015);
-  }
-  22% {
-    transform: translateY(0) scale(1);
-  }
-  39% {
-    transform: translateY(0) scale(1);
-  }
-  42% {
-    transform: translateY(4px) scale(1.02, 0.97);
-  }
-  48% {
-    transform: translateY(-1px) scale(0.995, 1.015);
-  }
-  55% {
-    transform: translateY(0) scale(1);
-  }
-  73% {
-    transform: translateY(0) scale(1);
-  }
-  76% {
-    transform: translateY(4px) scale(1.02, 0.97);
-  }
-  82% {
-    transform: translateY(-1px) scale(0.995, 1.015);
-  }
-  89%,
-  100% {
-    transform: translateY(0) scale(1);
+@media (prefers-reduced-motion: reduce) {
+  .stackin-mark-book {
+    animation: none;
   }
 }
 
