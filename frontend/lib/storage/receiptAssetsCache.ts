@@ -1,6 +1,12 @@
 "use client"
 
-import { clearKeysWithMeta, getWithMeta, setWithMeta } from "./metadata"
+import {
+  clearKeysWithMeta,
+  clearWithMeta,
+  getWithMeta,
+  listKeysWithMeta,
+  setWithMeta,
+} from "./metadata"
 import { CACHE_VERSIONS } from "./cacheVersions"
 
 export type ReceiptMediaVariant = "preview" | "thumbnail"
@@ -17,6 +23,15 @@ export type CachedReceiptMediaRecord = {
 }
 
 const PREFIX = "receipt-media"
+
+// Each cached preview is a ~2MB data URL in on-device storage, so only the
+// most recent ones are kept (thumbnails are small and kept indefinitely).
+// Older previews still load from Storage like any other receipt.
+const MAX_CACHED_PREVIEWS = 20
+// Save times per preview key, so pruning never has to read the large
+// records themselves to find the oldest.
+const PREVIEW_INDEX_KEY = "receipt-media-index:preview"
+type PreviewIndex = Record<string, number>
 
 function makeReceiptMediaKey(
   workspaceId: string,
@@ -61,16 +76,53 @@ async function saveReceiptMediaFromBlob(
     cachedAt: new Date().toISOString(),
   }
 
-  await setWithMeta(
-    makeReceiptMediaKey(workspaceId, receiptAssetId, variant),
-    record,
-    {
-      ttlMs: Infinity,
-      version: CACHE_VERSIONS.receiptMedia,
-    }
-  )
+  const key = makeReceiptMediaKey(workspaceId, receiptAssetId, variant)
+  await setWithMeta(key, record, {
+    ttlMs: Infinity,
+    version: CACHE_VERSIONS.receiptMedia,
+  })
+
+  if (variant === "preview") {
+    // Not awaited: pruning shouldn't delay the capture that triggered it.
+    void recordPreviewAndPrune(key)
+  }
 
   return record
+}
+
+// Serializes index read-modify-writes when several previews save at once.
+let previewIndexQueue: Promise<void> = Promise.resolve()
+
+function recordPreviewAndPrune(savedKey: string): Promise<void> {
+  const run = previewIndexQueue.then(async () => {
+    const indexRecord = await getWithMeta<PreviewIndex>(PREVIEW_INDEX_KEY, {
+      expectedVersion: CACHE_VERSIONS.receiptMedia,
+    })
+    const savedAt = { ...(indexRecord?.data ?? {}), [savedKey]: Date.now() }
+
+    // Membership comes from the stored keys themselves, so entries removed
+    // elsewhere (asset/workspace cache clears) drop out of the index, and
+    // previews saved before this index existed count as oldest.
+    const previewKeys = (await listKeysWithMeta()).filter(
+      (key) => key.startsWith(`${PREFIX}:`) && key.endsWith(":preview")
+    )
+    previewKeys.sort((left, right) => (savedAt[right] ?? 0) - (savedAt[left] ?? 0))
+
+    const kept = previewKeys.slice(0, MAX_CACHED_PREVIEWS)
+    for (const key of previewKeys.slice(MAX_CACHED_PREVIEWS)) {
+      await clearWithMeta(key)
+    }
+
+    const nextIndex: PreviewIndex = {}
+    for (const key of kept) nextIndex[key] = savedAt[key] ?? 0
+    await setWithMeta(PREVIEW_INDEX_KEY, nextIndex, {
+      ttlMs: Infinity,
+      version: CACHE_VERSIONS.receiptMedia,
+    })
+  })
+  // Pruning is best-effort; never fail (or block later saves on) a capture.
+  previewIndexQueue = run.catch(() => {})
+  return previewIndexQueue
 }
 
 export async function saveReceiptMediaFromFile(

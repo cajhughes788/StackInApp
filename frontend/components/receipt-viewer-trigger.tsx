@@ -76,6 +76,10 @@ export default function ReceiptViewerTrigger({
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [src, setSrc] = useState<string | null>(null)
+  // The (already cached) thumbnail, shown while the full-size preview
+  // resolves and downloads so the viewer never sits on a blank loading line.
+  const [placeholderSrc, setPlaceholderSrc] = useState<string | null>(null)
+  const [previewLoaded, setPreviewLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [transform, setTransform] = useState<TransformState>({
     scale: 1,
@@ -194,6 +198,14 @@ export default function ReceiptViewerTrigger({
     setTransform((current) => clampTransform(current))
   }, [clampTransform])
 
+  // Resolve the full-size image URL as soon as the button is on screen (URL
+  // only, no image bytes; persisted after the first time) so a tap only has
+  // to download the image. Concurrent lookups are shared with the click.
+  useEffect(() => {
+    void resolveReceiptMediaSource(workspaceId, receiptAssetId, "preview", asset).catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per receipt
+  }, [workspaceId, receiptAssetId])
+
   async function handleOpenChange(nextOpen: boolean) {
     setOpen(nextOpen)
     if (!nextOpen) {
@@ -206,6 +218,12 @@ export default function ReceiptViewerTrigger({
 
     setLoading(true)
     setError(null)
+
+    void resolveReceiptMediaSource(workspaceId, receiptAssetId, "thumbnail", asset)
+      .then((result) => {
+        if (result.src) setPlaceholderSrc(result.src)
+      })
+      .catch(() => {})
 
     try {
       const result = await resolveReceiptMediaSource(
@@ -459,15 +477,29 @@ export default function ReceiptViewerTrigger({
               onPointerCancel={handlePointerEnd}
               onDoubleClick={handleDoubleClick}
             >
+              {placeholderSrc && !previewLoaded && (loading || src) ? (
+                <img
+                  src={placeholderSrc}
+                  alt=""
+                  aria-hidden="true"
+                  draggable={false}
+                  className="max-h-[calc(95vh-4.5rem)] w-auto max-w-full select-none object-contain blur-[2px]"
+                />
+              ) : null}
               {loading ? (
-                <p className="text-sm text-white/80">Loading receipt preview...</p>
+                placeholderSrc ? null : (
+                  <p className="text-sm text-white/80">Loading receipt preview...</p>
+                )
               ) : src ? (
                 <img
                   src={src}
                   alt={title}
                   draggable={false}
-                  className="max-h-[calc(95vh-4.5rem)] w-auto max-w-full select-none object-contain"
+                  className={`max-h-[calc(95vh-4.5rem)] w-auto max-w-full select-none object-contain${
+                    previewLoaded || !placeholderSrc ? "" : " pointer-events-none absolute opacity-0"
+                  }`}
                   onLoad={(event) => {
+                    setPreviewLoaded(true)
                     setImageSize({
                       width: event.currentTarget.naturalWidth,
                       height: event.currentTarget.naturalHeight,

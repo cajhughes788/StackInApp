@@ -172,7 +172,9 @@ export async function uploadReceiptAssetToStorage(
     })
     await uploadBytes(storageRef, file, {
       contentType: file.type || "image/jpeg",
-      cacheControl: "public,max-age=3600",
+      // Each receipt asset id gets fresh paths, so these bytes never change:
+      // let the browser/WebView keep them instead of re-downloading hourly.
+      cacheControl: "private,max-age=31536000,immutable",
     })
     trace.end("receipt.upload.bytes", {
       storagePath,

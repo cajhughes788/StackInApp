@@ -299,7 +299,7 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
             `Net Income: ${formatCurrency(Number(netIncome))}`,
             `Total Deductions: ${formatCurrency(deductions)}`,
             stub.totalUnreported !== undefined
-                ? `Unreported Cash: ${formatCurrency(Number(stub.totalUnreported))}`
+                ? `Personal Cash: ${formatCurrency(Number(stub.totalUnreported))}`
                 : null,
         ]
             .filter(Boolean)
@@ -327,7 +327,7 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
             ["Summary", "", "Gross Income", Number(stub.grossIncome), "", ""],
             ["Summary", "", "Net Income", Number(stub.netIncome), "", ""],
             ...(stub.totalUnreported !== undefined
-                ? [["Summary", "", "Unreported Cash", Number(stub.totalUnreported), "", ""]]
+                ? [["Summary", "", "Personal Cash", Number(stub.totalUnreported), "", ""]]
                 : []),
             ...rows.map((row) => [
                 "Entries",
@@ -355,7 +355,7 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
                 .map((row) => ["Entry Details", row.date ?? "", "Reported Cash", getRowReportedCash(row), "", ""]),
             ...rows
                 .filter((row) => getRowUnreportedCash(row) !== 0)
-                .map((row) => ["Entry Details", row.date ?? "", "Unreported Cash", getRowUnreportedCash(row), "", ""]),
+                .map((row) => ["Entry Details", row.date ?? "", "Personal Cash", getRowUnreportedCash(row), "", ""]),
             ...deductions.map(([label, amount]) => ["Deductions", "", label, Number(amount), "", ""]),
         ];
 
@@ -1043,7 +1043,7 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
                   </div>)}
 
                 {stub.totalUnreported !== undefined && stub.totalUnreported > 0 && (<div className="rounded-lg border border-border/70 bg-secondary/40 px-3 py-3 min-[420px]:py-3.5">
-                    <div className="text-xs uppercase tracking-wide text-muted-foreground">Unreported Cash</div>
+                    <div className="text-xs uppercase tracking-wide text-muted-foreground">Personal Cash</div>
                     <div className="mt-1 text-lg font-semibold tabular-nums text-foreground">
                       {formatCurrency(Number(stub.totalUnreported))}
                     </div>

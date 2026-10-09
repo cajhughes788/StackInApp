@@ -16,20 +16,85 @@ function getAssetVersion(asset: Partial<ReceiptAsset> | null | undefined): numbe
   return asset?.version ?? 1
 }
 
-async function resolveUrlFromPath(
+// Resolved (and in-flight) download URLs for the session. Saves repeat
+// persistent-cache reads (a native bridge call each on iOS) and collapses
+// concurrent lookups — e.g. a viewer's warm-up and its click — into one
+// getDownloadURL.
+const resolvedUrls = new Map<string, Promise<string>>()
+
+function resolveUrlFromPath(
   workspaceId: string,
   receiptAssetId: string,
   variant: ReceiptUrlVariant,
   storagePath: string
-): Promise<string | null> {
-  const cached = await loadReceiptMediaUrl(workspaceId, receiptAssetId, variant)
-  if (cached) return cached
+): Promise<string> {
+  const key = `${workspaceId}:${receiptAssetId}:${variant}`
+  const existing = resolvedUrls.get(key)
+  if (existing) return existing
 
-  const { getDownloadURL, ref } = await import("firebase/storage")
-  const { getStorageSafe } = await import("@/lib/firebase")
-  const url = await getDownloadURL(ref(getStorageSafe(), storagePath))
-  await saveReceiptMediaUrl(workspaceId, receiptAssetId, variant, url)
-  return url
+  const pending = (async () => {
+    const cached = await loadReceiptMediaUrl(workspaceId, receiptAssetId, variant)
+    if (cached) return cached
+
+    const { getDownloadURL, ref } = await import("firebase/storage")
+    const { getStorageSafe } = await import("@/lib/firebase")
+    const url = await getDownloadURL(ref(getStorageSafe(), storagePath))
+    await saveReceiptMediaUrl(workspaceId, receiptAssetId, variant, url)
+    return url
+  })()
+  pending.catch(() => resolvedUrls.delete(key))
+  resolvedUrls.set(key, pending)
+  return pending
+}
+
+// Same formula as the backend's buildDerivedStoragePath (and the client's
+// buildClientReceiptDerivedPath, not imported here to keep firebase/storage
+// out of this module's static graph).
+function derivedStoragePath(
+  workspaceId: string,
+  receiptAssetId: string,
+  variant: ReceiptMediaVariant
+): string {
+  const fileName = variant === "thumbnail" ? "thumb.jpg" : "preview.jpg"
+  return `workspaces/${workspaceId}/receipts/${receiptAssetId}/${fileName}`
+}
+
+function hasMediaSource(asset: Partial<ReceiptAsset> | null | undefined): boolean {
+  return Boolean(
+    asset?.previewStoragePath ||
+      asset?.thumbnailStoragePath ||
+      asset?.originalStoragePath ||
+      asset?.storagePath ||
+      asset?.dataUrl
+  )
+}
+
+// Expenses on the Receipts page usually have no draft (and so no asset
+// record) attached, which meant the thumbnail and then the viewer each made
+// their own backend round trip for the same asset. Keep fetched assets (and
+// in-flight fetches) for the session so the viewer reuses the thumbnail's.
+const fetchedAssets = new Map<string, Promise<ReceiptAsset>>()
+
+function fetchAssetOnce(workspaceId: string, receiptAssetId: string): Promise<ReceiptAsset> {
+  const key = `${workspaceId}:${receiptAssetId}`
+  const existing = fetchedAssets.get(key)
+  if (existing) return existing
+
+  const pending = getReceiptAsset(workspaceId, receiptAssetId).then(
+    (fetched) => {
+      // Don't pin a record that may still change (upload still running).
+      if (!hasMediaSource(fetched) || fetched.uploadStatus === "uploading") {
+        fetchedAssets.delete(key)
+      }
+      return fetched
+    },
+    (err) => {
+      fetchedAssets.delete(key)
+      throw err
+    }
+  )
+  fetchedAssets.set(key, pending)
+  return pending
 }
 
 async function ensureAsset(
@@ -37,20 +102,11 @@ async function ensureAsset(
   receiptAssetId: string,
   asset?: Partial<ReceiptAsset> | null
 ): Promise<ReceiptAsset> {
-  if (asset?.id === receiptAssetId) {
-    const hasStoragePath = Boolean(
-      asset.previewStoragePath ||
-        asset.thumbnailStoragePath ||
-        asset.originalStoragePath ||
-        asset.storagePath ||
-        asset.dataUrl
-    )
-    if (hasStoragePath) {
-      return asset as ReceiptAsset
-    }
+  if (asset?.id === receiptAssetId && hasMediaSource(asset)) {
+    return asset as ReceiptAsset
   }
 
-  return getReceiptAsset(workspaceId, receiptAssetId)
+  return fetchAssetOnce(workspaceId, receiptAssetId)
 }
 
 export async function resolveReceiptMediaSource(
@@ -67,6 +123,24 @@ export async function resolveReceiptMediaSource(
   )
   if (cached?.dataUrl) {
     return { src: cached.dataUrl, asset: (asset as ReceiptAsset) ?? null, fromCache: true }
+  }
+
+  // Without an asset record in hand (expenses carry only the id), go
+  // straight to the deterministic derived path instead of a backend round
+  // trip for the record. Only if that object is missing (older receipt, or
+  // its preview upload failed) fall back to fetching the record.
+  if (!hasMediaSource(asset)) {
+    try {
+      const url = await resolveUrlFromPath(
+        workspaceId,
+        receiptAssetId,
+        variant,
+        derivedStoragePath(workspaceId, receiptAssetId, variant)
+      )
+      return { src: url, asset: (asset as ReceiptAsset) ?? null, fromCache: false }
+    } catch {
+      // Fall through to the asset record's own paths.
+    }
   }
 
   const resolvedAsset = await ensureAsset(workspaceId, receiptAssetId, asset)
@@ -138,7 +212,7 @@ export async function resolveReceiptOriginalUrl(
   }
 
   try {
-    const fetched = await getReceiptAsset(workspaceId, receiptAssetId)
+    const fetched = await fetchAssetOnce(workspaceId, receiptAssetId)
     const path = fetched.originalStoragePath ?? fetched.storagePath
     if (!path) return null
     return resolveUrlFromPath(workspaceId, receiptAssetId, "original", path)

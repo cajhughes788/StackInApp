@@ -952,7 +952,7 @@ export default function EntriesGrid() {
       </th>)}
 
     {visibility.showUnreportedCash && (<th className={`${thBase} text-center sm:text-right`}>
-        <ResponsiveHeader desktopLabel="Unreported Cash" mobileLines={["Unreported", "Cash"]}/>
+        <ResponsiveHeader desktopLabel="Personal Cash" mobileLines={["Personal", "Cash"]}/>
       </th>)}
 
     {/* Day Total appears outside this block */}
@@ -972,7 +972,7 @@ export default function EntriesGrid() {
           <ResponsiveHeader desktopLabel="Reported Cash" mobileLines={["Reported", "Cash"]}/>
         </th>)}
       {independentColumns?.showUnreportedCash && (<th className={`${thBase} text-center sm:text-right`}>
-          <ResponsiveHeader desktopLabel="Unreported Cash" mobileLines={["Unreported", "Cash"]}/>
+          <ResponsiveHeader desktopLabel="Personal Cash" mobileLines={["Personal", "Cash"]}/>
         </th>)}
       {independentColumns?.showVenmo && (<th className={`${thBase} text-center sm:text-right`}>
           <ResponsiveHeader desktopLabel="Venmo"/>
@@ -1058,7 +1058,7 @@ export default function EntriesGrid() {
             <NumericCell entry={e} field="w2.reportedCash" prefix="$"/>
           </td>)}
 
-        {/* Unreported Cash */}
+        {/* Personal Cash */}
         {visibility.showUnreportedCash && (<td className={`${tdBase} text-center tabular-nums whitespace-nowrap sm:text-right leading-tight py-1`}>
             <NumericCell entry={e} field="w2.unreportedCash" prefix="$"/>
           </td>)}

@@ -410,7 +410,7 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
               <div className="flex items-center justify-between">
                 <div>
                   <Label htmlFor="askUnreportedCash">
-                    Unreported Cash
+                    Personal Cash
                   </Label>
                   <p className="text-xs text-muted-foreground">
                     For personal tracking only — your data stays yours.
@@ -423,7 +423,7 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
               {local.askUnreportedCash && (<div className="flex items-center justify-between pl-2">
                   <div>
                     <Label htmlFor="includeUnreportedInUI">
-                      Include unreported cash in income totals?
+                      Include personal cash in income totals?
                     </Label>
                     <p className="text-xs text-muted-foreground">
                       Does not affect tax estimations; appears in totals +

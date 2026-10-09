@@ -181,7 +181,7 @@ export default function IndependentSettingsSection({
 
               <div className="flex items-center justify-between">
                 <div>
-                  <Label>Unreported Cash</Label>
+                  <Label>Personal Cash</Label>
                   <p className="text-xs text-muted-foreground">
                     For personal tracking only — not used in taxes.
                   </p>
@@ -195,13 +195,13 @@ export default function IndependentSettingsSection({
                 />
               </div>
 
-              {/* Include unreported cash in UI */}
+              {/* Include personal cash in UI */}
               {local.askUnreportedCash && (
                 <div className="flex items-center justify-between pl-2">
                   <div>
                     <Label>Include in income totals?</Label>
                     <p className="text-xs text-muted-foreground">
-                      Adds unreported cash to gauge + averages.
+                      Adds personal cash to gauge + averages.
                     </p>
                   </div>
 

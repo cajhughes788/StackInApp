@@ -905,7 +905,7 @@ export default function EntryForm() {
             </div>)}
 
           {visibility?.showUnreportedCash && (<div>
-              <Label htmlFor="unreportedCash">Unreported Cash</Label>
+              <Label htmlFor="unreportedCash">Personal Cash</Label>
               <Input id="unreportedCash" type="number" step="0.01" value={form.unreportedCash} onChange={(e) => setForm({ ...form, unreportedCash: e.target.value })}/>
             </div>)}
 
@@ -971,7 +971,7 @@ export default function EntryForm() {
                 </div>)}
 
               {visibility.showIndependentUnreportedCash && showNonSourceIncomeField && (<div>
-                  <Label htmlFor="independentUnreportedCash">Unreported Cash</Label>
+                  <Label htmlFor="independentUnreportedCash">Personal Cash</Label>
                   <Input id="independentUnreportedCash" type="number" step="0.01" value={form.unreportedCash} onChange={(e) => setForm({ ...form, unreportedCash: e.target.value })}/>
                 </div>)}
 
