@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Capacitor } from "@capacitor/core"
 import { Browser } from "@capacitor/browser"
 import { usePlaidLink } from "react-plaid-link"
@@ -15,6 +15,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Select,
   SelectContent,
@@ -42,22 +43,26 @@ type LinkMetadata = { institutionId: string | null; accounts: Array<{ name: stri
 // Settings) shows "no bank connected" for a beat before loadItems() resolves,
 // even when a connection has existed for months. Cache the last-known list
 // per workspace so the connected-bank cards render immediately, then let
-// loadItems() silently reconcile in the background as before.
+// loadItems() silently reconcile in the background.
+//
+// No expiry: the snapshot is always revalidated on mount, so an old one only
+// ever shows briefly before being corrected — whereas the 5-minute TTL this
+// used to have meant almost every visit (they're rarely 5 minutes apart)
+// started from nothing and flashed "Connect a bank" anyway.
 const PLAID_ITEMS_CACHE_PREFIX = "plaid_items_snapshot:"
-const PLAID_ITEMS_CACHE_TTL_MS = 5 * 60 * 1000
 
-function loadCachedPlaidItems(workspaceId: string): PlaidItem[] {
-  if (typeof window === "undefined") return []
+// null = no snapshot for this workspace on this device (vs. a snapshot that
+// says "no banks"), so the first load can show a loading state instead of
+// an empty, unconnected-looking section.
+function loadCachedPlaidItems(workspaceId: string): PlaidItem[] | null {
+  if (typeof window === "undefined") return null
   try {
     const raw = window.localStorage.getItem(PLAID_ITEMS_CACHE_PREFIX + workspaceId)
-    if (!raw) return []
-    const parsed = JSON.parse(raw) as { items?: unknown; writtenAt?: unknown }
-    if (!Array.isArray(parsed.items)) return []
-    const writtenAt = typeof parsed.writtenAt === "number" ? parsed.writtenAt : 0
-    if (Date.now() - writtenAt > PLAID_ITEMS_CACHE_TTL_MS) return []
-    return parsed.items as PlaidItem[]
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as { items?: unknown }
+    return Array.isArray(parsed.items) ? (parsed.items as PlaidItem[]) : null
   } catch {
-    return []
+    return null
   }
 }
 
@@ -110,7 +115,13 @@ function WebPlaidLink({
 
 export default function PlaidConnectButton({ workspaceId }: { workspaceId: string }) {
   const { toast } = useToast()
-  const [items, setItems] = useState<PlaidItem[]>(() => loadCachedPlaidItems(workspaceId))
+  // null until either the cached snapshot or the first fetch says what's
+  // connected — rendered as a loading state, never as "no banks".
+  const [items, setItems] = useState<PlaidItem[] | null>(() => loadCachedPlaidItems(workspaceId))
+  const [loadFailed, setLoadFailed] = useState(false)
+  // Guards against a slow response for a previous workspace landing after a
+  // switch and overwriting the current one's list.
+  const activeRequestIdRef = useRef(0)
   const [isConnecting, setIsConnecting] = useState(false)
   const [webLinkToken, setWebLinkToken] = useState<string | null>(null)
   const [webLinkMode, setWebLinkMode] = useState<"connect" | "reconnect">("connect")
@@ -124,20 +135,35 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
   const isNative = Capacitor.isNativePlatform()
 
   const loadItems = useCallback(async (): Promise<PlaidItem[]> => {
+    const requestId = ++activeRequestIdRef.current
     try {
       const fetched = await getPlaidItems(workspaceId)
-      setItems(fetched)
+      if (activeRequestIdRef.current === requestId) {
+        setItems(fetched)
+        setLoadFailed(false)
+      }
       persistCachedPlaidItems(workspaceId, fetched)
       return fetched
     } catch {
-      // Best-effort — the account page still functions without the list.
+      // Keep whatever is showing (the cached list) rather than blanking it —
+      // a failed request says nothing about whether banks are connected.
+      if (activeRequestIdRef.current === requestId) setLoadFailed(true)
       return []
     }
   }, [workspaceId])
 
+  // On mount and on workspace switch (this component isn't remounted when
+  // the active workspace changes): show that workspace's snapshot, then
+  // revalidate.
+  const mountedWorkspaceIdRef = useRef(workspaceId)
   useEffect(() => {
+    if (mountedWorkspaceIdRef.current !== workspaceId) {
+      mountedWorkspaceIdRef.current = workspaceId
+      setItems(loadCachedPlaidItems(workspaceId))
+      setLoadFailed(false)
+    }
     void loadItems()
-  }, [loadItems])
+  }, [workspaceId, loadItems])
 
   const finishExchange = useCallback(
     async (publicToken: string, linkMetadata: LinkMetadata) => {
@@ -242,6 +268,7 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
     const defaultBusiness = value === "business" ? true : value === "personal" ? false : null
     const previousItems = items
     setItems((prev) =>
+      prev &&
       prev.map((item) =>
         item.id === itemId
           ? {
@@ -275,6 +302,7 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
         )
       )
       setItems((prev) =>
+        prev &&
         prev.map((current) =>
           current.id === item.id
             ? {
@@ -302,7 +330,23 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
 
   return (
     <div className="space-y-3">
-      {items.map((item) => (
+      {items === null && !loadFailed ? (
+        <div className="rounded-lg border border-muted px-3 py-2 space-y-2" aria-label="Checking your connected banks">
+          <Skeleton className="h-4 w-36" />
+          <Skeleton className="h-3 w-20" />
+        </div>
+      ) : null}
+
+      {items === null && loadFailed ? (
+        <div className="flex items-center justify-between gap-2 rounded-lg border border-muted px-3 py-2 text-sm">
+          <span className="text-muted-foreground">Couldn&apos;t check your connected banks.</span>
+          <Button variant="ghost" size="sm" onClick={() => void loadItems()}>
+            Try again
+          </Button>
+        </div>
+      ) : null}
+
+      {(items ?? []).map((item) => (
         <div key={item.id} className="rounded-lg border border-muted px-3 py-2 space-y-2">
           <div className="flex items-center justify-between">
             <div>
@@ -371,7 +415,7 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
       ))}
 
       <Button variant="outline" className="w-full" onClick={handleConnect} disabled={isConnecting}>
-        {isConnecting ? "Connecting..." : "Connect a bank"}
+        {isConnecting ? "Connecting..." : items && items.length > 0 ? "Connect another bank" : "Connect a bank"}
       </Button>
 
       {webLinkToken ? (
