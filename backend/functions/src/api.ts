@@ -472,6 +472,16 @@ export const resetPlaidMerchantMemory = withCorsAuth(async (req, res) => {
   await resetPlaidMerchantMemoryHandler(req, res)
 })
 
+export const getPlaidHiddenTransfers = withCorsAuth(async (req, res) => {
+  const { getPlaidHiddenTransfersHandler } = await import("./routes/getPlaidHiddenTransfers.js")
+  await getPlaidHiddenTransfersHandler(req, res)
+})
+
+export const restorePlaidHiddenTransfer = withCorsAuth(async (req, res) => {
+  const { restorePlaidHiddenTransferHandler } = await import("./routes/restorePlaidHiddenTransfer.js")
+  await restorePlaidHiddenTransferHandler(req, res)
+})
+
 // Bare onRequest like stripeWebhook — Plaid's signature verification needs
 // the raw request body, which withCorsAuth's express.json() parsing would
 // otherwise consume before the handler sees it.

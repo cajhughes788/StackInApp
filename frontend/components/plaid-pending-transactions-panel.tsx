@@ -45,6 +45,8 @@ import {
 import { createRecurringRule } from "@/lib/domain/recurringRulesService"
 import { cadenceLabel } from "@shared/recurringSchedule"
 import { useToast } from "@/hooks/use-toast"
+import { useReviewRequestNonce } from "@/lib/push/deepLinkStore"
+import { useReviewCountsStore } from "@/lib/stores/useReviewCountsStore"
 
 // Remembers, per workspace on this device, whether the last load found
 // anything to review. The loading skeleton only shows for a workspace that
@@ -73,14 +75,10 @@ function writeHadPending(workspaceId: string, hadPending: boolean) {
 // Above this count the review list defaults to collapsed (once, on first
 // load) so a bulk import doesn't bury the manual add-expense form below it —
 // unless the user arrived via a "new transactions to review" push
-// notification tap (registerPush.ts's deep link), in which case staying
-// collapsed would defeat the point of tapping the notification at all.
+// notification tap (deepLinkStore.ts), in which case staying collapsed
+// would defeat the point of tapping the notification at all.
 const AUTO_COLLAPSE_THRESHOLD = 5
 
-function arrivedViaReviewDeepLink(): boolean {
-  if (typeof window === "undefined") return false
-  return new URLSearchParams(window.location.search).get("openReview") === "1"
-}
 
 // Bulk confirm/dismiss reuses the single-transaction endpoint per item
 // (inherits dedup/category-normalization/merchant-memory for free) rather
@@ -128,26 +126,41 @@ function TransactionReviewCard({
   receiptCapture: ReturnType<typeof useReceiptCapture>
 }) {
   const displayName = resolvePlaidDisplayName(transaction.merchantName, transaction.rawName)
+  const isRefund = transaction.isRefund === true
 
   return (
     <div className="space-y-3 rounded-xl border border-muted bg-card p-4">
       <div className="flex items-start justify-between gap-3">
-        <div className="flex items-start gap-2">
+        {/* min-w-0 + break-words: a long unbroken bank descriptor must wrap
+            instead of pushing the amount off-screen and making the page
+            scroll sideways. */}
+        <div className="flex min-w-0 items-start gap-2">
           <Checkbox
             className="mt-1"
             checked={isSelected}
             onCheckedChange={onToggleSelected}
             aria-label={`Select ${displayName}`}
           />
-          <div>
-            <div className="font-medium">{displayName}</div>
+          <div className="min-w-0">
+            <div className="font-medium break-words">{displayName}</div>
             <div className="text-sm text-muted-foreground">{transaction.date}</div>
+            {isRefund ? (
+              <div className="text-xs text-muted-foreground">
+                {transaction.refundOf
+                  ? `Refund of your ${transaction.refundOf.date} purchase (${formatCurrency(transaction.refundOf.amount)}) — reduces that expense category`
+                  : "Refund — reduces your expenses in this category"}
+              </div>
+            ) : null}
           </div>
         </div>
-        <div className="text-right">
-          <div className="font-semibold">{formatCurrency(transaction.amount)}</div>
+        {/* Capped at half the row, with the category badge allowed to wrap —
+            a long custom category would otherwise squeeze the name instead. */}
+        <div className="max-w-[50%] shrink-0 text-right">
+          <div className={`font-semibold ${isRefund ? "text-emerald-700" : ""}`}>
+            {isRefund ? `Refund ${formatCurrency(transaction.amount)}` : formatCurrency(transaction.amount)}
+          </div>
           {transaction.suggestedExpenseAccount ? (
-            <Badge variant="secondary" className="mt-1">
+            <Badge variant="secondary" className="mt-1 h-auto whitespace-normal break-words text-right">
               {transaction.suggestedExpenseAccount}
             </Badge>
           ) : null}
@@ -180,25 +193,27 @@ function TransactionReviewCard({
           type="button"
           variant="outline"
           size="icon"
-          aria-label="Confirm as business"
+          aria-label={isRefund ? "Apply refund to business expenses" : "Confirm as business"}
           onClick={onConfirm}
         >
           <Check className="h-4 w-4" />
         </Button>
+        {isRefund ? null : (
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            aria-label={isReceiptRowOpen ? "Remove receipt" : "Attach receipt"}
+            onClick={onToggleReceiptRow}
+          >
+            <Paperclip className="h-4 w-4" />
+          </Button>
+        )}
         <Button
           type="button"
           variant="outline"
           size="icon"
-          aria-label={isReceiptRowOpen ? "Remove receipt" : "Attach receipt"}
-          onClick={onToggleReceiptRow}
-        >
-          <Paperclip className="h-4 w-4" />
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          aria-label="Not business"
+          aria-label={isRefund ? "Not a business refund" : "Not business"}
           onClick={onDismiss}
         >
           <X className="h-4 w-4" />
@@ -250,7 +265,13 @@ export default function PlaidPendingTransactionsPanel() {
   const [isSettingUpRecurring, setIsSettingUpRecurring] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
   const [receiptRowId, setReceiptRowId] = useState<string | null>(null)
-  const didAutoCollapseRef = useRef(arrivedViaReviewDeepLink())
+  // Set by a notification tap (see the review-request effect below) so the
+  // list it brought the user to never auto-collapses.
+  const didAutoCollapseRef = useRef(false)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const scrollAfterLoadRef = useRef(false)
+  const handledReviewNonceRef = useRef<number | null>(null)
+  const reviewRequestNonce = useReviewRequestNonce("expenses", activeWorkspaceId)
   // Bumped on every loadTransactions call so a slow, superseded request
   // (e.g. one fired for a workspace ID that turned out to be a stale cache
   // value from useWorkspaceStore's hydrate-then-reconcile flow) can't
@@ -274,7 +295,12 @@ export default function PlaidPendingTransactionsPanel() {
     setExpectsPending(readHadPending(activeWorkspaceId))
     setIsLoading(true)
     try {
-      const results = await getPlaidPendingTransactions(activeWorkspaceId)
+      // Deposits are reviewed on the Income tab — see
+      // plaid-income-review-panel.tsx — except refunds, which reduce an
+      // expense and so belong here.
+      const results = (await getPlaidPendingTransactions(activeWorkspaceId)).filter(
+        (transaction) => transaction.direction !== "income" || transaction.isRefund
+      )
       if (activeRequestIdRef.current !== requestId) return
       loadedWorkspaceIdRef.current = activeWorkspaceId
       setTransactions(results)
@@ -367,11 +393,34 @@ export default function PlaidPendingTransactionsPanel() {
     void loadTransactions()
   }, [loadTransactions])
 
+  // A notification tap for this list (deepLinkStore.ts): re-fetch — the app
+  // may have been open since before the new transactions arrived — expand,
+  // and scroll to it once loaded. Declared after the mount load so, on a
+  // cold start, this request supersedes that one (activeRequestIdRef).
+  useEffect(() => {
+    if (reviewRequestNonce == null || handledReviewNonceRef.current === reviewRequestNonce) return
+    handledReviewNonceRef.current = reviewRequestNonce
+    didAutoCollapseRef.current = true
+    scrollAfterLoadRef.current = true
+    setCollapsed(false)
+    void loadTransactions()
+  }, [reviewRequestNonce, loadTransactions])
+
+  useEffect(() => {
+    if (!scrollAfterLoadRef.current || isLoading) return
+    scrollAfterLoadRef.current = false
+    if (transactions.length > 0) {
+      containerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+    }
+  }, [isLoading, transactions.length])
+
   // Keep the had-pending flag current as rows are confirmed/dismissed, so
   // clearing the last one also stops the skeleton on the next visit.
   useEffect(() => {
     if (activeWorkspaceId && loadedWorkspaceIdRef.current === activeWorkspaceId) {
       writeHadPending(activeWorkspaceId, transactions.length > 0)
+      // Badges the home page's Expenses tab (useReviewCountsStore).
+      useReviewCountsStore.getState().setCount(activeWorkspaceId, "expenses", transactions.length)
     }
   }, [activeWorkspaceId, transactions])
 
@@ -409,6 +458,11 @@ export default function PlaidPendingTransactionsPanel() {
   }
 
   function handleConfirmClick(transaction: PlaidPendingTransaction) {
+    // Refunds skip the fuel and receipt checks — both are about money spent.
+    if (transaction.isRefund) {
+      void handleDecision(transaction, true)
+      return
+    }
     const account = selectedAccount[transaction.id] ?? transaction.suggestedExpenseAccount ?? undefined
     if (
       transaction.isLikelyFuelPurchase &&
@@ -532,7 +586,7 @@ export default function PlaidPendingTransactionsPanel() {
   if (transactions.length === 0 && !(isLoading && expectsPending)) return null
 
   return (
-    <div className="space-y-3">
+    <div ref={containerRef} className="space-y-3 scroll-mt-4">
       <button
         type="button"
         onClick={() => setCollapsed((current) => !current)}

@@ -119,6 +119,8 @@ export const API_ENDPOINTS = {
     merchantMemory: "https://getplaidmerchantmemory-3lc2fwdgwq-uc.a.run.app",
     updateMerchantMemory: "https://updateplaidmerchantmemory-3lc2fwdgwq-uc.a.run.app",
     resetMerchantMemory: "https://resetplaidmerchantmemory-3lc2fwdgwq-uc.a.run.app",
+    hiddenTransfers: "https://getplaidhiddentransfers-3lc2fwdgwq-uc.a.run.app",
+    restoreHiddenTransfer: "https://restoreplaidhiddentransfer-3lc2fwdgwq-uc.a.run.app",
   },
 
   devices: {

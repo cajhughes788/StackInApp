@@ -1,6 +1,6 @@
 import type { Request, Response } from "express"
 import { z } from "zod"
-import { listMerchantMemory } from "../services/plaidService"
+import { listIncomeMemory, listMerchantMemory } from "../services/plaidService"
 import { BadRequestError, UnauthorizedError, sendHttpError } from "../lib/httpErrors"
 
 const QuerySchema = z.object({
@@ -23,8 +23,13 @@ export async function getPlaidMerchantMemoryHandler(req: Request, res: Response)
       sendHttpError(res, new BadRequestError("Missing workspaceId", parsedQuery.error.format()), "getPlaidMerchantMemory")
       return
     }
-    const merchants = await listMerchantMemory(parsedQuery.data.workspaceId, uid)
-    res.status(200).json({ ok: true, merchants })
+    // payers = income memory (PlaidIncomeMemorySchema), returned alongside so
+    // Learned Merchants loads both in one request.
+    const [merchants, payers] = await Promise.all([
+      listMerchantMemory(parsedQuery.data.workspaceId, uid),
+      listIncomeMemory(parsedQuery.data.workspaceId, uid),
+    ])
+    res.status(200).json({ ok: true, merchants, payers })
   } catch (err: any) {
     sendHttpError(res, err, "getPlaidMerchantMemory")
   }

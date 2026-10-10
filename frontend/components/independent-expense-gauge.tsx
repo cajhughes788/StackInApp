@@ -71,7 +71,8 @@ export default function IndependentExpenseGauge() {
       ? settings.independent.expenseTargetPerMonth
       : null
   const gaugeScale = targetExpenses ?? maxAmount
-  const fillPercentage = Math.min((totalExpenses / gaugeScale) * 100, 100)
+  // Refunds are negative expenses, so a refund-heavy month can total below 0.
+  const fillPercentage = Math.max(0, Math.min((totalExpenses / gaugeScale) * 100, 100))
 
   if (
     workspaceState.status !== "ready" ||

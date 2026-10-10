@@ -1,10 +1,16 @@
 import { Configuration, PlaidApi, PlaidEnvironments, Products, CountryCode } from "plaid"
 import { db } from "../admin"
+import { FieldValue } from "firebase-admin/firestore"
 import { assertWorkspaceMembership } from "../lib/workspaceMembership"
 import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "../lib/httpErrors"
 import { PlaidItemSchema, PlaidItemPublicSchema, type PlaidItemType, type PlaidLinkedAccountType } from "@shared/schemas/plaidItem"
-import { PlaidPendingTransactionSchema, type PlaidPendingTransactionType } from "@shared/schemas/plaidPendingTransaction"
+import {
+  PlaidPendingTransactionSchema,
+  plaidDirectionFromAmount,
+  type PlaidPendingTransactionType,
+} from "@shared/schemas/plaidPendingTransaction"
 import { PlaidMerchantMemorySchema, type PlaidMerchantMemoryType } from "@shared/schemas/plaidMerchantMemory"
+import { PlaidIncomeMemorySchema, type PlaidIncomeMemoryType } from "@shared/schemas/plaidIncomeMemory"
 import {
   classifyPlaidTransaction,
   normalizePlaidMerchantKey,
@@ -12,12 +18,22 @@ import {
   resolvePlaidDisplayName,
   detectRecurringCadence,
   isSimilarRecurringAmount,
+  suggestPlaidIncomePaymentMethod,
+  classifyPlaidTransferSignal,
+  isPlaidTransferPair,
+  isPeerToPeerDescriptor,
+  isVenmoCashoutDescriptor,
+  normalizePlaidPayerKey,
+  isLikelyPlaidRefund,
+  pickRefundedPurchase,
   type PlaidClassificationResult,
 } from "@shared/plaidClassification"
 import { isLikelyFuelPurchase } from "@shared/expenseKeywordMatching"
 import { computeNextOccurrence } from "@shared/recurringSchedule"
 import type { RecurringCadence } from "@shared/schemas/recurringRule"
+import type { IncomeCategory, PaymentMethod } from "@shared/schemas/entry"
 import * as expensesSvc from "./expensesService"
+import * as entriesSvc from "./entriesService"
 import { sendTransactionNotification } from "./pushNotificationService"
 import { PLAID_CLIENT_ID, PLAID_SECRET, PLAID_ENV, PLAID_TOKEN_ENCRYPTION_KEY } from "../secrets"
 import { encryptToken, decryptToken } from "../lib/tokenEncryption"
@@ -64,6 +80,10 @@ function pendingTransactionsCol(workspaceId: string) {
 
 function merchantMemoryCol(workspaceId: string) {
   return db.collection("workspaces").doc(workspaceId).collection("plaidMerchantMemory")
+}
+
+function incomeMemoryCol(workspaceId: string) {
+  return db.collection("workspaces").doc(workspaceId).collection("plaidIncomeMemory")
 }
 
 // Top-level id -> workspaceId lookup so the webhook handler (which only
@@ -554,13 +574,69 @@ async function upsertPendingTransactionFromPlaid(
 
   const merchantName = transaction.merchant_name ?? null
   const rawName = transaction.name ?? ""
-  const merchantKey = await resolveMerchantKey(workspaceId, merchantName, rawName)
+  const direction = plaidDirectionFromAmount(transaction.amount)
+  const amount = Math.abs(transaction.amount)
+  const personalFinanceCategoryPrimary: string | null = transaction.personal_finance_category?.primary ?? null
+  const expenseMerchantKey = await resolveMerchantKey(workspaceId, merchantName, rawName)
+  // Money in from a merchant is a refund, not income — checked before
+  // anything else, so a card refund isn't taken for a card payment either.
+  const refundOf =
+    direction === "income" && !isPeerToPeerDescriptor(merchantName, rawName)
+      ? await findRefundedPurchase(workspaceId, expenseMerchantKey, { date: transaction.date, amount })
+      : null
+  const isRefund = isLikelyPlaidRefund({
+    merchantName,
+    rawName,
+    personalFinanceCategoryPrimary,
+    direction,
+    hasMatchingPurchase: refundOf !== null,
+  })
+  // Deposits are keyed by payer for income memory (see
+  // normalizePlaidPayerKey); spending and refunds keep the merchant key, so
+  // a refund lines up with the merchant's purchases.
+  const merchantKey = direction === "income" && !isRefund
+    ? normalizePlaidPayerKey(merchantName, rawName)
+    : expenseMerchantKey
+  const linkedAccount = linkedAccounts.find((account) => account.accountId === transaction.account_id) ?? null
+  const personalFinanceCategoryDetailed: string | null = transaction.personal_finance_category?.detailed ?? null
+  const transferSignal = classifyPlaidTransferSignal({
+    merchantName,
+    rawName,
+    personalFinanceCategoryPrimary,
+    personalFinanceCategoryDetailed,
+    direction,
+    accountType: linkedAccount?.type ?? null,
+    isRefund,
+  })
 
   // A learned decision from a past confirm/dismiss on this same merchant
   // takes priority over the generic rule-based guess — see
   // confirmPendingTransaction below, which writes this memory.
-  const memory = merchantKey ? await getMerchantMemory(workspaceId, merchantKey) : null
-  const classification: PlaidClassificationResult = memory
+  //
+  // Merchant memory and the expense classifier only describe money going
+  // out, so a deposit skips both. The same merchant key often covers both
+  // directions (payments sent through Venmo vs. a Venmo cash-out), and an
+  // "always personal" Venmo decision must not silently swallow incoming
+  // client payments.
+  // A refund is spending in reverse, so it reads the merchant's expense memory.
+  const usesExpenseMemory = direction === "expense" || isRefund
+  const memory = usesExpenseMemory && merchantKey ? await getMerchantMemory(workspaceId, merchantKey) : null
+  // Deposits have their own memory, keyed by payer — see PlaidIncomeMemorySchema.
+  const incomeMemory = direction === "income" && !isRefund && merchantKey ? await getIncomeMemory(workspaceId, merchantKey) : null
+  const classification: PlaidClassificationResult = isRefund
+    ? await classifyRefund(workspaceId, refundOf, memory, {
+        merchantName,
+        rawName,
+        personalFinanceCategoryPrimary,
+        amount,
+      })
+    : direction === "income"
+    ? {
+        suggestedExpenseAccount: null,
+        isBusinessGuess: incomeMemory ? incomeMemory.lastOutcome === "income" : null,
+        confidence: incomeMemory ? 0.95 : 0,
+      }
+    : memory
     ? { suggestedExpenseAccount: memory.expenseCategory, isBusinessGuess: memory.isBusiness, confidence: 0.95 }
     : applyAccountDefault(
         classifyPlaidTransaction({
@@ -569,7 +645,7 @@ async function upsertPendingTransactionFromPlaid(
           personalFinanceCategoryPrimary: transaction.personal_finance_category?.primary ?? null,
           amount: transaction.amount,
         }),
-        linkedAccounts.find((account) => account.accountId === transaction.account_id)?.defaultBusiness ?? null
+        linkedAccount?.defaultBusiness ?? null
       )
   // Explicit opt-in only (see PlaidMerchantMemorySchema) — the transaction
   // still gets recorded, just pre-dismissed and silent, so a rare business
@@ -578,7 +654,40 @@ async function upsertPendingTransactionFromPlaid(
   // same silent treatment: the recurring rule's cron already generates this
   // merchant's expense on schedule, so confirming the bank transaction too
   // would book the same real-world charge twice.
-  const autoDismiss = memory?.mode === "always_personal" || memory?.mode === "covered_by_recurring_rule"
+  // A refund from an "always personal" merchant is money back on a personal
+  // purchase — unless it matched a purchase that was booked as business.
+  // A recurring-rule merchant's refund still needs review: the rule booked
+  // the original charge, so the refund should reduce it.
+  const memoryDismiss = isRefund
+    ? memory?.mode === "always_personal" && !refundOf
+    : memory?.mode === "always_personal" ||
+      memory?.mode === "covered_by_recurring_rule" ||
+      incomeMemory?.mode === "always_not_income"
+
+  // Transfers between the user's own accounts are neither income nor
+  // expense — dismissed silently, like memoryDismiss above. A strong signal
+  // stands alone; anything weaker needs the other half of the transfer on
+  // another linked account (which also gets dismissed, if still pending).
+  // A user who restored this one from Hidden Transfers has overruled
+  // detection — a re-sync or history re-import must not hide it again.
+  const transferPairId = transferSignal && !existing?.transferOverride
+    ? await pairWithTransferCounterpart(workspaceId, {
+        id: transaction.transaction_id,
+        accountId: transaction.account_id,
+        direction,
+        amount,
+        date: transaction.date,
+        transferSignal,
+      })
+    : null
+  // A Venmo cash-out is only a transfer when the Venmo statement is the
+  // workspace's source for Venmo income — see isVenmoCashoutDescriptor.
+  const isVenmoCashout = isVenmoCashoutDescriptor(merchantName, rawName, direction)
+  const venmoCashoutIsTransfer =
+    isVenmoCashout && !existing?.transferOverride && (await workspaceImportsVenmoStatements(workspaceId))
+  const isTransfer =
+    !existing?.transferOverride && (transferSignal === "transfer" || transferPairId !== null || venmoCashoutIsTransfer)
+  const autoDismiss = memoryDismiss || isTransfer
 
   const nowIso = new Date().toISOString()
   const pending: PlaidPendingTransactionType = {
@@ -588,16 +697,30 @@ async function upsertPendingTransactionFromPlaid(
     plaidTransactionId: transaction.transaction_id,
     accountId: transaction.account_id,
     date: transaction.date,
-    amount: transaction.amount,
+    amount,
+    direction,
     merchantName,
     rawName,
     merchantKey,
-    personalFinanceCategoryPrimary: transaction.personal_finance_category?.primary ?? null,
+    personalFinanceCategoryPrimary,
+    personalFinanceCategoryDetailed,
+    transferSignal,
+    isVenmoCashout,
+    isRefund,
+    refundOf,
     suggestedExpenseAccount: classification.suggestedExpenseAccount,
+    suggestedIncomeCategory: incomeMemory?.lastOutcome === "income" ? incomeMemory.incomeCategory : null,
+    suggestedPaymentMethod:
+      direction === "income" && !isRefund
+        ? (incomeMemory?.lastOutcome === "income" ? incomeMemory.paymentMethod : null) ??
+          suggestPlaidIncomePaymentMethod(merchantName, rawName)
+        : null,
     isBusinessGuess: classification.isBusinessGuess,
     confidence: classification.confidence,
-    isLikelyFuelPurchase: isLikelyFuelPurchase(merchantName ?? rawName),
+    isLikelyFuelPurchase: direction === "expense" && isLikelyFuelPurchase(merchantName ?? rawName),
     status: autoDismiss ? "dismissed" : "pending",
+    ...(isTransfer ? { dismissReason: "transfer" as const } : {}),
+    ...(transferPairId ? { transferPairId } : {}),
     createdAt: existing?.createdAt ?? nowIso,
     updatedAt: nowIso,
   }
@@ -605,6 +728,172 @@ async function upsertPendingTransactionFromPlaid(
   await pendingTransactionsCol(workspaceId).doc(parsed.id).set(stripUndefinedDeep(parsed), { merge: true })
 
   return autoDismiss ? null : parsed
+}
+
+// The purchase a refund most likely reverses, among this merchant's
+// confirmed bank purchases — see pickRefundedPurchase. Same
+// (merchantKey, status, date) query shape detectRecurringSuggestion uses,
+// so it runs on the existing composite index.
+async function findRefundedPurchase(
+  workspaceId: string,
+  merchantKey: string,
+  refund: { date: string; amount: number }
+): Promise<PlaidPendingTransactionType["refundOf"]> {
+  if (!merchantKey) return null
+  const snap = await pendingTransactionsCol(workspaceId)
+    .where("merchantKey", "==", merchantKey)
+    .where("status", "==", "confirmed")
+    .orderBy("date", "desc")
+    .limit(20)
+    .get()
+  const purchases = snap.docs
+    .map((doc) => PlaidPendingTransactionSchema.parse(doc.data()))
+    .filter((t) => t.direction === "expense" && !t.isRefund && t.committedExpenseId)
+  const picked = pickRefundedPurchase(refund, purchases)
+  if (!picked?.committedExpenseId) return null
+  return { pendingId: picked.id, expenseId: picked.committedExpenseId, date: picked.date, amount: picked.amount }
+}
+
+// A refund is booked in the same category as what it reverses: the matched
+// purchase's actual expense category if there is one, then the merchant's
+// remembered category, then the generic classifier.
+async function classifyRefund(
+  workspaceId: string,
+  refundOf: PlaidPendingTransactionType["refundOf"],
+  memory: PlaidMerchantMemoryType | null,
+  input: { merchantName: string | null; rawName: string; personalFinanceCategoryPrimary: string | null; amount: number }
+): Promise<PlaidClassificationResult> {
+  if (refundOf) {
+    const expenseSnap = await db.doc(`workspaces/${workspaceId}/expenses/${refundOf.expenseId}`).get()
+    const account = expenseSnap.exists ? (expenseSnap.data()?.account as string | undefined) : undefined
+    if (account) return { suggestedExpenseAccount: account, isBusinessGuess: true, confidence: 0.95 }
+  }
+  if (memory) {
+    return { suggestedExpenseAccount: memory.expenseCategory, isBusinessGuess: memory.isBusiness, confidence: 0.8 }
+  }
+  return classifyPlaidTransaction(input)
+}
+
+async function workspaceImportsVenmoStatements(workspaceId: string): Promise<boolean> {
+  const snap = await db
+    .collection(`workspaces/${workspaceId}/importBatches`)
+    .where("source", "==", "venmo_csv")
+    .limit(1)
+    .get()
+  return !snap.empty
+}
+
+// Bank cash-outs can land a few days after the Venmo payments they carry.
+const VENMO_CASHOUT_TRAILING_DAYS = 7
+
+// Called right after a Venmo statement is imported (importsService
+// createImportBatch). From now on the statement is where Venmo income comes
+// from, so:
+// - cash-outs still waiting in review are hidden as transfers (restorable
+//   from Hidden Transfers, like any other transfer), and
+// - cash-outs already confirmed as income in the statement's period are
+//   returned, so the import can warn that confirming the statement's
+//   payments too would count that money twice. Nothing booked is undone
+//   automatically: which side to keep is the user's call.
+export async function reconcileVenmoCashoutsWithImport(
+  workspaceId: string,
+  period: { start: string; end: string } | null
+): Promise<{ count: number; total: number; deposits: Array<{ date: string; amount: number }> }> {
+  const snap = await pendingTransactionsCol(workspaceId).where("isVenmoCashout", "==", true).get()
+  const records = snap.docs.map((doc) => PlaidPendingTransactionSchema.parse(doc.data()))
+  const nowIso = new Date().toISOString()
+
+  const writer = db.batch()
+  let hiddenCount = 0
+  for (const record of records) {
+    if (record.status !== "pending" || record.transferOverride) continue
+    writer.set(
+      pendingTransactionsCol(workspaceId).doc(record.id),
+      { status: "dismissed", dismissReason: "transfer", updatedAt: nowIso },
+      { merge: true }
+    )
+    hiddenCount += 1
+  }
+  if (hiddenCount > 0) await writer.commit()
+
+  if (!period) return { count: 0, total: 0, deposits: [] }
+  const trailingEnd = new Date(`${period.end}T12:00:00Z`)
+  trailingEnd.setUTCDate(trailingEnd.getUTCDate() + VENMO_CASHOUT_TRAILING_DAYS)
+  const windowEnd = trailingEnd.toISOString().slice(0, 10)
+  const overlapping = records
+    .filter((r) => r.status === "confirmed" && r.committedEntryId && r.date >= period.start && r.date <= windowEnd)
+    .sort((a, b) => a.date.localeCompare(b.date))
+  return {
+    count: overlapping.length,
+    total: Math.round(overlapping.reduce((sum, r) => sum + r.amount, 0) * 100) / 100,
+    deposits: overlapping.map((r) => ({ date: r.date, amount: r.amount })),
+  }
+}
+
+// Looks for the other half of a transfer: an opposite-direction transaction
+// of the same amount, on a different linked account, a few days apart — see
+// isPlaidTransferPair. When found, that transaction is dismissed too (unless
+// the user already confirmed it as real income/expense, in which case their
+// decision wins and nothing pairs). Returns the counterpart's id, or null.
+//
+// Amounts are stored as positive magnitudes, so an equality query on amount
+// finds candidates from both directions. Records from before the direction
+// split stored signed amounts and no transferSignal, so they never match.
+async function pairWithTransferCounterpart(
+  workspaceId: string,
+  incoming: {
+    id: string
+    accountId: string
+    direction: PlaidPendingTransactionType["direction"]
+    amount: number
+    date: string
+    transferSignal: NonNullable<PlaidPendingTransactionType["transferSignal"]>
+  }
+): Promise<string | null> {
+  const snap = await pendingTransactionsCol(workspaceId).where("amount", "==", incoming.amount).limit(25).get()
+  const candidates = snap.docs
+    .map((doc) => PlaidPendingTransactionSchema.parse(doc.data()))
+    .filter(
+      (candidate) =>
+        candidate.id !== incoming.id &&
+        !candidate.transferPairId &&
+        !candidate.transferOverride &&
+        (candidate.status === "pending" || candidate.status === "dismissed") &&
+        isPlaidTransferPair(candidate, incoming)
+    )
+    // Closest date first — the likeliest other half when several match.
+    .sort(
+      (a, b) =>
+        Math.abs(Date.parse(a.date) - Date.parse(incoming.date)) - Math.abs(Date.parse(b.date) - Date.parse(incoming.date))
+    )
+
+  for (const candidate of candidates) {
+    const ref = pendingTransactionsCol(workspaceId).doc(candidate.id)
+    const paired = await db.runTransaction(async (txn) => {
+      const current = await txn.get(ref)
+      if (!current.exists) return false
+      const fresh = PlaidPendingTransactionSchema.parse(current.data())
+      // Re-checked inside the transaction: the user may have confirmed it,
+      // or another transfer may have claimed it, since the query above.
+      if (fresh.transferPairId || fresh.transferOverride || (fresh.status !== "pending" && fresh.status !== "dismissed")) {
+        return false
+      }
+      txn.set(
+        ref,
+        {
+          status: "dismissed",
+          // A user's own earlier dismissal keeps its (absent) reason.
+          ...(fresh.status === "pending" ? { dismissReason: "transfer" } : {}),
+          transferPairId: incoming.id,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      )
+      return true
+    })
+    if (paired) return candidate.id
+  }
+  return null
 }
 
 // One notification per sync run, not one per transaction — a single sync
@@ -628,20 +917,57 @@ async function notifyForSyncResults(
     const parsed = notifiable[0]
     await sendTransactionNotification(uid, {
       title: resolvePlaidDisplayName(parsed.merchantName, parsed.rawName),
-      body: `New transaction: $${parsed.amount.toFixed(2)}${parsed.suggestedExpenseAccount ? ` • ${parsed.suggestedExpenseAccount}` : ""}`,
-      data: { deepLink: `stackin://plaid/pending/${parsed.id}` },
+      body: parsed.isRefund
+        ? `Refund: $${parsed.amount.toFixed(2)}${parsed.suggestedExpenseAccount ? ` • ${parsed.suggestedExpenseAccount}` : ""}`
+        : parsed.direction === "income"
+          ? parsed.suggestedIncomeCategory
+            ? `Money in: $${parsed.amount.toFixed(2)} • ${INCOME_CATEGORY_LABELS[parsed.suggestedIncomeCategory]}`
+            : `Money in: $${parsed.amount.toFixed(2)} — confirm if it's income`
+          : `New transaction: $${parsed.amount.toFixed(2)}${parsed.suggestedExpenseAccount ? ` • ${parsed.suggestedExpenseAccount}` : ""}`,
+      // registerPush.ts lands income links on the Income tab, everything
+      // else on Expenses — in this workspace, which may not be the one the
+      // app was last left on.
+      data: {
+        workspaceId,
+        deepLink:
+          parsed.direction === "income" && !parsed.isRefund
+            ? `stackin://plaid/pending-income/${parsed.id}`
+            : `stackin://plaid/pending/${parsed.id}`,
+      },
     })
     return
   }
 
+  // Expenses and refunds are reviewed on Expenses, deposits on Income. A
+  // mixed batch opens Expenses (see the deepLink below), so name both —
+  // the Income tab's count badge shows where the deposits are.
+  const depositCount = notifiable.filter((t) => t.direction === "income" && !t.isRefund).length
+  const expenseCount = notifiable.length - depositCount
+  const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`
   await sendTransactionNotification(uid, {
     title: "New bank transactions to review",
-    body: `${notifiable.length} new transactions are ready to review in StackIn.`,
+    body:
+      depositCount > 0 && expenseCount > 0
+        ? `${plural(expenseCount, "expense")} and ${plural(depositCount, "deposit")} are ready to review in 521.`
+        : `${notifiable.length} new transactions are ready to review in 521.`,
     // No specific id — same startsWith("stackin://plaid/pending/") prefix
     // registerPush.ts already matches, so tapping still lands on the
-    // Expenses tab where the whole batch is waiting.
-    data: { deepLink: "stackin://plaid/pending/" },
+    // Expenses tab where the whole batch is waiting. An all-income batch
+    // lands on the Income tab instead.
+    data: {
+      workspaceId,
+      deepLink: notifiable.every((t) => t.direction === "income" && !t.isRefund)
+        ? "stackin://plaid/pending-income/"
+        : "stackin://plaid/pending/",
+    },
   })
+}
+
+const INCOME_CATEGORY_LABELS: Record<IncomeCategory, string> = {
+  services: "Services",
+  tips: "Tips",
+  products: "Products",
+  other: "Other income",
 }
 
 // Only overrides isBusinessGuess (not the suggested category) — a per-account
@@ -696,7 +1022,7 @@ async function carryForwardTransaction(
     plaidTransactionId: transaction.transaction_id,
     accountId: transaction.account_id,
     date: transaction.date,
-    amount: transaction.amount,
+    amount: Math.abs(transaction.amount),
     // Plaid often has cleaner merchant data once a charge posts — worth
     // refreshing for display, but this never re-triggers classification or
     // a notification; the user already saw (or chose to ignore) this charge.
@@ -714,9 +1040,11 @@ async function carryForwardTransaction(
     const uid = await getLinkOwnerUid(workspaceId, plaidItemId)
     if (uid) {
       try {
+        // A refund's expense is negative — keep it that way.
+        const magnitude = Math.abs(transaction.amount)
         await expensesSvc.updateExpense(workspaceId, uid, prior.committedExpenseId, {
           date: transaction.date,
-          amount: transaction.amount,
+          amount: prior.isRefund ? -magnitude : magnitude,
         })
       } catch (error) {
         console.warn("plaidService.carryForwardTransaction: failed to refresh committed expense after posting", {
@@ -726,6 +1054,17 @@ async function carryForwardTransaction(
         })
       }
     }
+  }
+  if (prior.status === "confirmed" && prior.committedEntryId && prior.amount !== updated.amount) {
+    // Deposits rarely change between pending and posted, and an entry's
+    // amount lives inside a user-chosen category breakdown that can't be
+    // rescaled safely here — surface it in logs rather than guess.
+    console.warn("plaidService.carryForwardTransaction: confirmed income amount changed after posting", {
+      workspaceId,
+      entryId: prior.committedEntryId,
+      priorAmount: prior.amount,
+      postedAmount: updated.amount,
+    })
   }
 }
 
@@ -738,6 +1077,16 @@ async function cleanupRemovedTransaction(workspaceId: string, plaidItemId: strin
     // Nothing was ever committed — safe to just remove (e.g. a card
     // authorization hold that was reversed rather than posted).
     await ref.delete()
+    return
+  }
+  if (existing.status === "confirmed" && existing.committedEntryId) {
+    // Confirmed income the bank later reversed. Entries have no flag field
+    // to surface this on, and auto-deleting would destroy the audit trail.
+    console.warn("plaidService.cleanupRemovedTransaction: confirmed income was reversed by the bank", {
+      workspaceId,
+      transactionId,
+      committedEntryId: existing.committedEntryId,
+    })
     return
   }
   if (existing.status !== "confirmed" || !existing.committedExpenseId) {
@@ -916,7 +1265,7 @@ async function detectRecurringSuggestion(
     .get()
   const matchingDatesAscending = snap.docs
     .map((doc) => PlaidPendingTransactionSchema.parse(doc.data()))
-    .filter((t) => isSimilarRecurringAmount(t.amount, currentAmount))
+    .filter((t) => t.direction === "expense" && isSimilarRecurringAmount(t.amount, currentAmount))
     .map((t) => t.date)
     .sort()
   if (matchingDatesAscending.length < 2) return null
@@ -961,21 +1310,32 @@ async function detectPersonalSuggestion(
   displayName: string
 ): Promise<PlaidPersonalSuggestion | null> {
   if (!merchantKey) return null
+  // Deposits share merchant keys with spending (a Venmo cash-out vs. a
+  // Venmo payment) but say nothing about whether spending there is
+  // personal, so only expense-direction records count. Filtered in memory
+  // since legacy records have no direction field to query on; the wider
+  // limit leaves room for deposits mixed into the results.
+  // Auto-dismissed transfers aren't the user saying "personal" either.
+  const isExpense = (doc: FirebaseFirestore.QueryDocumentSnapshot) => {
+    const record = PlaidPendingTransactionSchema.parse(doc.data())
+    return record.direction === "expense" && record.dismissReason !== "transfer"
+  }
   const [dismissedSnap, confirmedSnap] = await Promise.all([
     pendingTransactionsCol(workspaceId)
       .where("merchantKey", "==", merchantKey)
       .where("status", "==", "dismissed")
-      .limit(PERSONAL_SUGGESTION_DISMISS_THRESHOLD)
+      .limit(PERSONAL_SUGGESTION_DISMISS_THRESHOLD * 4)
       .get(),
     pendingTransactionsCol(workspaceId)
       .where("merchantKey", "==", merchantKey)
       .where("status", "==", "confirmed")
-      .limit(1)
+      .limit(10)
       .get(),
   ])
-  if (dismissedSnap.size < PERSONAL_SUGGESTION_DISMISS_THRESHOLD) return null
-  if (!confirmedSnap.empty) return null
-  return { merchantKey, displayName, dismissCount: dismissedSnap.size }
+  const dismissCount = dismissedSnap.docs.filter(isExpense).length
+  if (dismissCount < PERSONAL_SUGGESTION_DISMISS_THRESHOLD) return null
+  if (confirmedSnap.docs.some(isExpense)) return null
+  return { merchantKey, displayName, dismissCount }
 }
 
 // Written the moment the suggestion above is surfaced, regardless of how (or
@@ -1027,11 +1387,21 @@ export async function confirmPendingTransaction(
   workspaceId: string,
   uid: string,
   pendingId: string,
-  decision: { isBusiness: boolean; account?: string; alwaysPersonal?: boolean; receiptAssetId?: string }
+  decision: {
+    isBusiness: boolean
+    account?: string
+    alwaysPersonal?: boolean
+    receiptAssetId?: string
+    // Income-direction transactions only — see confirmIncomeTransaction.
+    incomeCategory?: IncomeCategory
+    paymentMethod?: PaymentMethod
+  }
 ): Promise<{
   committedExpenseId?: string
+  committedEntryId?: string
   recurringSuggestion?: PlaidRecurringSuggestion
   personalSuggestion?: PlaidPersonalSuggestion
+  notIncomeSuggestion?: PlaidPersonalSuggestion
 }> {
   await assertWorkspaceMembership(workspaceId, uid)
   const ref = pendingTransactionsCol(workspaceId).doc(pendingId)
@@ -1070,7 +1440,7 @@ export async function confirmPendingTransaction(
       return {}
     }
     if (decision.isBusiness && current.status === "confirmed") {
-      return { committedExpenseId: current.committedExpenseId }
+      return { committedExpenseId: current.committedExpenseId, committedEntryId: current.committedEntryId }
     }
     if (current.status === "processing") {
       throw new ConflictError("This transaction is already being processed — try again in a moment.")
@@ -1091,6 +1461,20 @@ export async function confirmPendingTransaction(
       await ref.set({ status: "pending", updatedAt: new Date().toISOString() }, { merge: true }).catch(() => {})
       throw error
     })
+    // A dismissed refund (money back on a personal purchase) says nothing
+    // new about the merchant — the purchase decision already did.
+    if (pending.isRefund) return {}
+
+    // A dismissed deposit (a friend paying the user back, money they moved
+    // themselves) teaches income memory, never the expense merchant memory.
+    if (pending.direction === "income") {
+      const notIncomeSuggestion = await recordIncomeDismissal(workspaceId, pending, displayName).catch((error) => {
+        console.error("plaidService.confirmPendingTransaction: income dismissal bookkeeping failed", error)
+        return null
+      })
+      return notIncomeSuggestion ? { notIncomeSuggestion } : {}
+    }
+
     // "always_personal" is an explicit opt-in from the dismiss UI, not
     // inferred from this one dismissal — see createPendingTransactionFromPlaid
     // for what it actually suppresses (the notification, not the record).
@@ -1122,6 +1506,13 @@ export async function confirmPendingTransaction(
       console.error("plaidService.confirmPendingTransaction: post-dismiss merchant bookkeeping failed", error)
     }
     return { personalSuggestion }
+  }
+
+  if (pending.isRefund) {
+    return confirmRefundTransaction(workspaceId, uid, ref, pending, displayName, decision.account)
+  }
+  if (pending.direction === "income") {
+    return confirmIncomeTransaction(workspaceId, uid, ref, pending, displayName, decision)
   }
 
   const account = decision.account ?? pending.suggestedExpenseAccount
@@ -1177,4 +1568,294 @@ export async function confirmPendingTransaction(
     }
   )
   return { committedExpenseId: expenseId, recurringSuggestion: recurringSuggestion ?? undefined }
+}
+
+// The income counterpart of the expense commit in confirmPendingTransaction:
+// books the deposit as an independent-workspace Entry with a single income
+// breakdown line, the same shape recurring income rules generate (see
+// recurringRulesService.ts). Called with the transaction already claimed
+// ("processing"), so this must release the claim on any failure.
+async function confirmIncomeTransaction(
+  workspaceId: string,
+  uid: string,
+  ref: FirebaseFirestore.DocumentReference,
+  pending: PlaidPendingTransactionType,
+  displayName: string,
+  decision: { incomeCategory?: IncomeCategory; paymentMethod?: PaymentMethod }
+): Promise<{ committedEntryId: string }> {
+  const incomeCategory = decision.incomeCategory ?? "services"
+  const paymentMethod = decision.paymentMethod ?? suggestPlaidIncomePaymentMethod(pending.merchantName, pending.rawName)
+  let entryId: string
+  try {
+    const workspaceSnap = await db.doc(`workspaces/${workspaceId}`).get()
+    if (workspaceSnap.data()?.type !== "independent") {
+      throw new BadRequestError("Bank deposits can only be added as income in an independent workspace.")
+    }
+    const created = await entriesSvc.createEntry(workspaceId, uid, {
+      workspace: "independent",
+      date: pending.date,
+      notes: [displayName, pending.rawName !== displayName ? pending.rawName : null, "Imported from bank"]
+        .filter(Boolean)
+        .join(" | "),
+      // Same idempotency key scheme as the expense path — createEntry turns
+      // it into a deterministic doc id, so a retry can never double-book.
+      clientMutationId: `plaid:${pending.plaidTransactionId}`,
+      independent: {
+        hours: 0,
+        incomeBreakdowns: [{ paymentMethod, [incomeCategory]: pending.amount }],
+        unreportedCash: 0,
+        unreportedCashTips: 0,
+        customIncome: [],
+      },
+    })
+    entryId = created.id
+    await ref.set(
+      { status: "confirmed", committedEntryId: entryId, updatedAt: new Date().toISOString() },
+      { merge: true }
+    )
+  } catch (error) {
+    await ref.set({ status: "pending", updatedAt: new Date().toISOString() }, { merge: true }).catch(() => {})
+    throw error
+  }
+  // Best-effort — the entry is already booked. Confirming always resets the
+  // payer to "ask every time": a deposit from an "always not income" payer
+  // that the user went looking for and confirmed means the payer is mixed.
+  await rememberIncomeDecision(workspaceId, payerKeyFor(pending), displayName, {
+    outcome: "income",
+    incomeCategory,
+    paymentMethod,
+  }).catch((error) => {
+    console.error("plaidService.confirmIncomeTransaction: rememberIncomeDecision failed", error)
+  })
+  return { committedEntryId: entryId }
+}
+
+// Books a refund as a negative expense in the category it reverses, so the
+// P&L nets it against that category in the month it actually happened. The
+// original purchase is left untouched for the record. No merchant memory or
+// recurring detection: a refund confirms an earlier decision rather than
+// making a new one. Called with the transaction already claimed.
+async function confirmRefundTransaction(
+  workspaceId: string,
+  uid: string,
+  ref: FirebaseFirestore.DocumentReference,
+  pending: PlaidPendingTransactionType,
+  displayName: string,
+  accountOverride: string | undefined
+): Promise<{ committedExpenseId: string }> {
+  const account = accountOverride ?? pending.suggestedExpenseAccount
+  if (!account) {
+    await ref.set({ status: "pending", updatedAt: new Date().toISOString() }, { merge: true }).catch(() => {})
+    throw new BadRequestError("An expense category is required to apply this refund.")
+  }
+  try {
+    const created = await expensesSvc.createExpense(workspaceId, uid, {
+      date: pending.date,
+      amount: -pending.amount,
+      vendor: displayName,
+      description: pending.refundOf
+        ? `Refund of ${pending.refundOf.date} purchase ($${pending.refundOf.amount.toFixed(2)})`
+        : `Refund — ${pending.rawName}`,
+      account,
+      clientMutationId: `plaid:${pending.plaidTransactionId}`,
+    })
+    await ref.set(
+      { status: "confirmed", committedExpenseId: created.id, updatedAt: new Date().toISOString() },
+      { merge: true }
+    )
+    return { committedExpenseId: created.id }
+  } catch (error) {
+    await ref.set({ status: "pending", updatedAt: new Date().toISOString() }, { merge: true }).catch(() => {})
+    throw error
+  }
+}
+
+// Records written before income memory stored the expense-style merchant
+// key on deposits, so always derive the payer key from the names.
+function payerKeyFor(pending: PlaidPendingTransactionType): string {
+  return normalizePlaidPayerKey(pending.merchantName, pending.rawName)
+}
+
+async function getIncomeMemory(workspaceId: string, payerKey: string): Promise<PlaidIncomeMemoryType | null> {
+  if (!payerKey) return null
+  const snap = await incomeMemoryCol(workspaceId).doc(payerKey).get()
+  return snap.exists ? PlaidIncomeMemorySchema.parse(snap.data()) : null
+}
+
+// Same atomic read-modify-write as rememberMerchantDecision, since bulk
+// review can decide several deposits from one payer at once.
+async function rememberIncomeDecision(
+  workspaceId: string,
+  payerKey: string,
+  displayName: string,
+  decision:
+    | { outcome: "income"; incomeCategory: IncomeCategory; paymentMethod: PaymentMethod }
+    | { outcome: "not_income" }
+): Promise<PlaidIncomeMemoryType | null> {
+  if (!payerKey) return null
+  const ref = incomeMemoryCol(workspaceId).doc(payerKey)
+  return db.runTransaction(async (txn) => {
+    const snap = await txn.get(ref)
+    const existing = snap.exists ? PlaidIncomeMemorySchema.parse(snap.data()) : null
+    const nowIso = new Date().toISOString()
+    const isIncome = decision.outcome === "income"
+    const canonical: PlaidIncomeMemoryType = {
+      id: payerKey,
+      workspaceId,
+      payerKey,
+      displayName,
+      lastOutcome: decision.outcome,
+      // A "not income" decision keeps the last known category/method, so a
+      // payer that's usually income but occasionally isn't still pre-fills.
+      incomeCategory: isIncome ? decision.incomeCategory : existing?.incomeCategory ?? null,
+      paymentMethod: isIncome ? decision.paymentMethod : existing?.paymentMethod ?? null,
+      mode: isIncome ? "ask_every_time" : existing?.mode ?? "ask_every_time",
+      incomeCount: (existing?.incomeCount ?? 0) + (isIncome ? 1 : 0),
+      notIncomeCount: (existing?.notIncomeCount ?? 0) + (isIncome ? 0 : 1),
+      lastDecisionAt: nowIso,
+      suggestedAlwaysNotIncomeAt: existing?.suggestedAlwaysNotIncomeAt ?? null,
+      createdAt: existing?.createdAt ?? nowIso,
+      updatedAt: nowIso,
+    }
+    txn.set(ref, PlaidIncomeMemorySchema.parse(canonical))
+    return canonical
+  })
+}
+
+// After this many "not income" dismissals from a payer that has never been
+// confirmed as income, offer (once) to stop asking — the income twin of
+// PERSONAL_SUGGESTION_DISMISS_THRESHOLD.
+const NOT_INCOME_SUGGESTION_THRESHOLD = 3
+
+async function recordIncomeDismissal(
+  workspaceId: string,
+  pending: PlaidPendingTransactionType,
+  displayName: string
+): Promise<PlaidPersonalSuggestion | null> {
+  const payerKey = payerKeyFor(pending)
+  const memory = await rememberIncomeDecision(workspaceId, payerKey, displayName, { outcome: "not_income" })
+  if (!memory) return null
+  if (
+    memory.mode !== "ask_every_time" ||
+    memory.suggestedAlwaysNotIncomeAt ||
+    memory.incomeCount > 0 ||
+    memory.notIncomeCount < NOT_INCOME_SUGGESTION_THRESHOLD ||
+    // One payer key covers every Venmo cash-out (or every Zelle a bank
+    // doesn't name the sender on) — silencing it would hide client money
+    // along with the personal transfers.
+    isPeerToPeerDescriptor(pending.merchantName, pending.rawName)
+  ) {
+    return null
+  }
+  await incomeMemoryCol(workspaceId).doc(payerKey).set({ suggestedAlwaysNotIncomeAt: new Date().toISOString() }, { merge: true })
+  return { merchantKey: payerKey, displayName, dismissCount: memory.notIncomeCount }
+}
+
+// Learned Merchants management, income side (the ?kind=income variants of
+// the merchant memory routes).
+export async function listIncomeMemory(workspaceId: string, uid: string): Promise<PlaidIncomeMemoryType[]> {
+  await assertWorkspaceMembership(workspaceId, uid)
+  const snap = await incomeMemoryCol(workspaceId).orderBy("updatedAt", "desc").get()
+  return snap.docs.map((doc) => PlaidIncomeMemorySchema.parse(doc.data()))
+}
+
+export async function updateIncomeMemory(
+  workspaceId: string,
+  uid: string,
+  payerKey: string,
+  patch: { mode?: PlaidIncomeMemoryType["mode"]; incomeCategory?: IncomeCategory | null }
+): Promise<PlaidIncomeMemoryType> {
+  await assertWorkspaceMembership(workspaceId, uid)
+  const ref = incomeMemoryCol(workspaceId).doc(payerKey)
+  const snap = await ref.get()
+  if (!snap.exists) throw new NotFoundError("No learned payer found for this key")
+  await ref.set(
+    {
+      ...(patch.mode ? { mode: patch.mode } : {}),
+      ...(patch.incomeCategory !== undefined ? { incomeCategory: patch.incomeCategory } : {}),
+      updatedAt: new Date().toISOString(),
+    },
+    { merge: true }
+  )
+  return PlaidIncomeMemorySchema.parse((await ref.get()).data())
+}
+
+export async function resetIncomeMemory(workspaceId: string, uid: string, payerKey: string): Promise<void> {
+  await assertWorkspaceMembership(workspaceId, uid)
+  await incomeMemoryCol(workspaceId).doc(payerKey).delete()
+}
+
+// Everything transfer detection hid (see pairWithTransferCounterpart and
+// classifyPlaidTransferSignal), newest first — the safety net for a real
+// payment wrongly treated as money moving between the user's own accounts.
+const HIDDEN_TRANSFERS_LIMIT = 300
+
+export async function listHiddenTransfers(workspaceId: string, uid: string): Promise<PlaidPendingTransactionType[]> {
+  await assertWorkspaceMembership(workspaceId, uid)
+  // Equality-only query (no orderBy) so no composite index is needed;
+  // sorted in memory instead.
+  const snap = await pendingTransactionsCol(workspaceId)
+    .where("dismissReason", "==", "transfer")
+    .limit(HIDDEN_TRANSFERS_LIMIT)
+    .get()
+  return snap.docs
+    .map((doc) => PlaidPendingTransactionSchema.parse(doc.data()))
+    .filter((t) => t.status === "dismissed")
+    .sort((a, b) => b.date.localeCompare(a.date))
+}
+
+// "Not a transfer" from Hidden Transfers: puts the transaction back into
+// review (the Income or Expenses list, by its direction) and marks it so
+// detection leaves it alone from now on. If it was only hidden because it
+// was paired with another transaction, that pairing was wrong too, so the
+// other half comes back the same way. A counterpart with its own strong
+// signal (e.g. a credit card payment) stays hidden; it only loses the pairing.
+export async function restoreHiddenTransfer(
+  workspaceId: string,
+  uid: string,
+  pendingId: string
+): Promise<{ restoredIds: string[] }> {
+  await assertWorkspaceMembership(workspaceId, uid)
+  const ref = pendingTransactionsCol(workspaceId).doc(pendingId)
+
+  return db.runTransaction(async (txn) => {
+    const snap = await txn.get(ref)
+    if (!snap.exists) throw new NotFoundError("Transaction not found")
+    const target = PlaidPendingTransactionSchema.parse(snap.data())
+    if (target.status === "pending" && target.transferOverride) {
+      // A retry of a restore that already went through.
+      return { restoredIds: [target.id] }
+    }
+    if (target.status !== "dismissed" || target.dismissReason !== "transfer") {
+      throw new BadRequestError("This transaction isn't a hidden transfer.")
+    }
+
+    // All reads before any writes, per Firestore transaction rules.
+    const counterpartRef = target.transferPairId ? pendingTransactionsCol(workspaceId).doc(target.transferPairId) : null
+    const counterpartSnap = counterpartRef ? await txn.get(counterpartRef) : null
+    const counterpart = counterpartSnap?.exists ? PlaidPendingTransactionSchema.parse(counterpartSnap.data()) : null
+
+    const nowIso = new Date().toISOString()
+    const restorePatch = {
+      status: "pending",
+      dismissReason: FieldValue.delete(),
+      transferPairId: FieldValue.delete(),
+      transferOverride: true,
+      updatedAt: nowIso,
+    }
+    txn.set(ref, restorePatch, { merge: true })
+    const restoredIds = [target.id]
+
+    if (counterpartRef && counterpart && counterpart.transferPairId === target.id) {
+      const hiddenOnlyByPairing =
+        counterpart.status === "dismissed" && counterpart.dismissReason === "transfer" && counterpart.transferSignal !== "transfer"
+      if (hiddenOnlyByPairing) {
+        txn.set(counterpartRef, restorePatch, { merge: true })
+        restoredIds.push(counterpart.id)
+      } else {
+        txn.set(counterpartRef, { transferPairId: FieldValue.delete(), transferOverride: true, updatedAt: nowIso }, { merge: true })
+      }
+    }
+    return { restoredIds }
+  })
 }

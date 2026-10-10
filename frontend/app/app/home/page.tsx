@@ -29,6 +29,9 @@ import ExpenseForm from "@/components/expense-form";
 import ExpensesGrid from "@/components/expenses-grid";
 import VenmoImportPanel from "@/components/venmo-import-panel";
 import PlaidPendingTransactionsPanel from "@/components/plaid-pending-transactions-panel";
+import PlaidIncomeReviewPanel from "@/components/plaid-income-review-panel";
+import { useReviewRequestNonce } from "@/lib/push/deepLinkStore";
+import { useReviewCountsStore } from "@/lib/stores/useReviewCountsStore";
 import {
     useExpensesData,
     useExpensesRenderState,
@@ -64,10 +67,10 @@ export default function HomePage() {
     // ---- INCOME vs EXPENSES TOGGLE ----
     const [mode, setMode] = useState<"income" | "expenses">("income");
     const [showNet, setShowNet] = useState(false);
-    // Lets a push-notification tap (registerPush.ts) or other deep link land
-    // directly on the Expenses tab via /app/home?mode=expenses. Reads
-    // window.location directly rather than useSearchParams() so this page
-    // doesn't need a Suspense boundary.
+    // Lets a link land directly on the Expenses tab via
+    // /app/home?mode=expenses (web). Reads window.location directly rather
+    // than useSearchParams() so this page doesn't need a Suspense boundary.
+    // Notification taps go through deepLinkStore instead — see below.
     useEffect(() => {
         if (typeof window === "undefined") return;
         const params = new URLSearchParams(window.location.search);
@@ -75,6 +78,24 @@ export default function HomePage() {
             setMode("expenses");
         }
     }, []);
+    // A notification tap (deepLinkStore.ts) picks the tab — including when
+    // the app was already open on this page, which a mount-time check would
+    // miss. Once per tap (nonce).
+    const expensesReviewNonce = useReviewRequestNonce("expenses", activeWorkspaceId);
+    const incomeReviewNonce = useReviewRequestNonce("income", activeWorkspaceId);
+    const appliedReviewNonceRef = useRef<number | null>(null);
+    useEffect(() => {
+        const nonce = expensesReviewNonce ?? incomeReviewNonce;
+        if (nonce == null || appliedReviewNonceRef.current === nonce) return;
+        appliedReviewNonceRef.current = nonce;
+        setMode(expensesReviewNonce != null ? "expenses" : "income");
+    }, [expensesReviewNonce, incomeReviewNonce]);
+    // Bank transactions waiting in each tab's review list — badges the tab
+    // buttons so, e.g., deposits from a mixed notification aren't missed
+    // behind the Income tab while Expenses is open.
+    const reviewCounts = useReviewCountsStore((s) => activeWorkspaceId ? s.byWorkspaceId[activeWorkspaceId] : undefined);
+    const incomeReviewCount = supportsExpenses ? reviewCounts?.income ?? 0 : 0;
+    const expensesReviewCount = supportsExpenses ? reviewCounts?.expenses ?? 0 : 0;
     // ---- ENTRIES STORE ----
     const entries = useEntriesData(activeWorkspaceId);
     const entriesState = useEntriesRenderState(activeWorkspaceId);
@@ -133,11 +154,14 @@ export default function HomePage() {
         mode,
     ]);
     useEffect(() => {
-        if (!supportsExpenses && mode === "expenses") {
+        // Only once the workspace is known: before that supportsExpenses is
+        // false for every workspace, and this used to undo a deep link's
+        // Expenses tab during startup.
+        if (workspaceState.status === "ready" && !supportsExpenses && mode === "expenses") {
             debugLog("home-page", "force_income_mode");
             setMode("income");
         }
-    }, [supportsExpenses, mode]);
+    }, [workspaceState.status, supportsExpenses, mode]);
     useEffect(() => {
         debugLog("home-page", "workspace_changed_reset_hydration", {
             activeWorkspaceId,
@@ -287,16 +311,18 @@ export default function HomePage() {
       ${mode === "income"
             ? "border-border bg-primary text-primary-foreground"
             : "bg-card text-card-foreground border-border hover:bg-accent"}
-    `}>
+    `} aria-label={incomeReviewCount > 0 ? `Income, ${incomeReviewCount} to review` : undefined}>
             Income
+            <ReviewCountBadge count={incomeReviewCount} active={mode === "income"}/>
           </button>
 
           {supportsExpenses && (<button onClick={() => setMode("expenses")} className={`px-4 py-2 rounded-lg border font-medium transition
       ${mode === "expenses"
                 ? "border-border bg-primary text-primary-foreground"
                 : "bg-card text-card-foreground border-border hover:bg-accent"}
-    `}>
+    `} aria-label={expensesReviewCount > 0 ? `Expenses, ${expensesReviewCount} to review` : undefined}>
               Expenses
+              <ReviewCountBadge count={expensesReviewCount} active={mode === "expenses"}/>
             </button>)}
         </div>
 
@@ -311,6 +337,9 @@ export default function HomePage() {
         {supportsExpenses ? (<div className="space-y-3">
             <div className={mode === "expenses" ? undefined : "hidden"}>
               <PlaidPendingTransactionsPanel />
+            </div>
+            <div className={mode === "income" ? undefined : "hidden"}>
+              <PlaidIncomeReviewPanel />
             </div>
             {showVenmoImportPanel ? <VenmoImportPanel /> : null}
             {/* ReceiptCapturePanel removed — receipt attachment now happens inside ExpenseForm */}
@@ -330,4 +359,14 @@ export default function HomePage() {
         </div>
       </main>
     </div>);
+}
+
+// Small count pill on the Income/Expenses toggle — see reviewCounts above.
+function ReviewCountBadge({ count, active }: { count: number; active: boolean }) {
+    if (count <= 0) return null;
+    return (<span aria-hidden="true" className={`ml-2 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-semibold tabular-nums ${active
+            ? "bg-primary-foreground/20 text-primary-foreground"
+            : "bg-primary text-primary-foreground"}`}>
+            {count > 99 ? "99+" : count}
+        </span>);
 }

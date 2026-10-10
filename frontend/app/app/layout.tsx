@@ -17,6 +17,7 @@ import { useAppOpenRefresh } from "@/hooks/useAppOpenRefresh"
 import { debugError, debugLog } from "@/lib/debugLoop"
 import { useAppBootstrap } from "@/hooks/useAppBootstrap"
 import { AppBootstrapProvider } from "@/contexts/app-bootstrap-context"
+import DeepLinkHandler from "@/components/deep-link-handler"
 
 export default function AppLayout({
   children,
@@ -154,6 +155,7 @@ export default function AppLayout({
     >
       <NativePermissionGuideDialog />
       <Toaster />
+      <DeepLinkHandler />
       {shouldBlock ? <AppLoader label="Loading your workspace..." /> : children}
     </AppBootstrapProvider>
   )

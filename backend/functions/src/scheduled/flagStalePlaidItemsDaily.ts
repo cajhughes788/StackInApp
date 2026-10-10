@@ -50,7 +50,8 @@ export const flagStalePlaidItemsDaily = onSchedule(
           // registerPush.ts routes this straight to the account page, where
           // the broken connection already shows a Reconnect button — see
           // plaid-connect-button.tsx's update-mode flow.
-          data: { deepLink: "stackin://plaid/reconnect" },
+          // workspaceId: the account page shows the active workspace's banks.
+          data: { deepLink: "stackin://plaid/reconnect", workspaceId },
         })
         await doc.ref.set({ lastStaleNotifiedAt: nowIso }, { merge: true })
       } catch (err) {

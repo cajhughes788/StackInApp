@@ -1,6 +1,7 @@
 import { apiFetch, tryWrite } from "@/lib/api/core/client"
 import { API_ENDPOINTS } from "@/lib/api/core/endpoints"
 import type { RecurringCadence } from "@shared/schemas/recurringRule"
+import type { IncomeCategory, PaymentMethod } from "@shared/schemas/entry"
 
 export type PlaidLinkedAccount = {
   accountId: string
@@ -28,16 +29,35 @@ export type PlaidPendingTransaction = {
   plaidItemId: string
   accountId: string
   date: string
+  /** Always positive — `direction` says whether money left or arrived. */
   amount: number
+  /** "income" for deposits (reviewed on the Income tab), "expense" for spending. */
+  direction: "expense" | "income"
   merchantName: string | null
   rawName: string
   /** Server-resolved merchant identity (may be a legacy key); absent on very old records. */
   merchantKey?: string
   suggestedExpenseAccount: string | null
+  /** Income direction only — remembered from this payer's last confirmed deposit. */
+  suggestedIncomeCategory?: IncomeCategory | null
+  /** Income direction only — remembered, or guessed from the descriptor. */
+  suggestedPaymentMethod?: PaymentMethod | null
   isBusinessGuess: boolean | null
   confidence: number
   isLikelyFuelPurchase: boolean
   status: "pending" | "confirmed" | "dismissed"
+  /** See classifyPlaidTransferSignal in shared/plaidClassification.ts. */
+  transferSignal?: "transfer" | "possible_transfer" | "unknown" | null
+  /** Money back from a merchant — reviewed with expenses, booked as a negative expense. */
+  isRefund?: boolean
+  /** The confirmed purchase this refund most likely reverses. */
+  refundOf?: { pendingId: string; expenseId: string; date: string; amount: number } | null
+  /** A deposit cashed out from Venmo — see isVenmoCashoutDescriptor. */
+  isVenmoCashout?: boolean
+  /** Set when the app dismissed this on its own as a transfer. */
+  dismissReason?: "transfer"
+  /** The other half of a matched transfer, when it was hidden by pairing. */
+  transferPairId?: string
 }
 
 export async function getPlaidLinkToken(): Promise<string> {
@@ -124,11 +144,21 @@ export type PlaidPersonalSuggestion = {
 export async function confirmPlaidPendingTransaction(
   workspaceId: string,
   pendingId: string,
-  decision: { isBusiness: boolean; account?: string; alwaysPersonal?: boolean; receiptAssetId?: string }
+  decision: {
+    isBusiness: boolean
+    account?: string
+    alwaysPersonal?: boolean
+    receiptAssetId?: string
+    incomeCategory?: IncomeCategory
+    paymentMethod?: PaymentMethod
+  }
 ): Promise<{
   committedExpenseId?: string
+  committedEntryId?: string
   recurringSuggestion?: PlaidRecurringSuggestion
   personalSuggestion?: PlaidPersonalSuggestion
+  /** Income dismissals: a one-time "stop asking about this payer?" offer. */
+  notIncomeSuggestion?: PlaidPersonalSuggestion
 }> {
   return tryWrite(
     `${API_ENDPOINTS.plaid.confirmPendingTransaction}?workspaceId=${encodeURIComponent(workspaceId)}&pendingId=${encodeURIComponent(pendingId)}`,
@@ -159,10 +189,48 @@ export type PlaidMerchantMemory = {
   updatedAt: string
 }
 
-export async function getPlaidMerchantMemory(workspaceId: string): Promise<PlaidMerchantMemory[]> {
+/** Learned income payers — see shared/schemas/plaidIncomeMemory.ts. */
+export type PlaidIncomeMemory = {
+  id: string
+  payerKey: string
+  displayName: string
+  lastOutcome: "income" | "not_income"
+  incomeCategory: IncomeCategory | null
+  paymentMethod: PaymentMethod | null
+  mode: "ask_every_time" | "always_not_income"
+  incomeCount: number
+  notIncomeCount: number
+  lastDecisionAt: string
+  updatedAt: string
+}
+
+export async function getPlaidMerchantMemory(
+  workspaceId: string
+): Promise<{ merchants: PlaidMerchantMemory[]; payers: PlaidIncomeMemory[] }> {
   const url = `${API_ENDPOINTS.plaid.merchantMemory}?workspaceId=${encodeURIComponent(workspaceId)}`
-  const res = await apiFetch<{ merchants: PlaidMerchantMemory[] }>(url, { method: "GET" })
-  return res.merchants ?? []
+  const res = await apiFetch<{ merchants: PlaidMerchantMemory[]; payers?: PlaidIncomeMemory[] }>(url, { method: "GET" })
+  return { merchants: res.merchants ?? [], payers: res.payers ?? [] }
+}
+
+export async function updatePlaidIncomeMemory(
+  workspaceId: string,
+  payerKey: string,
+  patch: { mode?: PlaidIncomeMemory["mode"]; incomeCategory?: IncomeCategory | null }
+): Promise<PlaidIncomeMemory> {
+  const res = await tryWrite<{ payer: PlaidIncomeMemory }>(
+    `${API_ENDPOINTS.plaid.updateMerchantMemory}?workspaceId=${encodeURIComponent(workspaceId)}&merchantKey=${encodeURIComponent(payerKey)}&kind=income`,
+    "POST",
+    patch
+  )
+  return res.payer
+}
+
+export async function resetPlaidIncomeMemory(workspaceId: string, payerKey: string): Promise<void> {
+  await tryWrite(
+    `${API_ENDPOINTS.plaid.resetMerchantMemory}?workspaceId=${encodeURIComponent(workspaceId)}&merchantKey=${encodeURIComponent(payerKey)}&kind=income`,
+    "DELETE",
+    {}
+  )
 }
 
 export async function updatePlaidMerchantMemory(
@@ -182,6 +250,22 @@ export async function resetPlaidMerchantMemory(workspaceId: string, merchantKey:
   await tryWrite(
     `${API_ENDPOINTS.plaid.resetMerchantMemory}?workspaceId=${encodeURIComponent(workspaceId)}&merchantKey=${encodeURIComponent(merchantKey)}`,
     "DELETE",
+    {}
+  )
+}
+
+export async function getPlaidHiddenTransfers(workspaceId: string): Promise<PlaidPendingTransaction[]> {
+  const url = `${API_ENDPOINTS.plaid.hiddenTransfers}?workspaceId=${encodeURIComponent(workspaceId)}`
+  const res = await apiFetch<{ transactions: PlaidPendingTransaction[] }>(url, { method: "GET" })
+  return res.transactions ?? []
+}
+
+// Returns every transaction put back into review — the one restored, plus
+// its paired other half when that was only hidden because of the pairing.
+export async function restorePlaidHiddenTransfer(workspaceId: string, pendingId: string): Promise<{ restoredIds: string[] }> {
+  return tryWrite(
+    `${API_ENDPOINTS.plaid.restoreHiddenTransfer}?workspaceId=${encodeURIComponent(workspaceId)}&pendingId=${encodeURIComponent(pendingId)}`,
+    "POST",
     {}
   )
 }

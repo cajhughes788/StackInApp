@@ -68,8 +68,11 @@ type ExpenseDisplayRow = {
 function buildExpenseDisplayRows(
   categories: ProfitLossExpenseCategory[]
 ): ExpenseDisplayRow[] {
+  // !== 0, not > 0: a category can net negative in a period that has a
+  // refund but no matching purchase, and dropping it would leave the
+  // visible rows not adding up to the expense total.
   return categories
-    .filter((item) => item.amount > 0)
+    .filter((item) => item.amount !== 0)
     .map((item) => {
       if (item.category !== "Other expenses") {
         return {
@@ -527,7 +530,7 @@ export default function ProfitLossPage() {
   )
 
   const expenseCategoryDetails = useMemo<ProfitLossExpenseCategory[]>(
-    () => (selected?.expenses.byCategory ?? []).filter((item) => item.amount > 0),
+    () => (selected?.expenses.byCategory ?? []).filter((item) => item.amount !== 0),
     [selected]
   )
 

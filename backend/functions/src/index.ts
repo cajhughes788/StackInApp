@@ -61,6 +61,8 @@ export {
   getPlaidMerchantMemory,
   updatePlaidMerchantMemory,
   resetPlaidMerchantMemory,
+  getPlaidHiddenTransfers,
+  restorePlaidHiddenTransfer,
   plaidWebhook,
   registerDeviceToken,
 } from "./api"

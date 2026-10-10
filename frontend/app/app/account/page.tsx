@@ -554,9 +554,14 @@ const handleLogout = async () => {
 
 	            {activeWorkspace?.type === "independent" ? (
 	              <div className="border-t border-muted pt-4">
-	                <Button variant="outline" onClick={() => router.push("/app/learned-merchants")}>
-	                  Learned Merchants
-	                </Button>
+	                <div className="flex flex-wrap gap-2">
+	                  <Button variant="outline" onClick={() => router.push("/app/learned-merchants")}>
+	                    Learned Merchants
+	                  </Button>
+	                  <Button variant="outline" onClick={() => router.push("/app/hidden-transfers")}>
+	                    Hidden Transfers
+	                  </Button>
+	                </div>
 	              </div>
 	            ) : null}
 
