@@ -939,7 +939,7 @@ export default function EntriesGrid() {
                             ? settings.w2?.includeUnreportedInUI ?? false
                             : settings.independent?.includeUnreportedInUI ?? false
                     });
-                    return (<tr key={e.id} className="bg-card even:bg-secondary/55 divide-x divide-border">
+                    return (<tr key={e.id} data-entry-date={e.date} className="bg-card even:bg-secondary/55 divide-x divide-border">
         {showNotesColumn && (<td className="text-center w-8">
             {e.notes ? (<Popover>
                 <PopoverTrigger asChild>
@@ -1001,7 +1001,7 @@ export default function EntriesGrid() {
                 sortedEntries.map((e) => {
                     if (e.workspace !== "independent")
                         return null;
-                    return (<tr key={e.id} className="bg-card even:bg-secondary/55 divide-x divide-border">
+                    return (<tr key={e.id} data-entry-date={e.date} className="bg-card even:bg-secondary/55 divide-x divide-border">
     {/* Notes */}
     {showNotesColumn && (<td className="text-center w-8">
         {e.notes ? (<Popover>

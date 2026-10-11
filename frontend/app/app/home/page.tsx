@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import AppLoader from "@/components/app-loader";
 import StackInHeader from "@/components/stackin-header";
 import IncomeGauge from "@/components/income-gauge";
-import IndependentIncomeGauge from "@/components/independent-income-gauge";
+import IncomeStreamsOverview from "@/components/income-streams-overview";
 import IndependentExpenseGauge from "@/components/independent-expense-gauge";
 import EntryForm from "@/components/entry-form";
 import EntriesGrid from "@/components/entries-grid";
@@ -303,7 +303,7 @@ export default function HomePage() {
       <StackInHeader />
 
       <main className="flex-1 px-4 pb-6 pt-4 max-w-3xl mx-auto w-full space-y-4">
-        {activeWorkspace?.type === "independent" ? (mode === "income" ? <IndependentIncomeGauge /> : <IndependentExpenseGauge />) : (<IncomeGauge />)}
+        {activeWorkspace?.type === "independent" ? (mode === "income" ? <IncomeStreamsOverview /> : <IndependentExpenseGauge />) : (<IncomeGauge />)}
 
         {/* Toggle */}
         <div className="flex justify-center gap-3 mt-4">
