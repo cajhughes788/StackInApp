@@ -2,7 +2,7 @@ import { SettingsType } from "./schemas/settings"
 import { EntryType } from "./schemas/entry"
 import {
   getIncomeBreakdownTotalForPaymentMethod,
-  getIncomeBreakdownTotalForPaymentMethodAndCategory,
+  getNonCustomOtherIncome,
 } from "./independentIncome"
 
 /* ------------------------------------------------------------
@@ -179,6 +179,9 @@ export type EntryGridVisibility =
       showZelle: boolean
       showPosSales: boolean
       showCashSales: boolean
+      // "Other" income that isn't custom income — mainly bank deposits
+      // confirmed with "Paid via: Other" (getNonCustomOtherIncome).
+      showOtherIncome: boolean
       showCustomIncome: boolean
       showDayTotal: true
     }
@@ -224,8 +227,13 @@ export function resolveEntryGridVisibility(
 
   // Independent
   const hoursUsed = entries.some((e) => (e.independent?.hours ?? 0) > 0)
-  const tipsUsed = entries.some(
-    (e) => getIncomeBreakdownTotalForPaymentMethodAndCategory(e.independent, "card", "tips") > 0
+  // Any card money — old card tips, or a deposit marked "Card" — belongs in
+  // the Card / POS column (see getIndependentColumnTotal in entries-grid).
+  const cardUsed = entries.some(
+    (e) => getIncomeBreakdownTotalForPaymentMethod(e.independent, "card") > 0
+  )
+  const otherIncomeUsed = entries.some(
+    (e) => getNonCustomOtherIncome(e.independent).total > 0.005
   )
   const unreportedUsed = entries.some(
     (e) => (e.independent?.unreportedCashTips ?? e.independent?.unreportedCash ?? 0) > 0
@@ -241,7 +249,7 @@ export function resolveEntryGridVisibility(
   )
   // Card tips (legacy "card" + tips) show in the Card / POS column and cash
   // tips in the Cash column — see getIndependentColumnTotal in entries-grid.
-  const posUsed = tipsUsed || entries.some(
+  const posUsed = cardUsed || entries.some(
     (e) => getIncomeBreakdownTotalForPaymentMethod(e.independent, "pos") > 0
   )
   const cashUsed = entries.some(
@@ -264,6 +272,7 @@ export function resolveEntryGridVisibility(
     showZelle: zelleUsed,
     showPosSales: posUsed,
     showCashSales: cashUsed,
+    showOtherIncome: otherIncomeUsed,
     showCustomIncome: customIncomeUsed,
     showDayTotal: true,
   }

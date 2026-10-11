@@ -49,13 +49,16 @@ import { useReviewCountsStore } from "@/lib/stores/useReviewCountsStore"
 const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   venmo: "Venmo",
   zelle: "Zelle",
-  apple_cash: "Apple Cash",
-  pos: "POS / card sales",
+  apple_cash: "Apple Pay",
+  pos: "Card / POS sales",
   card: "Card",
   cash: "Cash",
   other: "Other",
 }
-const PAYMENT_METHODS = Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[]
+// No separate "Card": card money belongs under Card / POS everywhere (the
+// entries grid and Payment streams fold "card" into it), so offering both
+// would only split the same money across two choices.
+const PAYMENT_METHODS: PaymentMethod[] = ["venmo", "zelle", "apple_cash", "pos", "cash", "other"]
 const DEFAULT_INCOME_CATEGORY: IncomeCategory = "services"
 
 // Same skeleton-flash guard as the expense panel, under its own key so the
@@ -99,11 +102,13 @@ type RowChoice = { incomeCategory: IncomeCategory; paymentMethod: PaymentMethod 
 // Pre-filled from the payer's income memory when the backend found one
 // (see PlaidIncomeMemorySchema); older records fall back to a guess.
 function defaultChoice(transaction: PlaidPendingTransaction): RowChoice {
+  const suggested =
+    transaction.suggestedPaymentMethod ?? suggestPlaidIncomePaymentMethod(transaction.merchantName, transaction.rawName)
   return {
     incomeCategory: transaction.suggestedIncomeCategory ?? DEFAULT_INCOME_CATEGORY,
-    paymentMethod:
-      transaction.suggestedPaymentMethod ??
-      suggestPlaidIncomePaymentMethod(transaction.merchantName, transaction.rawName),
+    // A payer remembered as "Card" before that option was folded into
+    // Card / POS would otherwise pre-fill a choice the menu no longer has.
+    paymentMethod: suggested === "card" ? "pos" : suggested,
   }
 }
 

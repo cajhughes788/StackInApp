@@ -24,7 +24,7 @@ import { computeIncomeGaugeForEntry } from "@shared/computeIncomeGauge";
 import { CUSTOM_POSITION_ID, CUSTOM_POSITION_TITLE } from "@shared/hourlyRates";
 import { debugRender } from "@/lib/debugLoop";
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore";
-import { aggregateIncomeBreakdowns, getIncomeBreakdownTotal, getIncomeBreakdownTotalForPaymentMethod, getIncomeBreakdownTotalForPaymentMethodAndCategory, } from "@shared/independentIncome";
+import { aggregateIncomeBreakdowns, getCustomIncomeMirrors, getNonCustomOtherIncome, } from "@shared/independentIncome";
 import SyncStatusIndicator from "@/components/sync-status-indicator";
 import { toast } from "@/hooks/use-toast";
 // Short date formatter
@@ -60,6 +60,14 @@ const paymentFieldConfig = {
         categories: ["services", "products", "other"] as IncomeCategory[],
         defaultCategory: "services" as IncomeCategory,
     },
+    // "Other" money that isn't custom income — mainly bank deposits
+    // confirmed with "Paid via: Other" (getNonCustomOtherIncome).
+    otherIncome: {
+        label: "Other / Bank",
+        paymentMethod: "other",
+        categories: ["services", "tips", "products", "other"] as IncomeCategory[],
+        defaultCategory: "services" as IncomeCategory,
+    },
 } as const;
 function displayMoneyValue(value: number | undefined, prefix = "", decimals = 2) {
     if (typeof value !== "number" || Math.abs(value) < 0.0001) {
@@ -73,27 +81,24 @@ function displayNumberValue(value: number | undefined, decimals = 2) {
     }
     return value.toFixed(decimals);
 }
-// Tips are a category of every source now (see paymentCategoryConfig in
-// lib/incomeBreakdown.ts): the Card / POS column includes card tips — stored
-// as "card" + tips before card tips moved under POS — and the Cash column
-// includes cash tips alongside cash sales.
-function isLegacyCardTips(item: { paymentMethod: string; tips?: number }) {
-    return item.paymentMethod === "card" && Number(item.tips ?? 0) > 0;
-}
-function belongsToColumn(item: { paymentMethod: string; tips?: number }, field: keyof typeof paymentFieldConfig) {
-    if (field === "posSales" && isLegacyCardTips(item))
-        return true;
+// Which stored breakdown lines each column covers. Tips are a category of
+// every source (see paymentCategoryConfig in lib/incomeBreakdown.ts), so the
+// Card / POS column includes card tips and the Cash column cash tips. Any
+// "card" line — old card tips, or a deposit marked "Card" — is card money
+// and belongs to Card / POS. The Other / Bank column is special: its lines
+// are shared with custom income's mirrors, handled in BreakdownCell.
+function belongsToColumn(item: { paymentMethod: string }, field: keyof typeof paymentFieldConfig) {
+    if (field === "posSales")
+        return item.paymentMethod === "pos" || item.paymentMethod === "card";
     return item.paymentMethod === paymentFieldConfig[field].paymentMethod;
 }
+function getColumnBreakdown(independent: EntryType["independent"] | undefined, field: keyof typeof paymentFieldConfig) {
+    if (field === "otherIncome")
+        return getNonCustomOtherIncome(independent);
+    return aggregateIncomeBreakdowns((independent?.incomeBreakdowns ?? []).filter((item) => belongsToColumn(item, field)));
+}
 function getIndependentColumnTotal(entry: EntryType, field: keyof typeof paymentFieldConfig) {
-    const independent = entry.independent;
-    if (!independent)
-        return 0;
-    if (field === "posSales") {
-        return getIncomeBreakdownTotalForPaymentMethod(independent, "pos") +
-            getIncomeBreakdownTotalForPaymentMethodAndCategory(independent, "card", "tips");
-    }
-    return getIncomeBreakdownTotalForPaymentMethod(independent, paymentFieldConfig[field].paymentMethod);
+    return entry.independent ? getColumnBreakdown(entry.independent, field).total : 0;
 }
 function ResponsiveHeader({ desktopLabel, mobileLines }: {
     desktopLabel: string;
@@ -220,6 +225,7 @@ export default function EntriesGrid() {
             showZelle: visibility.showZelle,
             showPosSales: visibility.showPosSales,
             showCashSales: visibility.showCashSales,
+            showOtherIncome: visibility.showOtherIncome,
             showCustomIncome: visibility.showCustomIncome,
         };
     }, [visibility]);
@@ -234,6 +240,7 @@ export default function EntriesGrid() {
             zelle: number;
             posSales: number;
             cashSales: number;
+            otherIncome: number;
             customIncome: number;
             dayTotal: number;
         }, e) => {
@@ -245,14 +252,13 @@ export default function EntriesGrid() {
                 acc.paidHours += e.totals?.paidHours ?? 0;
             }
             if (e.workspace === "independent") {
-                acc.tips += getIncomeBreakdownTotalForPaymentMethodAndCategory(e.independent, "card", "tips");
-                acc.reportedCash += getIncomeBreakdownTotalForPaymentMethodAndCategory(e.independent, "cash", "tips");
                 acc.unreportedCash += e.independent?.unreportedCashTips ?? e.independent?.unreportedCash ?? 0;
                 acc.venmo += getIndependentColumnTotal(e, "venmo");
                 acc.appleCash += getIndependentColumnTotal(e, "appleCash");
                 acc.zelle += getIndependentColumnTotal(e, "zelle");
                 acc.posSales += getIndependentColumnTotal(e, "posSales");
                 acc.cashSales += getIndependentColumnTotal(e, "cashSales");
+                acc.otherIncome += getIndependentColumnTotal(e, "otherIncome");
                 acc.customIncome += (e.independent?.customIncome ?? []).reduce((sum: number, ci: {
                     amount?: number;
                 }) => sum + (ci.amount ?? 0), 0);
@@ -276,6 +282,7 @@ export default function EntriesGrid() {
             zelle: 0,
             posSales: 0,
             cashSales: 0,
+            otherIncome: 0,
             customIncome: 0,
             dayTotal: 0,
         });
@@ -310,6 +317,8 @@ export default function EntriesGrid() {
         if (independentColumns?.showPosSales)
             count += 1;
         if (independentColumns?.showCashSales)
+            count += 1;
+        if (independentColumns?.showOtherIncome)
             count += 1;
         if (independentColumns?.showCustomIncome)
             count += 1;
@@ -465,10 +474,7 @@ export default function EntriesGrid() {
         const entryRef = useRef(entry);
         useEffect(() => { entryRef.current = entry; }, [entry]);
         const independent = entry.independent;
-        const existingBreakdowns = independent?.incomeBreakdowns ?? [];
-        const matching = existingBreakdowns.filter((item) => belongsToColumn(item, field));
-        // Card tips from the old separate field only contribute their tips.
-        const aggregated = aggregateIncomeBreakdowns(matching.map((item) => isLegacyCardTips(item) ? { paymentMethod: item.paymentMethod, tips: item.tips } : item));
+        const aggregated = getColumnBreakdown(independent, field);
         // "Receives Tips" — or tips already recorded, so they stay editable.
         const showTipsBox = tipsEnabled || aggregated.tips > 0;
         const tipsOnTop = field === "posSales" || field === "cashSales";
@@ -489,9 +495,7 @@ export default function EntriesGrid() {
         useEffect(() => {
             if (isOpen) return;
             const liveIndependent = entryRef.current.independent;
-            const liveBreakdowns = liveIndependent?.incomeBreakdowns ?? [];
-            const liveMatching = liveBreakdowns.filter((item) => belongsToColumn(item, field));
-            const liveAgg = aggregateIncomeBreakdowns(liveMatching.map((item) => isLegacyCardTips(item) ? { paymentMethod: item.paymentMethod, tips: item.tips } : item));
+            const liveAgg = getColumnBreakdown(liveIndependent, field);
             setServices(liveAgg.services > 0 ? liveAgg.services.toFixed(2) : "");
             setTips(liveAgg.tips > 0 ? liveAgg.tips.toFixed(2) : "");
             setProducts(liveAgg.products > 0 ? liveAgg.products.toFixed(2) : "");
@@ -531,18 +535,16 @@ export default function EntriesGrid() {
             try {
                 // Use live entry breakdowns to avoid overwriting concurrent edits.
                 const liveBreakdowns = latestEntry.independent.incomeBreakdowns ?? [];
-                // Replace everything this column covers. Old card tips move
-                // under POS: only their tips are dropped from a "card" line
-                // (any other card amounts stay where they were).
-                const nextBreakdowns = liveBreakdowns.flatMap((item) => {
-                    if (!belongsToColumn(item, field))
-                        return [item];
-                    if (isLegacyCardTips(item)) {
-                        const { tips: _cardTips, ...rest } = item;
-                        return getIncomeBreakdownTotal(rest) > 0 ? [rest] : [];
-                    }
-                    return [];
-                });
+                // Replace everything this column covers (card lines are saved
+                // back as Card / POS). "Other" lines also carry custom income,
+                // so the Other / Bank column rebuilds those mirrors from the
+                // customIncome list and replaces only the rest.
+                const nextBreakdowns = field === "otherIncome"
+                    ? [
+                        ...liveBreakdowns.filter((item) => item.paymentMethod !== "other"),
+                        ...getCustomIncomeMirrors(latestEntry.independent),
+                    ]
+                    : liveBreakdowns.filter((item) => !belongsToColumn(item, field));
                 if (parsed.data) {
                     nextBreakdowns.push(parsed.data);
                 }
@@ -905,6 +907,9 @@ export default function EntriesGrid() {
       {independentColumns?.showCashSales && (<th className={`${thBase} text-center sm:text-right`}>
           <ResponsiveHeader desktopLabel="Cash"/>
         </th>)}
+      {independentColumns?.showOtherIncome && (<th className={`${thBase} text-center sm:text-right`}>
+          <ResponsiveHeader desktopLabel="Other / Bank" mobileLines={["Other /", "Bank"]}/>
+        </th>)}
       {independentColumns?.showCustomIncome && (<th className={`${thBase} text-center sm:text-right`}>
           <ResponsiveHeader desktopLabel="Custom"/>
         </th>)}
@@ -1050,6 +1055,11 @@ export default function EntriesGrid() {
         <BreakdownCell entry={e} field="cashSales"/>
       </td>)}
 
+    {/* Other / Bank */}
+    {independentColumns?.showOtherIncome && (<td className={`${tdBase} text-center tabular-nums whitespace-nowrap sm:text-right leading-tight py-1`}>
+        <BreakdownCell entry={e} field="otherIncome"/>
+      </td>)}
+
     {/* Custom Income Total */}
     {independentColumns?.showCustomIncome && (<td className={`${tdBase} text-center tabular-nums whitespace-nowrap sm:text-right leading-tight py-1`}>
         {formatCurrency((e.independent?.customIncome || []).reduce((sum: number, ci: {
@@ -1142,6 +1152,11 @@ export default function EntriesGrid() {
         {/* Cash Sales */}
         {independentColumns?.showCashSales && (<td className="px-2 py-1.5 text-center sm:text-right tabular-nums whitespace-nowrap text-slate-700 dark:text-white">
             {formatCurrency(totals.cashSales)}
+          </td>)}
+
+        {/* Other / Bank */}
+        {independentColumns?.showOtherIncome && (<td className="px-2 py-1.5 text-center sm:text-right tabular-nums whitespace-nowrap text-slate-700 dark:text-white">
+            {formatCurrency(totals.otherIncome)}
           </td>)}
 
         {/* Custom Income */}
