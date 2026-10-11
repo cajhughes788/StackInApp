@@ -3,7 +3,6 @@ import { EntryType } from "./schemas/entry"
 import {
   getIncomeBreakdownTotalForPaymentMethod,
   getIncomeBreakdownTotalForPaymentMethodAndCategory,
-  getIndependentCashSalesTotal,
 } from "./independentIncome"
 
 /* ------------------------------------------------------------
@@ -37,8 +36,10 @@ export type IndependentFormVisibility = {
   showPosSales: boolean
   showCashSales: boolean
 
-  showIndependentTips: boolean
-  showIndependentReportedCash: boolean
+  // "Receives Tips" — adds a Tips line to every income source (see
+  // resolveIndependentFormVisibility). Replaced the separate Credit Card
+  // Tips / Reported Cash fields.
+  showSourceTips: boolean
   showIndependentUnreportedCash: boolean
 
   showCustomIncome: boolean
@@ -81,6 +82,27 @@ export function resolveW2FormVisibility(
   }
 }
 
+/* ------------------------------------------------------------
+ * TIPS AS A CATEGORY OF EVERY SOURCE
+ * Card tips now live inside Card / POS sales and cash tips inside Cash
+ * (entered on top of sales). The old per-type toggles (askCardTips /
+ * askReportedCash) still count as having that source turned on, so nobody
+ * who used them loses the field — without rewriting saved settings.
+ * ------------------------------------------------------------ */
+export function isPosSalesSourceEnabled(settings: SettingsType["independent"]): boolean {
+  return (
+    settings?.enablePosSales === true ||
+    (settings?.isTippedIndependent === true && settings?.askCardTips === true)
+  )
+}
+
+export function isCashSourceEnabled(settings: SettingsType["independent"]): boolean {
+  return (
+    settings?.enableCashSales === true ||
+    (settings?.isTippedIndependent === true && settings?.askReportedCash === true)
+  )
+}
+
 export function resolveIndependentFormVisibility(
   settings: SettingsType["independent"]
 ): Omit<IndependentFormVisibility, "mode" | "showNotes"> {
@@ -91,14 +113,13 @@ export function resolveIndependentFormVisibility(
     showVenmo: settings?.enableVenmo === true,
     showAppleCash: settings?.enableApplePay === true,
     showZelle: settings?.enableZelle === true,
-    showPosSales: settings?.enablePosSales === true,
-    showCashSales: settings?.enableCashSales === true,
+    showPosSales: isPosSalesSourceEnabled(settings),
+    showCashSales: isCashSourceEnabled(settings),
 
-    showIndependentTips: isTipped && settings?.askCardTips === true,
-    showIndependentReportedCash:
-      isTipped && settings?.askReportedCash === true,
-    showIndependentUnreportedCash:
-      isTipped && settings?.askUnreportedCash === true,
+    showSourceTips: isTipped,
+    // Personal Cash isn't a kind of tip — it's its own option now (Built-in
+    // income sources), no longer gated by "Receives Tips".
+    showIndependentUnreportedCash: settings?.askUnreportedCash === true,
 
     showCustomIncome:
       Array.isArray(settings?.customIncomeFields) &&
@@ -206,9 +227,6 @@ export function resolveEntryGridVisibility(
   const tipsUsed = entries.some(
     (e) => getIncomeBreakdownTotalForPaymentMethodAndCategory(e.independent, "card", "tips") > 0
   )
-  const reportedUsed = entries.some(
-    (e) => getIncomeBreakdownTotalForPaymentMethodAndCategory(e.independent, "cash", "tips") > 0
-  )
   const unreportedUsed = entries.some(
     (e) => (e.independent?.unreportedCashTips ?? e.independent?.unreportedCash ?? 0) > 0
   )
@@ -221,11 +239,13 @@ export function resolveEntryGridVisibility(
   const zelleUsed = entries.some(
     (e) => getIncomeBreakdownTotalForPaymentMethod(e.independent, "zelle") > 0
   )
-  const posUsed = entries.some(
+  // Card tips (legacy "card" + tips) show in the Card / POS column and cash
+  // tips in the Cash column — see getIndependentColumnTotal in entries-grid.
+  const posUsed = tipsUsed || entries.some(
     (e) => getIncomeBreakdownTotalForPaymentMethod(e.independent, "pos") > 0
   )
   const cashUsed = entries.some(
-    (e) => getIndependentCashSalesTotal(e.independent) > 0
+    (e) => getIncomeBreakdownTotalForPaymentMethod(e.independent, "cash") > 0
   )
   const customIncomeUsed = entries.some(
     (e) => (e.independent?.customIncome?.length ?? 0) > 0
@@ -235,8 +255,9 @@ export function resolveEntryGridVisibility(
     mode: "independent",
     showNotes: notesUsed,
     showHours: hoursUsed,
-    showTips: tipsUsed,
-    showReportedCash: reportedUsed,
+    // Folded into the Card / POS and Cash columns.
+    showTips: false,
+    showReportedCash: false,
     showUnreportedCash: unreportedUsed,
     showVenmo: venmoUsed,
     showAppleCash: appleUsed,

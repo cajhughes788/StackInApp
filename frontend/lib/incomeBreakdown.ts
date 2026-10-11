@@ -22,13 +22,25 @@ export const categoryLabels: Record<IncomeCategory, string> = {
   other: "Other",
 }
 
+// How a source's amount is entered, matching how its statement shows it:
+// - "split": one amount received (a Venmo/Apple Pay/Zelle payment), split
+//   into categories that always add up to it — Tips is one of them.
+// - "salesPlusTips": the main amount is sales (split into Services /
+//   Products / Other), and tips are entered separately ON TOP, the way a
+//   POS report or a cash drawer count lists them. Tips never reduce sales.
+// Either way it's stored the same: category amounts under the source's
+// payment method, total = their sum.
+export type IncomeEntryStyle = "split" | "salesPlusTips"
+
 export const paymentCategoryConfig: Record<
   "venmo" | "appleCash" | "zelle" | "posSales" | "cashSales",
   {
     paymentMethod: PaymentMethod
+    // For "salesPlusTips" these are the sales categories; tips are separate.
     categories: IncomeCategory[]
     defaultCategory: IncomeCategory
     label: string
+    entryStyle: IncomeEntryStyle
   }
 > = {
   venmo: {
@@ -36,31 +48,48 @@ export const paymentCategoryConfig: Record<
     categories: ["services", "tips", "products", "other"],
     defaultCategory: "services",
     label: "Venmo",
+    entryStyle: "split",
   },
   appleCash: {
     paymentMethod: "apple_cash",
     categories: ["services", "tips", "products", "other"],
     defaultCategory: "services",
     label: "Apple Pay",
+    entryStyle: "split",
   },
   zelle: {
     paymentMethod: "zelle",
     categories: ["services", "tips", "products", "other"],
     defaultCategory: "services",
     label: "Zelle",
+    entryStyle: "split",
   },
   posSales: {
     paymentMethod: "pos",
     categories: ["services", "products", "other"],
     defaultCategory: "services",
-    label: "POS Sales",
+    label: "Card / POS Sales",
+    entryStyle: "salesPlusTips",
   },
   cashSales: {
     paymentMethod: "cash",
     categories: ["services", "products", "other"],
     defaultCategory: "services",
-    label: "Cash Sales",
+    label: "Cash",
+    entryStyle: "salesPlusTips",
   },
+}
+
+// The categories a source's split offers: Tips only when the workspace
+// "Receives Tips" — and never for "salesPlusTips" sources, whose tips have
+// their own field on top of sales.
+export function getSplitCategories(
+  field: keyof typeof paymentCategoryConfig,
+  tipsEnabled: boolean
+): IncomeCategory[] {
+  return paymentCategoryConfig[field].categories.filter(
+    (category) => category !== "tips" || tipsEnabled
+  )
 }
 
 export function emptyBreakdownDraft(): BreakdownDraft {

@@ -24,7 +24,7 @@ import { computeIncomeGaugeForEntry } from "@shared/computeIncomeGauge";
 import { CUSTOM_POSITION_ID, CUSTOM_POSITION_TITLE } from "@shared/hourlyRates";
 import { debugRender } from "@/lib/debugLoop";
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore";
-import { aggregateIncomeBreakdowns, getIncomeBreakdownTotalForPaymentMethod, getIncomeBreakdownTotalForPaymentMethodAndCategory, getIndependentCashSalesTotal, } from "@shared/independentIncome";
+import { aggregateIncomeBreakdowns, getIncomeBreakdownTotal, getIncomeBreakdownTotalForPaymentMethod, getIncomeBreakdownTotalForPaymentMethodAndCategory, } from "@shared/independentIncome";
 import SyncStatusIndicator from "@/components/sync-status-indicator";
 import { toast } from "@/hooks/use-toast";
 // Short date formatter
@@ -49,13 +49,13 @@ const paymentFieldConfig = {
         defaultCategory: "services" as IncomeCategory,
     },
     posSales: {
-        label: "POS Sales",
+        label: "Card / POS Sales",
         paymentMethod: "pos",
         categories: ["services", "products", "other"] as IncomeCategory[],
         defaultCategory: "services" as IncomeCategory,
     },
     cashSales: {
-        label: "Cash Sales",
+        label: "Cash",
         paymentMethod: "cash",
         categories: ["services", "products", "other"] as IncomeCategory[],
         defaultCategory: "services" as IncomeCategory,
@@ -73,12 +73,25 @@ function displayNumberValue(value: number | undefined, decimals = 2) {
     }
     return value.toFixed(decimals);
 }
+// Tips are a category of every source now (see paymentCategoryConfig in
+// lib/incomeBreakdown.ts): the Card / POS column includes card tips — stored
+// as "card" + tips before card tips moved under POS — and the Cash column
+// includes cash tips alongside cash sales.
+function isLegacyCardTips(item: { paymentMethod: string; tips?: number }) {
+    return item.paymentMethod === "card" && Number(item.tips ?? 0) > 0;
+}
+function belongsToColumn(item: { paymentMethod: string; tips?: number }, field: keyof typeof paymentFieldConfig) {
+    if (field === "posSales" && isLegacyCardTips(item))
+        return true;
+    return item.paymentMethod === paymentFieldConfig[field].paymentMethod;
+}
 function getIndependentColumnTotal(entry: EntryType, field: keyof typeof paymentFieldConfig) {
     const independent = entry.independent;
     if (!independent)
         return 0;
-    if (field === "cashSales") {
-        return getIndependentCashSalesTotal(independent);
+    if (field === "posSales") {
+        return getIncomeBreakdownTotalForPaymentMethod(independent, "pos") +
+            getIncomeBreakdownTotalForPaymentMethodAndCategory(independent, "card", "tips");
     }
     return getIncomeBreakdownTotalForPaymentMethod(independent, paymentFieldConfig[field].paymentMethod);
 }
@@ -147,6 +160,8 @@ export default function EntriesGrid() {
         w2: {},
         independent: {},
     };
+    // "Receives Tips" — offers a Tips box in every income source's editor.
+    const tipsEnabled = resolvedSettings.independent?.isTippedIndependent === true;
     const armOrOpenCell = useCallback((id: string, field: string) => {
         if (armedCell?.id === id && armedCell.field === field) {
             setArmedCell(null);
@@ -199,8 +214,6 @@ export default function EntriesGrid() {
             return null;
         return {
             showHours: visibility.showHours,
-            showTips: visibility.showTips,
-            showReportedCash: visibility.showReportedCash,
             showUnreportedCash: visibility.showUnreportedCash,
             showVenmo: visibility.showVenmo,
             showAppleCash: visibility.showAppleCash,
@@ -285,10 +298,6 @@ export default function EntriesGrid() {
             return count;
         }
         if (independentColumns?.showHours)
-            count += 1;
-        if (independentColumns?.showTips)
-            count += 1;
-        if (independentColumns?.showReportedCash)
             count += 1;
         if (independentColumns?.showUnreportedCash)
             count += 1;
@@ -457,17 +466,12 @@ export default function EntriesGrid() {
         useEffect(() => { entryRef.current = entry; }, [entry]);
         const independent = entry.independent;
         const existingBreakdowns = independent?.incomeBreakdowns ?? [];
-        const matching = existingBreakdowns.filter((item) => {
-            if (item.paymentMethod !== config.paymentMethod)
-                return false;
-            if (field === "cashSales") {
-                return (Number(item.services ?? 0) > 0 ||
-                    Number(item.products ?? 0) > 0 ||
-                    Number(item.other ?? 0) > 0);
-            }
-            return true;
-        });
-        const aggregated = aggregateIncomeBreakdowns(matching);
+        const matching = existingBreakdowns.filter((item) => belongsToColumn(item, field));
+        // Card tips from the old separate field only contribute their tips.
+        const aggregated = aggregateIncomeBreakdowns(matching.map((item) => isLegacyCardTips(item) ? { paymentMethod: item.paymentMethod, tips: item.tips } : item));
+        // "Receives Tips" — or tips already recorded, so they stay editable.
+        const showTipsBox = tipsEnabled || aggregated.tips > 0;
+        const tipsOnTop = field === "posSales" || field === "cashSales";
         const [services, setServices] = useState(aggregated.services > 0
             ? aggregated.services.toFixed(2)
             : "");
@@ -486,16 +490,8 @@ export default function EntriesGrid() {
             if (isOpen) return;
             const liveIndependent = entryRef.current.independent;
             const liveBreakdowns = liveIndependent?.incomeBreakdowns ?? [];
-            const liveMatching = liveBreakdowns.filter((item) => {
-                if (item.paymentMethod !== config.paymentMethod) return false;
-                if (field === "cashSales") {
-                    return Number(item.services ?? 0) > 0 ||
-                        Number(item.products ?? 0) > 0 ||
-                        Number(item.other ?? 0) > 0;
-                }
-                return true;
-            });
-            const liveAgg = aggregateIncomeBreakdowns(liveMatching);
+            const liveMatching = liveBreakdowns.filter((item) => belongsToColumn(item, field));
+            const liveAgg = aggregateIncomeBreakdowns(liveMatching.map((item) => isLegacyCardTips(item) ? { paymentMethod: item.paymentMethod, tips: item.tips } : item));
             setServices(liveAgg.services > 0 ? liveAgg.services.toFixed(2) : "");
             setTips(liveAgg.tips > 0 ? liveAgg.tips.toFixed(2) : "");
             setProducts(liveAgg.products > 0 ? liveAgg.products.toFixed(2) : "");
@@ -514,7 +510,7 @@ export default function EntriesGrid() {
                 services: config.categories.includes("services") && Number(services || 0) > 0
                     ? Number(services || 0)
                     : undefined,
-                tips: config.categories.includes("tips") && Number(tips || 0) > 0
+                tips: showTipsBox && Number(tips || 0) > 0
                     ? Number(tips || 0)
                     : undefined,
                 products: config.categories.includes("products") && Number(products || 0) > 0
@@ -535,16 +531,17 @@ export default function EntriesGrid() {
             try {
                 // Use live entry breakdowns to avoid overwriting concurrent edits.
                 const liveBreakdowns = latestEntry.independent.incomeBreakdowns ?? [];
-                const nextBreakdowns = liveBreakdowns.filter((item) => {
-                    if (item.paymentMethod !== config.paymentMethod)
-                        return true;
-                    if (field === "cashSales") {
-                        const isCashSalesBreakdown = Number(item.services ?? 0) > 0 ||
-                            Number(item.products ?? 0) > 0 ||
-                            Number(item.other ?? 0) > 0;
-                        return !isCashSalesBreakdown;
+                // Replace everything this column covers. Old card tips move
+                // under POS: only their tips are dropped from a "card" line
+                // (any other card amounts stay where they were).
+                const nextBreakdowns = liveBreakdowns.flatMap((item) => {
+                    if (!belongsToColumn(item, field))
+                        return [item];
+                    if (isLegacyCardTips(item)) {
+                        const { tips: _cardTips, ...rest } = item;
+                        return getIncomeBreakdownTotal(rest) > 0 ? [rest] : [];
                     }
-                    return false;
+                    return [];
                 });
                 if (parsed.data) {
                     nextBreakdowns.push(parsed.data);
@@ -582,7 +579,7 @@ export default function EntriesGrid() {
             <label className="text-xs text-muted-foreground">Services</label>
             <Input value={services} onChange={(e) => setServices(e.target.value)}/>
           </div>)}
-        {config.categories.includes("tips") && (<div>
+        {showTipsBox && !tipsOnTop && (<div>
             <label className="text-xs text-muted-foreground">Tips</label>
             <Input value={tips} onChange={(e) => setTips(e.target.value)}/>
           </div>)}
@@ -594,6 +591,10 @@ export default function EntriesGrid() {
             <label className="text-xs text-muted-foreground">Other</label>
             <Input value={other} onChange={(e) => setOther(e.target.value)}/>
           </div>)}
+        {showTipsBox && tipsOnTop && (<div>
+            <label className="text-xs text-muted-foreground">+ Tips (on top of sales)</label>
+            <Input value={tips} onChange={(e) => setTips(e.target.value)}/>
+          </div>)}
 
         <div className="flex items-center justify-between">
           <span className="text-xs text-muted-foreground">Total</span>
@@ -603,85 +604,6 @@ export default function EntriesGrid() {
         <Button size="sm" className="w-full" onClick={save} disabled={saving}>
           {saving ? "Saving..." : "Save Breakdown"}
         </Button>
-      </GridEditorPopoverContent>
-    </Popover>);
-    };
-    const TipBreakdownCell = ({ entry, paymentMethod, label, }: {
-        entry: EntryType;
-        paymentMethod: "card" | "cash";
-        label: string;
-    }) => {
-        const cellField = `tips.${paymentMethod}`;
-        const cellId = entry.id ?? `${entry.date ?? "entry"}-${cellField}`;
-        const isOpen = openEditorCell?.id === cellId && openEditorCell.field === cellField;
-        const isArmed = armedCell?.id === cellId && armedCell.field === cellField;
-        const entryRef = useRef(entry);
-        useEffect(() => { entryRef.current = entry; }, [entry]);
-        const independent = entry.independent;
-        const currentValue = getIncomeBreakdownTotalForPaymentMethodAndCategory(independent, paymentMethod, "tips");
-        const [value, setValue] = useState(currentValue > 0 ? currentValue.toFixed(2) : "");
-        const [saving, setSaving] = useState(false);
-        // Reset when entry changes while editor is closed.
-        useEffect(() => {
-            if (isOpen) return;
-            const liveValue = getIncomeBreakdownTotalForPaymentMethodAndCategory(
-                entryRef.current.independent, paymentMethod, "tips"
-            );
-            setValue(liveValue > 0 ? liveValue.toFixed(2) : "");
-        }, [entry]);
-        const save = async () => {
-            const latestEntry = entryRef.current;
-            if (!latestEntry.id || !latestEntry.independent)
-                return;
-            const numericValue = Number(value || 0);
-            if (Number.isNaN(numericValue) || numericValue < 0) {
-                alert(`Invalid ${label.toLowerCase()} amount`);
-                return;
-            }
-            setSaving(true);
-            try {
-                // Use live breakdowns to preserve concurrent edits.
-                const liveBreakdowns = latestEntry.independent.incomeBreakdowns ?? [];
-                const nextBreakdowns = liveBreakdowns.filter(
-                    (item) => !(item.paymentMethod === paymentMethod && Number(item.tips ?? 0) > 0)
-                );
-                if (numericValue > 0) {
-                    nextBreakdowns.push({ paymentMethod, tips: numericValue });
-                }
-                await entriesService.updateEntry(activeWorkspaceId, latestEntry.id, {
-                    independent: { incomeBreakdowns: nextBreakdowns },
-                });
-                setOpenEditorCell(null);
-                setArmedCell(null);
-            } catch (err) {
-                toast({
-                    title: "Save failed",
-                    description: "We could not save this change. Please try again.",
-                    variant: "destructive",
-                });
-            } finally {
-                setSaving(false);
-            }
-        };
-        return (<Popover open={isOpen} onOpenChange={(nextOpen) => {
-                if (!nextOpen) {
-                    setOpenEditorCell((current) => current?.id === cellId && current.field === cellField ? null : current);
-                }
-            }}>
-      <PopoverTrigger asChild>
-        <button type="button" className={getEditableCellButtonClass(isArmed)} onClick={() => armOrOpenCell(cellId, cellField)}>
-          {displayMoneyValue(currentValue)}
-        </button>
-      </PopoverTrigger>
-
-      <GridEditorPopoverContent data-grid-popover="entries" side="top" align="end" className="w-56 p-3 z-50" onOpenAutoFocus={(e) => e.preventDefault()}>
-        <div className="space-y-3">
-          <div className="text-sm font-medium">{label}</div>
-          <Input value={value} onChange={(e) => setValue(e.target.value)}/>
-          <Button size="sm" className="w-full" onClick={save} disabled={saving}>
-            {saving ? "Saving..." : "Save"}
-          </Button>
-        </div>
       </GridEditorPopoverContent>
     </Popover>);
     };
@@ -965,12 +887,6 @@ export default function EntriesGrid() {
       {independentColumns?.showHours && (<th className={`${thBase} text-center sm:text-right`}>
           <ResponsiveHeader desktopLabel="Hours"/>
         </th>)}
-      {independentColumns?.showTips && (<th className={`${thBase} text-center sm:text-right`}>
-          <ResponsiveHeader desktopLabel="Card Tips" mobileLines={["Card", "Tips"]}/>
-        </th>)}
-      {independentColumns?.showReportedCash && (<th className={`${thBase} text-center sm:text-right`}>
-          <ResponsiveHeader desktopLabel="Reported Cash" mobileLines={["Reported", "Cash"]}/>
-        </th>)}
       {independentColumns?.showUnreportedCash && (<th className={`${thBase} text-center sm:text-right`}>
           <ResponsiveHeader desktopLabel="Personal Cash" mobileLines={["Personal", "Cash"]}/>
         </th>)}
@@ -984,10 +900,10 @@ export default function EntriesGrid() {
           <ResponsiveHeader desktopLabel="Zelle"/>
         </th>)}
       {independentColumns?.showPosSales && (<th className={`${thBase} text-center sm:text-right`}>
-          <ResponsiveHeader desktopLabel="POS Sales" mobileLines={["POS", "Sales"]}/>
+          <ResponsiveHeader desktopLabel="Card / POS" mobileLines={["Card /", "POS"]}/>
         </th>)}
       {independentColumns?.showCashSales && (<th className={`${thBase} text-center sm:text-right`}>
-          <ResponsiveHeader desktopLabel="Cash Sales" mobileLines={["Cash", "Sales"]}/>
+          <ResponsiveHeader desktopLabel="Cash"/>
         </th>)}
       {independentColumns?.showCustomIncome && (<th className={`${thBase} text-center sm:text-right`}>
           <ResponsiveHeader desktopLabel="Custom"/>
@@ -1106,14 +1022,6 @@ export default function EntriesGrid() {
         <HoursCell entry={e}/>
       </td>)}
 
-    {independentColumns?.showTips && (<td className={`${tdBase} text-center tabular-nums whitespace-nowrap sm:text-right leading-tight py-1`}>
-        <TipBreakdownCell entry={e} paymentMethod="card" label="Credit Card Tips"/>
-      </td>)}
-
-    {independentColumns?.showReportedCash && (<td className={`${tdBase} text-center tabular-nums whitespace-nowrap sm:text-right leading-tight py-1`}>
-        <TipBreakdownCell entry={e} paymentMethod="cash" label="Reported Cash"/>
-      </td>)}
-
     {independentColumns?.showUnreportedCash && (<td className={`${tdBase} text-center tabular-nums whitespace-nowrap sm:text-right leading-tight py-1`}>
         <NumericCell entry={e} field="independent.unreportedCash" prefix="$"/>
       </td>)}
@@ -1206,14 +1114,6 @@ export default function EntriesGrid() {
         {/* Hours */}
         {independentColumns?.showHours && (<td className="px-2 py-1.5 text-center sm:text-right tabular-nums whitespace-nowrap text-slate-700 dark:text-white">
             {totals.paidHours.toFixed(2)}
-          </td>)}
-
-        {independentColumns?.showTips && (<td className="px-2 py-1.5 text-center sm:text-right tabular-nums whitespace-nowrap text-slate-700 dark:text-white">
-            {formatCurrency(totals.tips)}
-          </td>)}
-
-        {independentColumns?.showReportedCash && (<td className="px-2 py-1.5 text-center sm:text-right tabular-nums whitespace-nowrap text-slate-700 dark:text-white">
-            {formatCurrency(totals.reportedCash)}
           </td>)}
 
         {independentColumns?.showUnreportedCash && (<td className="px-2 py-1.5 text-center sm:text-right tabular-nums whitespace-nowrap text-slate-700 dark:text-white">

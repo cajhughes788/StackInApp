@@ -9,6 +9,7 @@ import {
     draftSum,
     emptyBreakdownDraft,
     parseMoney,
+    getSplitCategories,
     paymentCategoryConfig,
     rebalanceBreakdownDraft,
     type BreakdownDraft,
@@ -109,6 +110,12 @@ export default function EntryForm() {
             return null;
         return resolveEntryFormVisibility(settings, activeWorkspace.type);
     }, [settings, activeWorkspace]);
+    // "Receives Tips": a Tips line on every income source — inside the split
+    // for Venmo/Apple Pay/Zelle, on top of sales for POS and Cash.
+    const tipsEnabled = visibility?.mode === "independent" && visibility.showSourceTips;
+    // Read by the memoized breakdown handlers below without re-creating them.
+    const tipsEnabledRef = useRef(tipsEnabled);
+    tipsEnabledRef.current = tipsEnabled;
     /** selectedPeriod is null while viewing the default "Current" period (see
      * usePeriodSelectionStore) — the date input's min/max must still be
      * bounded in that case, or nothing stops the user from typing a date
@@ -163,6 +170,10 @@ export default function EntryForm() {
         zelle: "",
         posSales: "",
         cashSales: "",
+        // Tips entered ON TOP of POS / cash sales (paymentCategoryConfig's
+        // "salesPlusTips" style) — never taken out of the sales amount.
+        posTips: "",
+        cashTips: "",
         paymentBreakdowns: {
             venmo: emptyBreakdownDraft(),
             appleCash: emptyBreakdownDraft(),
@@ -286,7 +297,7 @@ export default function EntryForm() {
                         selected: [config.defaultCategory],
                         [config.defaultCategory]: value,
                     }
-                    : rebalanceBreakdownDraft(previousDraft, parseMoney(value), config.categories);
+                    : rebalanceBreakdownDraft(previousDraft, parseMoney(value), getSplitCategories(field, tipsEnabledRef.current));
             return {
                 ...prev,
                 [field]: value,
@@ -307,7 +318,7 @@ export default function EntryForm() {
                 ...draft,
                 selected,
                 [category]: checked ? draft[category] : "",
-            }, parseMoney(prev[field]), paymentCategoryConfig[field].categories, checked ? category : undefined);
+            }, parseMoney(prev[field]), getSplitCategories(field, tipsEnabledRef.current), checked ? category : undefined);
             return {
                 ...prev,
                 paymentBreakdowns: {
@@ -324,7 +335,7 @@ export default function EntryForm() {
             const nextDraft = rebalanceBreakdownDraft({
                 ...draft,
                 [category]: value,
-            }, total, paymentCategoryConfig[field].categories, category);
+            }, total, getSplitCategories(field, tipsEnabledRef.current), category);
             return {
                 ...prev,
                 paymentBreakdowns: {
@@ -336,6 +347,7 @@ export default function EntryForm() {
     }, []);
     const renderPaymentBreakdownFields = (field: "venmo" | "appleCash" | "zelle" | "posSales" | "cashSales") => {
         const config = paymentCategoryConfig[field];
+        const splitCategories = getSplitCategories(field, tipsEnabled);
         const total = parseMoney(form[field]);
         const draft = form.paymentBreakdowns[field];
         if (total <= 0)
@@ -351,18 +363,18 @@ export default function EntryForm() {
         }
         return (<div className="mt-3 space-y-3 rounded-md border bg-secondary/80 p-3">
         <div className="text-sm font-medium">
-          Split {config.label} into categories
+          Split {config.entryStyle === "salesPlusTips" ? `${config.label.replace(/ Sales$/, "")} sales` : config.label} into categories
         </div>
 
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {config.categories.map((category) => (<label key={`${field}-${category}`} className="flex items-center gap-2 text-sm">
+          {splitCategories.map((category) => (<label key={`${field}-${category}`} className="flex items-center gap-2 text-sm">
               <Checkbox checked={draft.selected.includes(category)} onCheckedChange={(checked) => toggleBreakdownCategory(field, category, checked === true)}/>
               <span>{categoryLabels[category]}</span>
             </label>))}
         </div>
 
         {draft.selected.length > 0 && (<div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {config.categories
+            {splitCategories
                     .filter((category) => draft.selected.includes(category))
                     .map((category) => (<div key={`${field}-${category}-amount`}>
                   <Label htmlFor={`${field}-${category}`}>
@@ -375,6 +387,26 @@ export default function EntryForm() {
         <p className="text-xs text-muted-foreground">
           Category split: {formatCurrency(draftSum(draft))} of {formatCurrency(total)}
         </p>
+      </div>);
+    };
+    /** POS and Cash ("salesPlusTips"): tips entered on top of sales, with the
+     * source total shown so it can be checked against the POS report or
+     * drawer count. $1,200 sales + $300 tips = $1,500, sales untouched. */
+    const renderSalesTipsField = (field: "posSales" | "cashSales") => {
+        if (!tipsEnabled || !showNonSourceIncomeField)
+            return null;
+        const tipsKey = field === "posSales" ? "posTips" : "cashTips";
+        const sales = parseMoney(form[field]);
+        const tips = parseMoney(form[tipsKey]);
+        return (<div className="mt-2 space-y-1">
+        <Label htmlFor={`${field}-tips`} className="text-xs font-normal text-muted-foreground">
+          + Tips (on top of sales)
+        </Label>
+        <Input id={`${field}-tips`} type="number" step="0.01" value={form[tipsKey]} onChange={(e) => setForm((prev) => ({ ...prev, [tipsKey]: e.target.value }))}/>
+        {sales > 0 && tips > 0 ? (<p className="text-xs text-muted-foreground">
+            {paymentCategoryConfig[field].label} total:{" "}
+            <span className="font-medium text-foreground tabular-nums">{formatCurrency(sales + tips)}</span>
+          </p>) : null}
       </div>);
     };
     /** A recurring rule can only carry one number with one category. `field`
@@ -392,7 +424,7 @@ export default function EntryForm() {
      * "clear the other fields first" — those call for different messages,
      * and showing the wrong one before the user has typed anything is
      * confusing. */
-    const getRecurringIneligibilityReason = useCallback((f: typeof form, field: RecurringIncomeSource): "no_amount" | "multi_category" | "other_fields_populated" | null => {
+    const getRecurringIneligibilityReason = useCallback((f: typeof form, field: RecurringIncomeSource): "no_amount" | "multi_category" | "has_tips" | "other_fields_populated" | null => {
         if (field === "custom") {
             const item = (f.customIncome ?? [])[0];
             if ((f.customIncome ?? []).length !== 1 || !item || !(Number(item.amount ?? 0) > 0) || !item.label?.trim()) {
@@ -403,8 +435,14 @@ export default function EntryForm() {
             if (amount <= 0) return "no_amount";
             const draft = f.paymentBreakdowns[field];
             if (draft.selected.length > 1) return "multi_category";
+            // Tips on top belong to this same source, so "clear the other
+            // income fields" would point at the wrong thing.
+            if ((field === "posSales" && parseMoney(f.posTips)) || (field === "cashSales" && parseMoney(f.cashTips))) {
+                return "has_tips";
+            }
         }
-        if (parseMoney(f.tips) || parseMoney(f.reportedCash) || parseMoney(f.unreportedCash) || parseMoney(f.independentHours)) {
+        if (parseMoney(f.tips) || parseMoney(f.reportedCash) || parseMoney(f.unreportedCash) || parseMoney(f.independentHours) ||
+            parseMoney(f.posTips) || parseMoney(f.cashTips)) {
             return "other_fields_populated";
         }
         if (field === "custom") {
@@ -417,12 +455,14 @@ export default function EntryForm() {
         }
         return null;
     }, []);
-    const recurringIneligibilityMessage = (reason: "no_amount" | "multi_category" | "other_fields_populated") => {
+    const recurringIneligibilityMessage = (reason: "no_amount" | "multi_category" | "has_tips" | "other_fields_populated") => {
         switch (reason) {
             case "no_amount":
                 return "Please enter an amount for this field before turning on Repeats.";
             case "multi_category":
                 return "This field is split across multiple categories — Repeats needs a single category. Uncheck the extra categories first.";
+            case "has_tips":
+                return "Repeats can only carry the sales amount — clear the tips for this entry first.";
             case "other_fields_populated":
                 return "Recurring income can only apply to one income source per entry — clear the other income fields first.";
         }
@@ -498,6 +538,8 @@ export default function EntryForm() {
             zelle: "",
             posSales: "",
             cashSales: "",
+            posTips: "",
+            cashTips: "",
             paymentBreakdowns: {
                 venmo: emptyBreakdownDraft(),
                 appleCash: emptyBreakdownDraft(),
@@ -625,13 +667,19 @@ export default function EntryForm() {
                     products?: number;
                     other?: number;
                 }> = [];
-                const buildCategorizedBreakdown = (field: "venmo" | "appleCash" | "zelle" | "posSales" | "cashSales") => {
+                // tipsOnTop: POS / Cash tips, added to the same breakdown on
+                // top of the sales split (which must still add up to sales).
+                const buildCategorizedBreakdown = (field: "venmo" | "appleCash" | "zelle" | "posSales" | "cashSales", tipsOnTop = 0) => {
                     const total = parseNum(form[field]) ?? 0;
-                    if (total <= 0)
-                        return;
                     const config = paymentCategoryConfig[field];
+                    if (total <= 0) {
+                        if (tipsOnTop > 0)
+                            incomeBreakdowns.push({ paymentMethod: config.paymentMethod, tips: tipsOnTop });
+                        return;
+                    }
                     const draft = form.paymentBreakdowns[field];
-                    const selectedCategories = draft.selected.filter((category) => config.categories.includes(category));
+                    const splitCategories = getSplitCategories(field, tipsEnabled);
+                    const selectedCategories = draft.selected.filter((category) => splitCategories.includes(category));
                     if (selectedCategories.length === 0) {
                         throw new Error(`Select at least one ${config.label} income category.`);
                     }
@@ -658,28 +706,16 @@ export default function EntryForm() {
                     if (Math.abs(sum - total) > 0.009) {
                         throw new Error(`${config.label} category amounts must add up to ${formatCurrency(total)}.`);
                     }
-                    incomeBreakdowns.push(parsedBreakdown.data);
+                    incomeBreakdowns.push(tipsOnTop > 0 ? { ...parsedBreakdown.data, tips: tipsOnTop } : parsedBreakdown.data);
                 };
                 buildCategorizedBreakdown("venmo");
                 buildCategorizedBreakdown("appleCash");
                 buildCategorizedBreakdown("zelle");
-                buildCategorizedBreakdown("posSales");
-                buildCategorizedBreakdown("cashSales");
-                const creditCardTips = parseNum(form.tips) ?? 0;
-                const reportedCashTips = parseNum(form.reportedCash) ?? 0;
+                // Card tips are stored under POS now (no separate "card" tips
+                // line), cash tips under Cash — as before, just entered here.
+                buildCategorizedBreakdown("posSales", tipsEnabled ? parseNum(form.posTips) ?? 0 : 0);
+                buildCategorizedBreakdown("cashSales", tipsEnabled ? parseNum(form.cashTips) ?? 0 : 0);
                 const unreportedCashTips = parseNum(form.unreportedCash) ?? 0;
-                if (creditCardTips > 0) {
-                    incomeBreakdowns.push({
-                        paymentMethod: "card",
-                        tips: creditCardTips,
-                    });
-                }
-                if (reportedCashTips > 0) {
-                    incomeBreakdowns.push({
-                        paymentMethod: "cash",
-                        tips: reportedCashTips,
-                    });
-                }
                 for (const item of form.customIncome ?? []) {
                     if (!item || Number(item.amount ?? 0) <= 0)
                         continue;
@@ -960,21 +996,6 @@ export default function EntryForm() {
                   <Input id="independentHours" type="number" step="0.1" value={form.independentHours} onChange={(e) => setForm({ ...form, independentHours: e.target.value })}/>
                 </div>)}
 
-              {visibility.showIndependentTips && showNonSourceIncomeField && (<div>
-                  <Label htmlFor="independentTips">Credit Card Tips</Label>
-                  <Input id="independentTips" type="number" step="0.01" value={form.tips} onChange={(e) => setForm({ ...form, tips: e.target.value })}/>
-                </div>)}
-
-              {visibility.showIndependentReportedCash && showNonSourceIncomeField && (<div>
-                  <Label htmlFor="independentReportedCash">Reported Cash</Label>
-                  <Input id="independentReportedCash" type="number" step="0.01" value={form.reportedCash} onChange={(e) => setForm({ ...form, reportedCash: e.target.value })}/>
-                </div>)}
-
-              {visibility.showIndependentUnreportedCash && showNonSourceIncomeField && (<div>
-                  <Label htmlFor="independentUnreportedCash">Personal Cash</Label>
-                  <Input id="independentUnreportedCash" type="number" step="0.01" value={form.unreportedCash} onChange={(e) => setForm({ ...form, unreportedCash: e.target.value })}/>
-                </div>)}
-
               {/* Venmo */}
               {visibility.showVenmo && showIncomeSource("venmo") && (<div data-breakdown-field="venmo">
                   <Label htmlFor="venmo">Venmo</Label>
@@ -1000,17 +1021,25 @@ export default function EntryForm() {
 
               {/* POS Sales */}
               {visibility.showPosSales && showIncomeSource("posSales") && (<div data-breakdown-field="posSales">
-                  <Label htmlFor="posSales">POS Sales</Label>
+                  <Label htmlFor="posSales">{paymentCategoryConfig.posSales.label}</Label>
                   <Input id="posSales" type="number" step="0.01" value={form.posSales} onFocus={() => setOpenBreakdownField("posSales")} onChange={(e) => updateCategorizedPaymentAmount("posSales", e.target.value)}/>
                   {renderPaymentBreakdownFields("posSales")}
+                  {renderSalesTipsField("posSales")}
                   {renderRepeatSwitch("posSales")}
                 </div>)}
 
               {visibility.showCashSales && showIncomeSource("cashSales") && (<div data-breakdown-field="cashSales">
-                  <Label htmlFor="cashSales">Cash Sales</Label>
+                  <Label htmlFor="cashSales">{paymentCategoryConfig.cashSales.label} sales</Label>
                   <Input id="cashSales" type="number" step="0.01" value={form.cashSales} onFocus={() => setOpenBreakdownField("cashSales")} onChange={(e) => updateCategorizedPaymentAmount("cashSales", e.target.value)}/>
                   {renderPaymentBreakdownFields("cashSales")}
+                  {renderSalesTipsField("cashSales")}
                   {renderRepeatSwitch("cashSales")}
+                </div>)}
+
+              {/* Personal Cash — its own option, no longer a kind of tip */}
+              {visibility.showIndependentUnreportedCash && showNonSourceIncomeField && (<div>
+                  <Label htmlFor="independentUnreportedCash">Personal Cash</Label>
+                  <Input id="independentUnreportedCash" type="number" step="0.01" value={form.unreportedCash} onChange={(e) => setForm({ ...form, unreportedCash: e.target.value })}/>
                 </div>)}
 
               {/* Independent Custom Income Repeater */}

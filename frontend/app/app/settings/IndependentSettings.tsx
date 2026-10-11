@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { Info } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { IndependentSettingsType } from "@shared/schemas/settings"
+import { isCashSourceEnabled, isPosSalesSourceEnabled } from "@shared/entryVisibility"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Switch } from "@/components/ui/switch"
@@ -37,6 +38,11 @@ export default function IndependentSettingsSection({
   ) {
     setLocal((prev) => ({ ...prev, [field]: value }))
     onChange({ [field]: value }, behavior)
+  }
+
+  function updateMany(patch: Partial<IndependentSettingsType>, behavior: "immediate" | "deferred" = "deferred") {
+    setLocal((prev) => ({ ...prev, ...patch }))
+    onChange(patch, behavior)
   }
 
   // --- Custom income fields ---
@@ -140,12 +146,17 @@ export default function IndependentSettingsSection({
         </CardHeader>
 
         <CardContent className="space-y-6">
-          {/* Main toggle */}
-          <div className="flex items-center justify-between">
+          {/* One switch for every source: a Tips line inside Venmo / Apple
+              Pay / Zelle's split, and on top of sales for Card / POS and
+              Cash (see paymentCategoryConfig in lib/incomeBreakdown.ts). It
+              replaced the separate Credit Card Tips / Reported Cash toggles,
+              which now just count as those sources being on. */}
+          <div className="flex items-center justify-between gap-4">
             <div className="space-y-0.5">
               <Label>Receives Tips</Label>
               <p className="text-sm text-muted-foreground">
-                Allows you to track all forms of tips.
+                Adds a Tips line to each income source below. For Card / POS and Cash, tips are entered on top of
+                sales.
               </p>
             </div>
 
@@ -157,64 +168,18 @@ export default function IndependentSettingsSection({
             />
           </div>
 
-          {local.isTippedIndependent && (
-            <div className="space-y-5 pl-3 border-l">
-              <div className="flex items-center justify-between">
-                <Label>Credit Card Tips</Label>
-                <Switch
-                  checked={local.askCardTips ?? false}
-                  onCheckedChange={(v) =>
-                    update("askCardTips", v, "immediate")
-                  }
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <Label>Reported Cash</Label>
-                <Switch
-                  checked={local.askReportedCash ?? false}
-                  onCheckedChange={(v) =>
-                    update("askReportedCash", v, "immediate")
-                  }
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label>Personal Cash</Label>
-                  <p className="text-xs text-muted-foreground">
-                    For personal tracking only — not used in taxes.
-                  </p>
-                </div>
-
-                <Switch
-                  checked={local.askUnreportedCash ?? false}
-                  onCheckedChange={(v) =>
-                    update("askUnreportedCash", v, "immediate")
-                  }
-                />
-              </div>
-
-              {/* Include personal cash in UI */}
-              {local.askUnreportedCash && (
-                <div className="flex items-center justify-between pl-2">
-                  <div>
-                    <Label>Include in income totals?</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Adds personal cash to gauge + averages.
-                    </p>
-                  </div>
-
-                  <Switch
-                    checked={local.includeUnreportedInUI ?? false}
-                    onCheckedChange={(v) =>
-                    update("includeUnreportedInUI", v, "immediate")
-                    }
-                  />
-                </div>
-              )}
-            </div>
-          )}
+          {/* Tips live inside sources now — with none on, there'd be nowhere
+              to enter them (the old standalone Credit Card Tips field is gone). */}
+          {local.isTippedIndependent &&
+          !local.enableVenmo &&
+          !local.enableApplePay &&
+          !local.enableZelle &&
+          !isPosSalesSourceEnabled(local) &&
+          !isCashSourceEnabled(local) ? (
+            <p className="rounded-md bg-secondary/60 px-3 py-2 text-sm text-muted-foreground">
+              Turn on the income sources you&apos;re paid through below — that&apos;s where tips are entered.
+            </p>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -255,25 +220,60 @@ export default function IndependentSettingsSection({
             />
           </div>
 
+          {/* Shown on for anyone who had Credit Card Tips on (card tips live
+              here now); turning it off clears both. */}
           <div className="flex items-center justify-between">
-            <Label>POS Sales</Label>
+            <Label>Card / POS Sales</Label>
             <Switch
-              checked={local.enablePosSales ?? false} // FIX: optional boolean fallback
+              checked={isPosSalesSourceEnabled(local)}
               onCheckedChange={(v) =>
-                update("enablePosSales", v, "immediate")
+                updateMany(v ? { enablePosSales: true } : { enablePosSales: false, askCardTips: false }, "immediate")
               }
             />
           </div>
 
+          {/* Same for Reported Cash (cash tips). */}
           <div className="flex items-center justify-between">
-            <Label>Cash Sales</Label>
+            <Label>Cash</Label>
             <Switch
-              checked={local.enableCashSales ?? false}
+              checked={isCashSourceEnabled(local)}
               onCheckedChange={(v) =>
-                update("enableCashSales", v, "immediate")
+                updateMany(v ? { enableCashSales: true } : { enableCashSales: false, askReportedCash: false }, "immediate")
               }
             />
           </div>
+
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <Label>Personal Cash</Label>
+              <p className="text-xs text-muted-foreground">
+                For personal tracking only — not used in taxes.
+              </p>
+            </div>
+            <Switch
+              checked={local.askUnreportedCash ?? false}
+              onCheckedChange={(v) =>
+                update("askUnreportedCash", v, "immediate")
+              }
+            />
+          </div>
+
+          {local.askUnreportedCash && (
+            <div className="flex items-center justify-between gap-4 border-l pl-3">
+              <div>
+                <Label>Include in income totals?</Label>
+                <p className="text-xs text-muted-foreground">
+                  Adds personal cash to your totals and averages.
+                </p>
+              </div>
+              <Switch
+                checked={local.includeUnreportedInUI ?? false}
+                onCheckedChange={(v) =>
+                  update("includeUnreportedInUI", v, "immediate")
+                }
+              />
+            </div>
+          )}
         </CardContent>
       </Card>
 
