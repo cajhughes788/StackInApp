@@ -121,9 +121,10 @@ export function resolveIndependentFormVisibility(
     // income sources), no longer gated by "Receives Tips".
     showIndependentUnreportedCash: settings?.askUnreportedCash === true,
 
-    showCustomIncome:
-      Array.isArray(settings?.customIncomeFields) &&
-      (settings.customIncomeFields?.length ?? 0) > 0,
+    // Always available: "Other income" lets anyone record money from another
+    // payer or platform on the go, naming it as they go (saved names are
+    // offered as suggestions — see frontend/lib/incomeNames.ts).
+    showCustomIncome: true,
   }
 }
 

@@ -332,10 +332,18 @@ export default function IndependentSettingsSection({
       {/* CUSTOM INCOME FIELDS */}
       <Card>
         <CardHeader>
-          <CardTitle>Custom Income Fields</CardTitle>
+          <CardTitle>Other Income Names</CardTitle>
         </CardHeader>
 
         <CardContent className="space-y-4">
+          {/* The shared list behind "Who paid you?" in the entry form and the
+              bank deposit review (lib/incomeNames.ts) — new names are added
+              automatically as they're used. */}
+          <p className="text-sm text-muted-foreground">
+            Who pays you outside your built-in sources — clients and platforms like DoorDash. Keeping one name per
+            payer makes your totals easy to check against the 1099s they send. Names you type when adding income are
+            saved here automatically.
+          </p>
           {(local.customIncomeFields ?? []).map((field, i) => (
             <div key={i} className="flex items-center gap-2">
               <Input
@@ -343,7 +351,7 @@ export default function IndependentSettingsSection({
                 onChange={(e) =>
                   updateCustomField(i, e.target.value)
                 }
-                placeholder="Custom income name"
+                placeholder="e.g. DoorDash"
               />
 
               <Button
@@ -356,7 +364,7 @@ export default function IndependentSettingsSection({
           ))}
 
           <Button variant="outline" onClick={addCustomField}>
-            + Add Custom Field
+            + Add name
           </Button>
         </CardContent>
       </Card>

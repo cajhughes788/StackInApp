@@ -26,6 +26,7 @@ import {
   normalizePlaidPayerKey,
   isLikelyPlaidRefund,
   pickRefundedPurchase,
+  suggestPayerName,
   type PlaidClassificationResult,
 } from "@shared/plaidClassification"
 import { isLikelyFuelPurchase } from "@shared/expenseKeywordMatching"
@@ -715,6 +716,7 @@ async function upsertPendingTransactionFromPlaid(
         ? (incomeMemory?.lastOutcome === "income" ? incomeMemory.paymentMethod : null) ??
           suggestPlaidIncomePaymentMethod(merchantName, rawName)
         : null,
+    suggestedIncomeLabel: suggestedIncomeLabelFor(direction, isRefund, incomeMemory, merchantName, rawName),
     isBusinessGuess: classification.isBusinessGuess,
     confidence: classification.confidence,
     isLikelyFuelPurchase: direction === "expense" && isLikelyFuelPurchase(merchantName ?? rawName),
@@ -1395,6 +1397,7 @@ export async function confirmPendingTransaction(
     // Income-direction transactions only — see confirmIncomeTransaction.
     incomeCategory?: IncomeCategory
     paymentMethod?: PaymentMethod
+    incomeLabel?: string
   }
 ): Promise<{
   committedExpenseId?: string
@@ -1581,10 +1584,15 @@ async function confirmIncomeTransaction(
   ref: FirebaseFirestore.DocumentReference,
   pending: PlaidPendingTransactionType,
   displayName: string,
-  decision: { incomeCategory?: IncomeCategory; paymentMethod?: PaymentMethod }
+  decision: { incomeCategory?: IncomeCategory; paymentMethod?: PaymentMethod; incomeLabel?: string }
 ): Promise<{ committedEntryId: string }> {
   const incomeCategory = decision.incomeCategory ?? "services"
   const paymentMethod = decision.paymentMethod ?? suggestPlaidIncomePaymentMethod(pending.merchantName, pending.rawName)
+  // A named "Other" deposit is booked as custom income — the same shape the
+  // entry form writes (a customIncome item plus its mirrored "other"
+  // breakdown line), so it lands in the grid's Other income column and in
+  // Payment streams under that name.
+  const incomeLabel = paymentMethod === "other" ? decision.incomeLabel?.trim() || null : null
   let entryId: string
   try {
     const workspaceSnap = await db.doc(`workspaces/${workspaceId}`).get()
@@ -1594,7 +1602,7 @@ async function confirmIncomeTransaction(
     const created = await entriesSvc.createEntry(workspaceId, uid, {
       workspace: "independent",
       date: pending.date,
-      notes: [displayName, pending.rawName !== displayName ? pending.rawName : null, "Imported from bank"]
+      notes: [incomeLabel, displayName, pending.rawName !== displayName ? pending.rawName : null, "Imported from bank"]
         .filter(Boolean)
         .join(" | "),
       // Same idempotency key scheme as the expense path — createEntry turns
@@ -1605,7 +1613,7 @@ async function confirmIncomeTransaction(
         incomeBreakdowns: [{ paymentMethod, [incomeCategory]: pending.amount }],
         unreportedCash: 0,
         unreportedCashTips: 0,
-        customIncome: [],
+        customIncome: incomeLabel ? [{ label: incomeLabel, amount: pending.amount, category: incomeCategory }] : [],
       },
     })
     entryId = created.id
@@ -1624,6 +1632,7 @@ async function confirmIncomeTransaction(
     outcome: "income",
     incomeCategory,
     paymentMethod,
+    incomeLabel,
   }).catch((error) => {
     console.error("plaidService.confirmIncomeTransaction: rememberIncomeDecision failed", error)
   })
@@ -1676,6 +1685,23 @@ function payerKeyFor(pending: PlaidPendingTransactionType): string {
   return normalizePlaidPayerKey(pending.merchantName, pending.rawName)
 }
 
+// Only for deposits that will default to "Paid via: Other" — the payer's
+// remembered name if it was named last time, else one read off the
+// descriptor. Null for spending, refunds and named payment apps.
+function suggestedIncomeLabelFor(
+  direction: PlaidPendingTransactionType["direction"],
+  isRefund: boolean,
+  incomeMemory: PlaidIncomeMemoryType | null,
+  merchantName: string | null,
+  rawName: string
+): string | null {
+  if (direction !== "income" || isRefund) return null
+  const remembered = incomeMemory?.lastOutcome === "income" ? incomeMemory : null
+  const method = remembered?.paymentMethod ?? suggestPlaidIncomePaymentMethod(merchantName, rawName)
+  if (method !== "other") return null
+  return remembered?.incomeLabel ?? suggestPayerName(merchantName, rawName)
+}
+
 async function getIncomeMemory(workspaceId: string, payerKey: string): Promise<PlaidIncomeMemoryType | null> {
   if (!payerKey) return null
   const snap = await incomeMemoryCol(workspaceId).doc(payerKey).get()
@@ -1689,7 +1715,7 @@ async function rememberIncomeDecision(
   payerKey: string,
   displayName: string,
   decision:
-    | { outcome: "income"; incomeCategory: IncomeCategory; paymentMethod: PaymentMethod }
+    | { outcome: "income"; incomeCategory: IncomeCategory; paymentMethod: PaymentMethod; incomeLabel: string | null }
     | { outcome: "not_income" }
 ): Promise<PlaidIncomeMemoryType | null> {
   if (!payerKey) return null
@@ -1709,6 +1735,7 @@ async function rememberIncomeDecision(
       // payer that's usually income but occasionally isn't still pre-fills.
       incomeCategory: isIncome ? decision.incomeCategory : existing?.incomeCategory ?? null,
       paymentMethod: isIncome ? decision.paymentMethod : existing?.paymentMethod ?? null,
+      incomeLabel: isIncome ? decision.incomeLabel : existing?.incomeLabel ?? null,
       mode: isIncome ? "ask_every_time" : existing?.mode ?? "ask_every_time",
       incomeCount: (existing?.incomeCount ?? 0) + (isIncome ? 1 : 0),
       notIncomeCount: (existing?.notIncomeCount ?? 0) + (isIncome ? 0 : 1),

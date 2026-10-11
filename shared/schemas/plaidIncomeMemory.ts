@@ -24,6 +24,9 @@ export const PlaidIncomeMemorySchema = z.object({
   lastOutcome: z.enum(["income", "not_income"]),
   incomeCategory: IncomeCategorySchema.nullable(),
   paymentMethod: PaymentMethodSchema.nullable(),
+  // "Who paid you?" for an "Other" deposit (DoorDash, Acme Corp) — booked as
+  // named custom income, and pre-filled on the next deposit from this payer.
+  incomeLabel: z.string().nullable().default(null),
   // "always_not_income" is an explicit opt-in (offered once, after repeated
   // dismissals — see confirmPendingTransaction in plaidService.ts). Future
   // deposits from this payer are still recorded, just dismissed silently.

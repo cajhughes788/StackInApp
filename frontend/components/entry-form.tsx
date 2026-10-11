@@ -23,6 +23,8 @@ import { useSettingsStore } from "@/lib/stores/useSettingsStore";
 import * as entriesService from "@/lib/domain/entriesService";
 import * as recurringRulesService from "@/lib/domain/recurringRulesService";
 import { RecurringCadenceFields } from "@/components/recurring-cadence-picker";
+import IncomeNameInput from "@/components/income-name-input";
+import { canonicalIncomeName, getSavedIncomeNames, saveNewIncomeNames } from "@/lib/incomeNames";
 import type { RecurringCadence, RecurringIncomeSource } from "@shared/schemas/recurringRule";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -716,9 +718,17 @@ export default function EntryForm() {
                 buildCategorizedBreakdown("posSales", tipsEnabled ? parseNum(form.posTips) ?? 0 : 0);
                 buildCategorizedBreakdown("cashSales", tipsEnabled ? parseNum(form.cashTips) ?? 0 : 0);
                 const unreportedCashTips = parseNum(form.unreportedCash) ?? 0;
-                for (const item of form.customIncome ?? []) {
-                    if (!item || Number(item.amount ?? 0) <= 0)
-                        continue;
+                // Other income needs a name (who paid you) — that's what makes
+                // per-payer totals checkable against 1099s. Names are snapped
+                // to the saved spelling when they only differ by case.
+                const savedIncomeNames = getSavedIncomeNames(settings);
+                const namedCustomIncome = (form.customIncome ?? [])
+                    .filter((item) => item && Number(item.amount ?? 0) > 0)
+                    .map((item) => ({ ...item, label: canonicalIncomeName(item.label ?? "", savedIncomeNames) }));
+                if (namedCustomIncome.some((item) => !item.label)) {
+                    throw new Error("Add who paid you for each Other income line.");
+                }
+                for (const item of namedCustomIncome) {
                     incomeBreakdowns.push({
                         paymentMethod: "other",
                         [item.category]: Number(item.amount ?? 0),
@@ -729,7 +739,7 @@ export default function EntryForm() {
                     incomeBreakdowns,
                     unreportedCash: unreportedCashTips,
                     unreportedCashTips,
-                    customIncome: form.customIncome ?? [],
+                    customIncome: namedCustomIncome,
                 };
             }
             // ---------------------------------------------------------
@@ -756,7 +766,7 @@ export default function EntryForm() {
                         source: "custom" as const,
                         amount: Number(form.customIncome[0].amount),
                         category: form.customIncome[0].category,
-                        label: form.customIncome[0].label,
+                        label: canonicalIncomeName(form.customIncome[0].label, getSavedIncomeNames(settings)),
                     }
                     : (() => {
                         const draft = form.paymentBreakdowns[repeatSourceField];
@@ -787,6 +797,15 @@ export default function EntryForm() {
             }
             setSuccess(true);
             submitTraceRef.current.mark("entry_create.ui_success");
+            // New names join the shared list (Settings → Other income names)
+            // so they're suggested next time, here and in the bank review.
+            if (activeWorkspace.type === "independent") {
+                const usedNames = (form.customIncome ?? [])
+                    .filter((item) => Number(item.amount ?? 0) > 0 && item.label?.trim())
+                    .map((item) => item.label);
+                if (usedNames.length > 0)
+                    void saveNewIncomeNames(activeWorkspaceId, usedNames);
+            }
             /** Reset raw form fields */
             setForm((prev) => buildClearedFormState(prev));
             setExpanded(false);
@@ -1044,11 +1063,13 @@ export default function EntryForm() {
 
               {/* Independent Custom Income Repeater */}
               {visibility.showCustomIncome && showIncomeSource("custom") && (<div className="space-y-2">
-                  <Label>Custom Income</Label>
-                  {(form.customIncome ?? []).map((item, idx) => (<div key={idx} className="flex gap-2">
-                      <Input placeholder="Label" value={item.label} onChange={(e) => {
+                  <Label>Other income</Label>
+                  {/* Name on its own line — it's the part that matters for
+                      matching 1099s, so it shouldn't be squeezed. */}
+                  {(form.customIncome ?? []).map((item, idx) => (<div key={idx} className="grid grid-cols-[1fr_auto] gap-2">
+                      <IncomeNameInput className="col-span-2" value={item.label} savedNames={getSavedIncomeNames(settings)} aria-label="Who paid you?" onChange={(label) => {
                             const next = [...form.customIncome];
-                            next[idx] = { ...next[idx], label: e.target.value };
+                            next[idx] = { ...next[idx], label };
                             setForm({ ...form, customIncome: next });
                         }}/>
                       <Input placeholder="Amount" type="number" step="0.01" value={item.amount} onChange={(e) => {
@@ -1068,7 +1089,7 @@ export default function EntryForm() {
                             setForm({ ...form, customIncome: next });
                         }} className="rounded border border-border bg-secondary px-2 py-1 text-sm">
                         <option value="services">Services</option>
-                        <option value="tips">Tips</option>
+                        {tipsEnabled || item.category === "tips" ? <option value="tips">Tips</option> : null}
                         <option value="products">Products</option>
                         <option value="other">Other</option>
                       </select>
@@ -1078,7 +1099,7 @@ export default function EntryForm() {
                         + {field.label}
                       </Button>))}
                     <Button type="button" variant="outline" size="sm" onClick={() => addCustomIncomeRow()}>
-                      + Add Custom Income
+                      + Other income
                     </Button>
                   </div>
 

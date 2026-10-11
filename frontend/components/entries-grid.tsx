@@ -60,10 +60,11 @@ const paymentFieldConfig = {
         categories: ["services", "products", "other"] as IncomeCategory[],
         defaultCategory: "services" as IncomeCategory,
     },
-    // "Other" money that isn't custom income — mainly bank deposits
-    // confirmed with "Paid via: Other" (getNonCustomOtherIncome).
+    // "Other" money with no name — bank deposits confirmed as "Paid via:
+    // Other" without a "Who paid you?" (or before that existed). Named other
+    // income is custom income, shown in the Other income column.
     otherIncome: {
-        label: "Other / Bank",
+        label: "Unnamed deposits",
         paymentMethod: "other",
         categories: ["services", "tips", "products", "other"] as IncomeCategory[],
         defaultCategory: "services" as IncomeCategory,
@@ -908,10 +909,10 @@ export default function EntriesGrid() {
           <ResponsiveHeader desktopLabel="Cash"/>
         </th>)}
       {independentColumns?.showOtherIncome && (<th className={`${thBase} text-center sm:text-right`}>
-          <ResponsiveHeader desktopLabel="Other / Bank" mobileLines={["Other /", "Bank"]}/>
+          <ResponsiveHeader desktopLabel="Unnamed deposits" mobileLines={["Unnamed", "deposits"]}/>
         </th>)}
       {independentColumns?.showCustomIncome && (<th className={`${thBase} text-center sm:text-right`}>
-          <ResponsiveHeader desktopLabel="Custom"/>
+          <ResponsiveHeader desktopLabel="Other income" mobileLines={["Other", "income"]}/>
         </th>)}
     </>)}
 

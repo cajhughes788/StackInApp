@@ -16,6 +16,8 @@ const BodySchema = z.object({
   receiptAssetId: z.string().optional(),
   incomeCategory: IncomeCategorySchema.optional(),
   paymentMethod: PaymentMethodSchema.optional(),
+  // "Who paid you?" — only used with paymentMethod "other".
+  incomeLabel: z.string().trim().max(60).optional(),
 })
 
 export async function confirmPlaidPendingTransactionHandler(req: Request, res: Response): Promise<void> {

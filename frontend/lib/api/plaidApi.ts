@@ -42,6 +42,8 @@ export type PlaidPendingTransaction = {
   suggestedIncomeCategory?: IncomeCategory | null
   /** Income direction only — remembered, or guessed from the descriptor. */
   suggestedPaymentMethod?: PaymentMethod | null
+  /** Income direction only — "Who paid you?" pre-fill for an "Other" deposit. */
+  suggestedIncomeLabel?: string | null
   isBusinessGuess: boolean | null
   confidence: number
   isLikelyFuelPurchase: boolean
@@ -151,6 +153,8 @@ export async function confirmPlaidPendingTransaction(
     receiptAssetId?: string
     incomeCategory?: IncomeCategory
     paymentMethod?: PaymentMethod
+    /** "Who paid you?" — only used with paymentMethod "other". */
+    incomeLabel?: string
   }
 ): Promise<{
   committedExpenseId?: string
@@ -197,6 +201,7 @@ export type PlaidIncomeMemory = {
   lastOutcome: "income" | "not_income"
   incomeCategory: IncomeCategory | null
   paymentMethod: PaymentMethod | null
+  incomeLabel?: string | null
   mode: "ask_every_time" | "always_not_income"
   incomeCount: number
   notIncomeCount: number

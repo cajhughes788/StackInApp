@@ -70,6 +70,10 @@ const PlaidPendingTransactionObjectSchema = z.object({
   // suggestPlaidIncomePaymentMethod). Null on spending and older records.
   suggestedIncomeCategory: IncomeCategorySchema.nullable().default(null),
   suggestedPaymentMethod: PaymentMethodSchema.nullable().default(null),
+  // Pre-fill for "Who paid you?" when suggestedPaymentMethod is "other":
+  // the payer's remembered name, else one derived from the descriptor
+  // (suggestPayerName).
+  suggestedIncomeLabel: z.string().nullable().default(null),
   isBusinessGuess: z.boolean().nullable(),
   confidence: z.number().min(0).max(1),
   // Independent of suggestedExpenseAccount/confidence — see

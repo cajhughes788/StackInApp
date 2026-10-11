@@ -334,6 +334,31 @@ export function isPlaidTransferPair(a: TransferPairSide, b: TransferPairSide): b
   return gapDays <= TRANSFER_PAIR_MAX_DAYS
 }
 
+// A starting name for "Who paid you?" when a deposit is classified as
+// "Paid via: Other" — the payer or platform, which is what's worth tracking
+// for taxes (it's what you check 1099-NEC / 1099-K forms against). Prefers
+// Plaid's enriched merchant name ("DoorDash"); otherwise strips banking noise
+// and reference numbers from the raw descriptor ("ACME CORP ACH CREDIT 0412"
+// → "Acme Corp"). Null when nothing recognizable is left ("MOBILE DEPOSIT").
+const PAYER_NOISE_WORDS = new Set([
+  "ach", "credit", "debit", "deposit", "deposits", "payout", "payouts", "payment", "payments", "pmt", "ppd", "ccd",
+  "web", "id", "dir", "direct", "dep", "transfer", "xfer", "online", "from", "mobile", "edeposit", "pos", "inst",
+  "instant", "orig", "co", "name", "des", "desc", "date", "indn", "trn", "ref", "chk", "sav", "acct", "account", "usa",
+])
+
+export function suggestPayerName(merchantName: string | null, rawName: string): string | null {
+  const enriched = merchantName?.trim()
+  if (enriched && enriched.replace(/[^a-zA-Z]/g, "").length >= 2) return enriched.slice(0, 40)
+  const words = rawName
+    .replace(/[*#:/\\|_.,]+/g, " ")
+    .split(/\s+/)
+    .filter((word) => word.length > 0 && !/\d/.test(word) && !PAYER_NOISE_WORDS.has(word.toLowerCase()))
+    .slice(0, 4)
+  if (words.length === 0) return null
+  const name = words.map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(" ")
+  return name.replace(/[^a-zA-Z]/g, "").length >= 2 ? name.slice(0, 40) : null
+}
+
 // Two amounts count as "the same recurring charge" if they're within $3 or
 // 10%, whichever is larger — covers small subscription price bumps without
 // matching unrelated purchases at the same merchant.

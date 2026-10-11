@@ -25,10 +25,13 @@ import {
 } from "@/components/ui/select"
 import { formatCurrency } from "@/lib/helpers"
 import { breakdownCategories, categoryLabels } from "@/lib/incomeBreakdown"
-import { resolvePlaidDisplayName, suggestPlaidIncomePaymentMethod } from "@shared/plaidClassification"
+import { resolvePlaidDisplayName, suggestPayerName, suggestPlaidIncomePaymentMethod } from "@shared/plaidClassification"
 import type { IncomeCategory, PaymentMethod } from "@shared/schemas/entry"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import { useEntriesStore } from "@/lib/stores/useEntriesStore"
+import { useSettingsStore } from "@/lib/stores/useSettingsStore"
+import IncomeNameInput from "@/components/income-name-input"
+import { canonicalIncomeName, getSavedIncomeNames, saveNewIncomeNames } from "@/lib/incomeNames"
 import {
   confirmPlaidPendingTransaction,
   getPlaidPendingTransactions,
@@ -97,7 +100,8 @@ async function runWithConcurrency<T>(items: T[], limit: number, worker: (item: T
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, runNext))
 }
 
-type RowChoice = { incomeCategory: IncomeCategory; paymentMethod: PaymentMethod }
+// incomeLabel: "Who paid you?" — only used when paymentMethod is "other".
+type RowChoice = { incomeCategory: IncomeCategory; paymentMethod: PaymentMethod; incomeLabel: string }
 
 // Pre-filled from the payer's income memory when the backend found one
 // (see PlaidIncomeMemorySchema); older records fall back to a guess.
@@ -109,12 +113,15 @@ function defaultChoice(transaction: PlaidPendingTransaction): RowChoice {
     // A payer remembered as "Card" before that option was folded into
     // Card / POS would otherwise pre-fill a choice the menu no longer has.
     paymentMethod: suggested === "card" ? "pos" : suggested,
+    incomeLabel:
+      transaction.suggestedIncomeLabel ?? suggestPayerName(transaction.merchantName, transaction.rawName) ?? "",
   }
 }
 
 function IncomeReviewCard({
   transaction,
   choice,
+  savedNames,
   isSelected,
   onToggleSelected,
   onChoiceChange,
@@ -123,6 +130,7 @@ function IncomeReviewCard({
 }: {
   transaction: PlaidPendingTransaction
   choice: RowChoice
+  savedNames: string[]
   isSelected: boolean
   onToggleSelected: () => void
   onChoiceChange: (patch: Partial<RowChoice>) => void
@@ -196,6 +204,17 @@ function IncomeReviewCard({
         </Select>
       </div>
 
+      {/* For taxes, who paid you matters more than how — it's what 1099s
+          are checked against — so "Other" money gets a name. */}
+      {choice.paymentMethod === "other" ? (
+        <IncomeNameInput
+          value={choice.incomeLabel}
+          onChange={(incomeLabel) => onChoiceChange({ incomeLabel })}
+          savedNames={savedNames}
+          aria-label="Who paid you?"
+        />
+      ) : null}
+
       <div className="flex justify-end gap-1">
         <Button type="button" variant="outline" size="icon" aria-label="Add as income" onClick={onConfirm}>
           <Check className="h-4 w-4" />
@@ -211,6 +230,8 @@ function IncomeReviewCard({
 export default function PlaidIncomeReviewPanel() {
   const workspaceState = useWorkspaceStore((state) => state.state)
   const activeWorkspaceId = workspaceState.status === "ready" ? workspaceState.activeWorkspaceId : null
+  const settings = useSettingsStore((state) => (activeWorkspaceId ? state.byWorkspaceId[activeWorkspaceId]?.data : null))
+  const savedNames = getSavedIncomeNames(settings)
 
   const { toast } = useToast()
   const [transactions, setTransactions] = useState<PlaidPendingTransaction[]>([])
@@ -307,12 +328,19 @@ export default function PlaidIncomeReviewPanel() {
     if (periodId) void store.refreshFromBackend(workspaceId, periodId, { force: true }).catch(() => {})
   }
 
+  // Returns the name used, if any, so callers can add new names to the shared
+  // list once the deposit is actually booked.
   async function submitDecision(workspaceId: string, transaction: PlaidPendingTransaction, isIncome: boolean) {
     const choice = choiceFor(transaction)
-    return confirmPlaidPendingTransaction(workspaceId, transaction.id, {
+    const incomeLabel =
+      isIncome && choice.paymentMethod === "other" ? canonicalIncomeName(choice.incomeLabel, savedNames) : ""
+    const result = await confirmPlaidPendingTransaction(workspaceId, transaction.id, {
       isBusiness: isIncome,
-      ...(isIncome ? { incomeCategory: choice.incomeCategory, paymentMethod: choice.paymentMethod } : {}),
+      ...(isIncome
+        ? { incomeCategory: choice.incomeCategory, paymentMethod: choice.paymentMethod, ...(incomeLabel ? { incomeLabel } : {}) }
+        : {}),
     })
+    return { result, incomeLabel }
   }
 
   async function handleDecision(transaction: PlaidPendingTransaction, isIncome: boolean) {
@@ -328,8 +356,9 @@ export default function PlaidIncomeReviewPanel() {
       return next
     })
     try {
-      const result = await submitDecision(workspaceId, transaction, isIncome)
+      const { result, incomeLabel } = await submitDecision(workspaceId, transaction, isIncome)
       if (isIncome) refreshVisibleEntries(workspaceId)
+      if (incomeLabel) void saveNewIncomeNames(workspaceId, [incomeLabel])
       // Only offered from single-row dismissals, like the expense panel's
       // personalSuggestion — a bulk run would stack one dialog per payer.
       if (result.notIncomeSuggestion) setNotIncomePrompt(result.notIncomeSuggestion)
@@ -357,13 +386,17 @@ export default function PlaidIncomeReviewPanel() {
     setIsBulkWorking(true)
 
     const failed: PlaidPendingTransaction[] = []
+    const usedNames: string[] = []
     await runWithConcurrency(targets, BULK_CONCURRENCY, async (transaction) => {
       try {
-        await submitDecision(workspaceId, transaction, isIncome)
+        const { incomeLabel } = await submitDecision(workspaceId, transaction, isIncome)
+        if (incomeLabel) usedNames.push(incomeLabel)
       } catch {
         failed.push(transaction)
       }
     })
+    // Once for the whole batch — saving per row would race on the same list.
+    if (usedNames.length > 0) void saveNewIncomeNames(workspaceId, usedNames)
 
     setIsBulkWorking(false)
     if (failed.length > 0) {
@@ -467,6 +500,7 @@ export default function PlaidIncomeReviewPanel() {
             key={transaction.id}
             transaction={transaction}
             choice={choiceFor(transaction)}
+            savedNames={savedNames}
             isSelected={selectedIds.has(transaction.id)}
             onToggleSelected={() => toggleSelected(transaction.id)}
             onChoiceChange={(patch) =>
