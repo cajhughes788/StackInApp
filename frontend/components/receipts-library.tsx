@@ -235,37 +235,37 @@ export default function ReceiptsLibrary() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="rounded-xl border border-border/80 px-5 py-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-semibold text-foreground">Receipts</h1>
+    <div className="space-y-5">
+      <div className="space-y-3 px-1">
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <h1 className="text-2xl font-semibold text-foreground">Receipts</h1>
             <p className="mt-1 text-sm text-muted-foreground">
               Receipts attached to expenses appear here. To add a receipt, attach one when creating an expense.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <label className="flex items-center gap-2 rounded-full bg-card py-1 pl-4 pr-2 text-sm text-muted-foreground">
               <span>Month</span>
               <input
                 type="month"
                 value={selectedMonth}
                 onChange={(event) => setSelectedMonth(event.target.value)}
-                className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+                className="rounded-full bg-muted px-3 py-1.5 text-sm text-foreground"
               />
             </label>
-            <Badge variant="outline">{visibleReceipts.length} receipts</Badge>
+            <Badge variant="outline" className="rounded-full border-0 bg-muted px-3 py-1.5 text-sm font-medium text-muted-foreground">{visibleReceipts.length} receipts</Badge>
           </div>
         </div>
       </div>
 
       {expensesLoading ? (
-        <div className="rounded-xl border border-dashed border-border/80 px-5 py-8 text-center text-sm text-muted-foreground">
+        <div className="rounded-[22px] bg-card px-5 py-8 text-center text-sm text-muted-foreground">
           Loading receipts for {monthLabel}...
         </div>
       ) : visibleReceipts.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border/80 px-5 py-8 text-center">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-secondary text-muted-foreground">
+        <div className="rounded-[22px] bg-card px-5 py-8 text-center">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
             <ReceiptText className="h-6 w-6" />
           </div>
           <p className="mt-4 text-base font-medium text-foreground">No receipts for {monthLabel}</p>
@@ -274,7 +274,7 @@ export default function ReceiptsLibrary() {
           </p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="divide-y divide-border/70 rounded-[22px] bg-card px-4">
           {visibleReceipts.map(({ expense, draft }) => {
             const merchant =
               expense.vendor ||
@@ -288,10 +288,10 @@ export default function ReceiptsLibrary() {
             return (
               <div
                 key={expense.id}
-                className="rounded-xl border border-border/80 bg-card px-5 py-4 shadow-sm"
+                className="py-3.5"
               >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0 space-y-0.5">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="truncate text-base font-medium text-foreground">{merchant}</p>
                     </div>
@@ -321,6 +321,7 @@ export default function ReceiptsLibrary() {
                         asset={draft?.receiptAsset}
                         title={merchant}
                         variant="outline"
+                        className="rounded-full"
                         label="View receipt"
                       />
                     ) : null}
