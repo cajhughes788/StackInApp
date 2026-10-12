@@ -9,7 +9,6 @@ import IncomeStreamsOverview from "@/components/income-streams-overview";
 import ExpenseCategoriesOverview from "@/components/expense-categories-overview";
 import NeedsYouPanel from "@/components/needs-you-panel";
 import EntryForm from "@/components/entry-form";
-import EntriesGrid from "@/components/entries-grid";
 import { useAuth } from "@/contexts/auth-context";
 import {
     useSettingsData,
@@ -310,28 +309,15 @@ export default function HomePage() {
       </main>
     </div>);
     }
+    // W-2 home: the pay period's total, the entry form, and the grid (the
+    // only place W-2 entries are edited, so it starts open).
     return (<div className="min-h-screen bg-background flex flex-col">
       <StackInHeader />
 
-      <main className="flex-1 px-4 pb-6 pt-4 max-w-3xl mx-auto w-full space-y-4">
+      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-5 px-4 pb-10 pt-4">
         <IncomeGauge />
-
-        {/* Toggle */}
-        <div className="flex justify-center gap-3 mt-4">
-          <button onClick={() => setMode("income")} className={`px-4 py-2 rounded-lg border font-medium transition
-      ${mode === "income"
-            ? "border-border bg-primary text-primary-foreground"
-            : "bg-card text-card-foreground border-border hover:bg-accent"}
-    `}>
-            Income
-          </button>
-        </div>
-
-        {/* Mode */}
-        <div className="space-y-4 mt-6">
-          <EntryForm />
-          <EntriesGrid />
-        </div>
+        <EntryForm />
+        <AllRecordsSection kind="entries" count={entries.length} defaultOpen className=""/>
       </main>
     </div>);
 }

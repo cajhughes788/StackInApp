@@ -93,6 +93,10 @@ function resolvePositionRate(settings: Parameters<typeof getRateOptions>[0], pos
         return { positionId: null, rate: settings?.w2?.defaultHourlyRate?.toString() ?? currentRate };
     return { positionId: option.id, rate: option.rate.toString() };
 }
+// W-2 fields: one soft row each, label left and value right.
+const W2_ROW = "flex items-center justify-between gap-3 rounded-2xl bg-muted px-4 py-1.5";
+const W2_LABEL = "shrink-0 text-sm font-normal text-muted-foreground";
+const W2_INPUT = "h-9 w-32 border-0 bg-transparent px-0 text-right text-base font-medium tabular-nums shadow-none focus-visible:ring-0";
 /** Width for a big amount input so the "$" sits right beside the number. */
 function amountWidth(value: string | undefined): string {
     // Empty shows the "0.00" placeholder, which needs four characters.
@@ -919,44 +923,44 @@ export default function EntryForm() {
           {/* W-2 Tips */}
           {/* W-2 UI continues to use legacy visibility flags */}
           {visibility?.mode === "w2" && (<>
-          {visibility?.showTips && (<div>
-              <Label htmlFor="tips">Credit Card Tips</Label>
-              <Input id="tips" type="number" step="0.01" value={form.tips} onChange={(e) => setForm({ ...form, tips: e.target.value })}/>
+          {visibility?.showTips && (<div className={W2_ROW}>
+              <Label htmlFor="tips" className={W2_LABEL}>Credit card tips</Label>
+              <Input id="tips" type="number" step="0.01" inputMode="decimal" placeholder="0.00" value={form.tips} onChange={(e) => setForm({ ...form, tips: e.target.value })} className={W2_INPUT}/>
             </div>)}
 
           {/* W-2 Hours Section */}
           {visibility?.showHoursSection && (<>
-              {visibility.showHoursManual && (<div>
-                  <Label htmlFor="hours">Hours Worked</Label>
-                  <Input id="hours" type="number" step="0.01" value={form.hours} onChange={(e) => setForm({ ...form, hours: e.target.value })} required/>
+              {visibility.showHoursManual && (<div className={W2_ROW}>
+                  <Label htmlFor="hours" className={W2_LABEL}>Hours worked</Label>
+                  <Input id="hours" type="number" step="0.01" inputMode="decimal" placeholder="0" value={form.hours} onChange={(e) => setForm({ ...form, hours: e.target.value })} required className={W2_INPUT}/>
                 </div>)}
 
-              {visibility.showInOutTimes && (<div className="space-y-2">
-                  <Label>In/Out Times</Label>
-                  <div className="flex space-x-4">
-                    <div>
-                      <Input placeholder="HH:MM" inputMode="numeric" value={form.inTime} onChange={(e) => setForm({
+              {visibility.showInOutTimes && (<div className="space-y-2 rounded-2xl bg-muted px-4 py-3">
+                  <Label className={W2_LABEL}>In / out times</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="flex items-center gap-1.5 rounded-xl bg-card px-2 py-1">
+                      <Input placeholder="HH:MM" inputMode="numeric" aria-label="In time" value={form.inTime} onChange={(e) => setForm({
                             ...form,
                             inTime: enforceHHMM(e.target.value),
-                        })} className="w-24 text-center" required/>
-                      <select value={form.inPeriod} onChange={(e) => {
+                        })} className="h-9 min-w-0 flex-1 border-0 bg-transparent px-1 text-center shadow-none focus-visible:ring-0" required/>
+                      <select aria-label="In AM or PM" value={form.inPeriod} onChange={(e) => {
                             setForm({ ...form, inPeriod: e.target.value });
                             writeStoredTimePeriods(e.target.value, form.outPeriod);
-                        }} className="ml-2 rounded border border-border bg-secondary px-2 py-1">
+                        }} className="rounded-full bg-muted px-2 py-1 text-sm">
                         <option>AM</option>
                         <option>PM</option>
                       </select>
                     </div>
 
-                    <div>
-                      <Input placeholder="HH:MM" inputMode="numeric" value={form.outTime} onChange={(e) => setForm({
+                    <div className="flex items-center gap-1.5 rounded-xl bg-card px-2 py-1">
+                      <Input placeholder="HH:MM" inputMode="numeric" aria-label="Out time" value={form.outTime} onChange={(e) => setForm({
                             ...form,
                             outTime: enforceHHMM(e.target.value),
-                        })} className="w-24 text-center" required/>
-                      <select value={form.outPeriod} onChange={(e) => {
+                        })} className="h-9 min-w-0 flex-1 border-0 bg-transparent px-1 text-center shadow-none focus-visible:ring-0" required/>
+                      <select aria-label="Out AM or PM" value={form.outPeriod} onChange={(e) => {
                             setForm({ ...form, outPeriod: e.target.value });
                             writeStoredTimePeriods(form.inPeriod, e.target.value);
-                        }} className="ml-2 rounded border border-border bg-secondary px-2 py-1">
+                        }} className="rounded-full bg-muted px-2 py-1 text-sm">
                         <option>AM</option>
                         <option>PM</option>
                       </select>
@@ -964,12 +968,12 @@ export default function EntryForm() {
                   </div>
                 </div>)}
 
-              {visibility.showRate && rateOptions.length > 1 && (<div>
-                  <Label htmlFor="position">Position</Label>
+              {visibility.showRate && rateOptions.length > 1 && (<div className={W2_ROW}>
+                  <Label htmlFor="position" className={W2_LABEL}>Position</Label>
                   <select id="position" value={form.positionId ?? ""} onChange={(e) => setForm({
                         ...form,
                         ...resolvePositionRate(settings, e.target.value === "" ? null : e.target.value, form.rate),
-                    })} className="mt-1 w-full rounded-md border border-border bg-secondary px-3 py-2 text-sm">
+                    })} className="min-w-0 max-w-[65%] truncate rounded-full bg-card px-3 py-1.5 text-sm">
                     {rateOptions.map((o) => (<option key={o.id ?? ""} value={o.id ?? ""}>
                         {o.title} – ${o.rate.toFixed(2)}/hr
                       </option>))}
@@ -977,26 +981,26 @@ export default function EntryForm() {
                   </select>
                 </div>)}
 
-              {visibility.showRate && (<div>
-                  <Label htmlFor="rate">Hourly Rate</Label>
+              {visibility.showRate && (<div className={W2_ROW}>
+                  <Label htmlFor="rate" className={W2_LABEL}>Hourly rate</Label>
                   {/* Typing a rate by hand marks the entry Custom */}
-                  <Input id="rate" type="number" step="0.01" value={form.rate} onChange={(e) => setForm({ ...form, rate: e.target.value, positionId: CUSTOM_POSITION_ID })} required/>
+                  <Input id="rate" type="number" step="0.01" inputMode="decimal" placeholder="0.00" value={form.rate} onChange={(e) => setForm({ ...form, rate: e.target.value, positionId: CUSTOM_POSITION_ID })} required className={W2_INPUT}/>
                 </div>)}
             </>)}
 
           {/* W-2 Cash + Deductions */}
-          {visibility?.showReportedCash && (<div>
-              <Label htmlFor="reportedCash">Reported Cash</Label>
-              <Input id="reportedCash" type="number" step="0.01" value={form.reportedCash} onChange={(e) => setForm({ ...form, reportedCash: e.target.value })}/>
+          {visibility?.showReportedCash && (<div className={W2_ROW}>
+              <Label htmlFor="reportedCash" className={W2_LABEL}>Reported cash</Label>
+              <Input id="reportedCash" type="number" step="0.01" inputMode="decimal" placeholder="0.00" value={form.reportedCash} onChange={(e) => setForm({ ...form, reportedCash: e.target.value })} className={W2_INPUT}/>
             </div>)}
 
-          {visibility?.showUnreportedCash && (<div>
-              <Label htmlFor="unreportedCash">Personal Cash</Label>
-              <Input id="unreportedCash" type="number" step="0.01" value={form.unreportedCash} onChange={(e) => setForm({ ...form, unreportedCash: e.target.value })}/>
+          {visibility?.showUnreportedCash && (<div className={W2_ROW}>
+              <Label htmlFor="unreportedCash" className={W2_LABEL}>Personal cash</Label>
+              <Input id="unreportedCash" type="number" step="0.01" inputMode="decimal" placeholder="0.00" value={form.unreportedCash} onChange={(e) => setForm({ ...form, unreportedCash: e.target.value })} className={W2_INPUT}/>
             </div>)}
 
           {visibility?.showBreakDeduction && settings.w2?.autoBreakDeduction && (<>
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center gap-3 rounded-2xl bg-muted px-4 py-3">
                 <Checkbox id="breakDeduction" checked={form.breakDeduction} onCheckedChange={(checked) => setForm({
                         ...form,
                         breakDeduction: checked as boolean,
@@ -1004,19 +1008,19 @@ export default function EntryForm() {
                             ? settings.w2?.breakMinutesDefault ?? 30
                             : 0,
                     })}/>
-                <Label htmlFor="breakDeduction">
-                  Break Deduction ({settings.w2?.breakMinutesDefault ?? 30} min)
+                <Label htmlFor="breakDeduction" className="text-sm font-normal">
+                  Break deduction ({settings.w2?.breakMinutesDefault ?? 30} min)
                 </Label>
               </div>
             </>)}
 
-          {visibility?.showCustomDeductions && (<div className="space-y-2 pt-2">
+          {visibility?.showCustomDeductions && (settings.w2?.customDeductions ?? []).length > 0 && (<div className="space-y-2.5 rounded-2xl bg-muted px-4 py-3">
               {(settings.w2?.customDeductions ?? []).map((d: {
                         label: string;
                         amount: number;
                     }) => {
                         const checked = form.appliedCustomDeductions.includes(d.label);
-                        return (<div key={d.label} className="flex items-center space-x-2">
+                        return (<div key={d.label} className="flex items-center gap-3">
                     <Checkbox id={`custom-${d.label}`} checked={checked} onCheckedChange={(c) => {
                                 setForm((prev) => {
                                     const next = new Set(prev.appliedCustomDeductions);
@@ -1030,7 +1034,7 @@ export default function EntryForm() {
                                     };
                                 });
                             }}/>
-                    <Label htmlFor={`custom-${d.label}`}>{d.label}</Label>
+                    <Label htmlFor={`custom-${d.label}`} className="text-sm font-normal">{d.label}</Label>
                   </div>);
                     })}
             </div>)}  </>)}

@@ -1,6 +1,7 @@
 // /components/income-gauge.tsx
 "use client";
 import { useState, useEffect, useMemo, useRef } from "react";
+import { ChevronDown } from "lucide-react";
 import { formatCurrency } from "@/lib/helpers";
 import { calculateNetPay } from "@shared/tax/engine";
 import { buildTaxProfileInput } from "@shared/tax/buildTaxProfileInput";
@@ -42,6 +43,7 @@ export default function IncomeGauge() {
     const [isLoading, setIsLoading] = useState(false);
     const [previewMessage, setPreviewMessage] = useState<string | null>(null);
     const previewRef = useRef<HTMLDivElement | null>(null);
+    const [detailsOpen, setDetailsOpen] = useState(false);
     // ------------------------------------------------------------
     // Compute income gauge totals across entries
     // ------------------------------------------------------------
@@ -137,7 +139,7 @@ export default function IncomeGauge() {
         return () => document.removeEventListener("pointerdown", handlePointerDown);
     }, []);
     // ------------------------------------------------------------
-    // Gauge Fill Percentage (max capped at $5000)
+    // Goal progress (falls back to a $5000 scale with no goal set)
     // ------------------------------------------------------------
     const maxAmount = 5000;
     const targetIncome = settings?.w2?.incomeTargetPerPeriod && settings.w2.incomeTargetPerPeriod > 0
@@ -158,69 +160,66 @@ export default function IncomeGauge() {
       </div>);
     }
     // ------------------------------------------------------------
-    // RENDER
+    // RENDER — laid out like the independent total card
+    // (income-streams-overview.tsx): period, headline gross, goal, and the
+    // day stats behind "Details".
     // ------------------------------------------------------------
-    return (<div ref={previewRef} className="relative bg-card rounded-lg border p-4 shadow-sm sm:p-6">
+    const goalShare = targetIncome ? totals.incomeGauge / targetIncome : 0;
+    return (<div ref={previewRef} className="relative rounded-[22px] bg-card p-5">
       <SyncStatusIndicator visible={showSyncIndicator} label="Syncing pay summary"/>
 
       <PeriodSelector />
 
-      {/* --- Gauge Bar --- */}
-      <div className="relative mb-5 h-28 sm:mb-6 sm:h-32">
-        <div className="app-soft-surface absolute inset-0 rounded-lg overflow-hidden">
-          <div className="h-full bg-gradient-to-r from-emerald-500 to-emerald-600 transition-all duration-500 ease-out" style={{ width: `${fillPercentage}%` }}/>
-        </div>
+      <button type="button" onClick={() => setDetailsOpen((current) => !current)} aria-expanded={detailsOpen} className="flex w-full items-end justify-between gap-3 text-left">
+        <span>
+          <span className="block text-sm text-muted-foreground">Gross pay this period</span>
+          <span className="block text-4xl font-semibold tracking-tight tabular-nums text-foreground sm:text-5xl">
+            {formatCurrency(totals.incomeGauge)}
+          </span>
+        </span>
+        <span className="flex shrink-0 items-center gap-1 pb-1.5 text-sm font-medium text-primary">
+          {targetIncome ? `${Math.round(goalShare * 100)}% of goal` : "Details"}
+          <ChevronDown className={`size-4 transition-transform ${detailsOpen ? "rotate-180" : ""}`} aria-hidden="true"/>
+        </span>
+      </button>
 
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="px-3 text-center">
-            <div className="text-2xl font-bold tabular-nums text-foreground sm:text-3xl">
-              {formatCurrency(totals.incomeGauge)}
-            </div>
-            <div className="text-xs text-muted-foreground sm:text-sm">
-              Gross Income
-              {targetIncome ? ` of ${formatCurrency(targetIncome)}` : ""}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* --- Breakdown --- */}
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-4">
-        <div className="rounded-lg border border-border/70 bg-secondary/40 px-3 py-3 text-center">
-          <div className="text-2xl font-bold tabular-nums text-foreground">
-            {totals.daysWorked}
-          </div>
-          <div className="text-xs text-muted-foreground">Days Worked</div>
-        </div>
-
-        <div className="rounded-lg border border-border/70 bg-secondary/40 px-3 py-3 text-center">
-          <div className="text-xl font-bold tabular-nums text-foreground sm:text-2xl">
-            {formatCurrency(totals.avgPerDay)}
-          </div>
-          <div className="text-xs text-muted-foreground">Avg/Day</div>
-        </div>
-
-        <div className="rounded-lg border border-border/70 bg-secondary/40 px-3 py-3 text-center">
-          <div className="text-xl font-bold tabular-nums text-foreground sm:text-2xl">
-            {formatCurrency(totals.avgPerHour)}
-          </div>
-          <div className="text-xs text-muted-foreground">Avg/Hour</div>
-        </div>
-      </div>
-
-      {/* --- Net Pay Preview Button — PATCH 3 --- */}
-      {activeWorkspace.type === "w2" && settings?.w2?.autoTaxCalculation && (<div className="mt-4 flex items-center justify-center gap-3">
-          <button onClick={handlePreviewNet} disabled={isLoading} className="text-sm font-medium text-emerald-700 hover:text-emerald-800 transition-colors">
-            {isLoading ? "Calculating…" : "Preview Net Pay"}
-          </button>
-
-          {netPreview !== null && !isLoading && (<div className="text-sm font-semibold text-emerald-600 transition-transform duration-300 ease-out" style={{ transform: "translateX(0)" }}>
-              Net: {formatCurrency(netPreview)}
-            </div>)}
+      {/* --- Take-home preview --- */}
+      {activeWorkspace.type === "w2" && settings?.w2?.autoTaxCalculation && (<div className="mt-1 flex flex-wrap items-center gap-x-2 text-sm">
+          {netPreview !== null && !isLoading ? (<span className="text-muted-foreground">
+              Take-home about <span className="font-medium tabular-nums text-foreground">{formatCurrency(netPreview)}</span>
+            </span>) : (<button type="button" onClick={handlePreviewNet} disabled={isLoading} className="font-medium text-primary">
+              {isLoading ? "Calculating…" : "See take-home"}
+            </button>)}
         </div>)}
 
-      {previewMessage && (<div className="mt-2 text-center text-sm text-muted-foreground">
+      {previewMessage && (<div className="mt-1 text-sm text-muted-foreground">
           {previewMessage}
         </div>)}
+
+      {detailsOpen ? (<div className="mt-4 space-y-4">
+          {targetIncome ? (<div className="space-y-1.5">
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted" aria-hidden="true">
+                <div className="h-full rounded-full bg-primary transition-[width] duration-500 ease-out" style={{ width: `${fillPercentage}%` }}/>
+              </div>
+              <div className="flex justify-between text-xs tabular-nums text-muted-foreground">
+                <span>{formatCurrency(totals.incomeGauge)}</span>
+                <span>Goal {formatCurrency(targetIncome)}</span>
+              </div>
+            </div>) : null}
+          <dl className="grid grid-cols-3 divide-x divide-border/70 rounded-2xl bg-muted py-3 text-center">
+            <div className="flex flex-col-reverse">
+              <dt className="text-xs text-muted-foreground">Days worked</dt>
+              <dd className="text-lg font-semibold tabular-nums text-foreground">{totals.daysWorked}</dd>
+            </div>
+            <div className="flex flex-col-reverse">
+              <dt className="text-xs text-muted-foreground">Avg / day</dt>
+              <dd className="text-lg font-semibold tabular-nums text-foreground">{formatCurrency(totals.avgPerDay)}</dd>
+            </div>
+            <div className="flex flex-col-reverse">
+              <dt className="text-xs text-muted-foreground">Avg / hour</dt>
+              <dd className="text-lg font-semibold tabular-nums text-foreground">{formatCurrency(totals.avgPerHour)}</dd>
+            </div>
+          </dl>
+        </div>) : null}
     </div>);
 }
