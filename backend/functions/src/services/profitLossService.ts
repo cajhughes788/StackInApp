@@ -7,6 +7,8 @@ import { ExpenseSchema, type ExpenseType, } from "@shared/schemas/expense";
 import { calculateAvgHoursPerWeek } from "@shared/hoursStats";
 import type { ProfitLossDetailItem, ProfitLossHours } from "@shared/schemas/profitLoss";
 import { ProfitLossStatementSchema, ProfitLossStatementListSchema, type ProfitLossPeriodType, type ProfitLossStatement, } from "@shared/schemas/profitLoss";
+import { ProfitLossInsightsSchema, type ProfitLossInsights } from "@shared/schemas/profitLossInsights";
+import { listCompleteMonths } from "@shared/incomeInsights";
 const DEFAULT_TIME_ZONE = "America/Los_Angeles";
 const INCOME_CATEGORY_CONFIG: Array<{
     key: IncomeCategory;
@@ -620,4 +622,62 @@ export async function generateDueProfitLossStatementsForWorkspace(workspaceId: s
             force: false,
         });
     }
+}
+
+const INSIGHTS_HISTORY_MONTHS = 6;
+
+function sumByDate(items: Array<{ date: string; amount: number }>): Array<{ date: string; amount: number }> {
+    const byDate = new Map<string, number>();
+    for (const item of items) {
+        byDate.set(item.date, (byDate.get(item.date) ?? 0) + (Number(item.amount) || 0));
+    }
+    return [...byDate.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, amount]) => ({ date, amount: roundCurrency(amount) }));
+}
+
+// The P&L page's "This month so far" and "Your patterns" summary — see
+// @shared/schemas/profitLossInsights. Reuses listProfitLossStatements (same
+// membership check and stale-statement handling) and returns only totals.
+export async function getProfitLossInsights(workspaceId: string, uid: string): Promise<ProfitLossInsights> {
+    const statements = await listProfitLossStatements(workspaceId, uid, "month");
+    const byKey = new Map(statements.map((statement) => [statement.periodKey, statement]));
+    const settingsSnap = await db.doc(`workspaces/${workspaceId}/settings/current`).get();
+    const timeZone = settingsSnap.get("common.timeZone") || DEFAULT_TIME_ZONE;
+    const today = DateTime.now().setZone(timeZone);
+    const currentKey = today.toFormat("yyyy-MM");
+    const previousKey = today.minus({ months: 1 }).toFormat("yyyy-MM");
+
+    const incomeItems = (statement: ProfitLossStatement | undefined) =>
+        statement?.income.categories.flatMap((category) => category.items) ?? [];
+    const expenseItems = (statement: ProfitLossStatement | undefined) =>
+        statement?.expenses.byCategory.flatMap((category) => category.items) ?? [];
+
+    // Complete months only, from the first month with any income, so months
+    // before someone used the app don't count as $0 months.
+    const firstIncomeMonth = statements
+        .filter((statement) => statement.income.total > 0)
+        .map((statement) => statement.periodKey)
+        .sort()[0];
+    const historyKeys = firstIncomeMonth
+        ? listCompleteMonths(currentKey, INSIGHTS_HISTORY_MONTHS, firstIncomeMonth)
+        : [];
+
+    const current = byKey.get(currentKey);
+    const previous = byKey.get(previousKey);
+    return ProfitLossInsightsSchema.parse({
+        today: today.toISODate(),
+        currentMonth: {
+            key: currentKey,
+            income: current?.income.total ?? 0,
+            expenses: current?.expenses.total ?? 0,
+        },
+        previousMonth: {
+            key: previousKey,
+            dailyIncome: sumByDate(incomeItems(previous)),
+            dailyExpenses: sumByDate(expenseItems(previous)),
+        },
+        history: historyKeys.map((key) => ({ key, income: byKey.get(key)?.income.total ?? 0 })),
+        historyDailyIncome: sumByDate(historyKeys.flatMap((key) => incomeItems(byKey.get(key)))),
+    });
 }

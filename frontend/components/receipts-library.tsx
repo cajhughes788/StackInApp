@@ -1,15 +1,21 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { ReceiptText } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { AlertCircle, ReceiptText } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import AttachReceiptDialog from "@/components/attach-receipt-dialog"
 import ReceiptThumbnail from "@/components/receipt-thumbnail"
 import ReceiptViewerTrigger from "@/components/receipt-viewer-trigger"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import { useExpensesStore } from "@/lib/stores/useExpensesStore"
 import { useReceiptDraftsStore } from "@/lib/stores/useReceiptDraftsStore"
 import * as expenseRepository from "@/lib/domain/expenseRepository"
+import { useExpenseFocusStore } from "@/lib/stores/useExpenseFocusStore"
+import { formatCurrency } from "@/lib/helpers"
+import { computeReceiptCoverage, needsReceiptForAuditDefense, RECEIPT_REQUIRED_THRESHOLD } from "@shared/receiptRequirements"
 import { getCalendarMonthBucketFromDate } from "@shared/payPeriods"
 import type { ReceiptDraft } from "@shared/schemas/receiptDraft"
 
@@ -52,6 +58,8 @@ function getReceiptLifecycleLabel(item: ReceiptDraft): string {
 }
 
 export default function ReceiptsLibrary() {
+  const router = useRouter()
+  const [attachExpenseId, setAttachExpenseId] = useState<string | null>(null)
   const [selectedMonth, setSelectedMonth] = useState<string>(getCurrentMonthValue)
   const [monthExpenses, setMonthExpenses] = useState<any[]>([])
   const [expensesLoading, setExpensesLoading] = useState(false)
@@ -221,6 +229,54 @@ export default function ReceiptsLibrary() {
       })
   }, [draftsByCommittedExpenseId, draftsByReceiptAssetId, effectiveExpenses, selectedMonth])
 
+  // Expenses this month that are over the audit threshold with no receipt
+  // (receiptRequirements.ts) — biggest first.
+  const missingReceipts = useMemo(() => {
+    return effectiveExpenses
+      .filter(
+        (expense) =>
+          typeof expense.date === "string" &&
+          expense.date.startsWith(`${selectedMonth}-`) &&
+          needsReceiptForAuditDefense(expense.amount ?? 0, expense.receiptAssetId)
+      )
+      .sort((left, right) => (right.amount ?? 0) - (left.amount ?? 0))
+  }, [effectiveExpenses, selectedMonth])
+
+  const coverage = useMemo(
+    () =>
+      computeReceiptCoverage(
+        effectiveExpenses.filter(
+          (expense) => typeof expense.date === "string" && expense.date.startsWith(`${selectedMonth}-`)
+        )
+      ),
+    [effectiveExpenses, selectedMonth]
+  )
+
+  // Opens the expense in the home page's expenses grid
+  // (useExpenseFocusStore → home page → expenses grid).
+  function viewExpense(expenseId: string) {
+    if (!activeWorkspaceId) return
+    useExpenseFocusStore.getState().focusExpense({
+      workspaceId: activeWorkspaceId,
+      expenseId,
+      month: selectedMonth,
+    })
+    router.push("/app/home")
+  }
+
+  // updateExpense (which the attach dialog uses) edits the expenses store,
+  // which holds one month at a time — load the selected month into it when
+  // it's showing another one. Runs alongside the dialog; picking and
+  // uploading a photo takes far longer than this cache read.
+  function startAttach(expenseId: string) {
+    if (!activeWorkspaceId) return
+    setAttachExpenseId(expenseId)
+    const expensesStore = useExpensesStore.getState()
+    if (!expensesStore.getExpense(activeWorkspaceId, expenseId)) {
+      void expensesStore.hydrateFromCache(activeWorkspaceId, selectedMonth)
+    }
+  }
+
   const monthLabel = useMemo(() => {
     const [year, month] = selectedMonth.split("-")
     const parsed = new Date(Number(year), Number(month) - 1, 1)
@@ -255,9 +311,71 @@ export default function ReceiptsLibrary() {
               />
             </label>
             <Badge variant="outline" className="rounded-full border-0 bg-muted px-3 py-1.5 text-sm font-medium text-muted-foreground">{visibleReceipts.length} receipts</Badge>
+            {!expensesLoading && coverage.percent !== null ? (
+              <Badge
+                variant="outline"
+                className={`rounded-full border-0 px-3 py-1.5 text-sm font-medium ${
+                  coverage.missing === 0
+                    ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300"
+                    : "bg-muted text-muted-foreground"
+                }`}
+                title={`${coverage.covered} of ${coverage.needed} expenses over ${formatCurrency(RECEIPT_REQUIRED_THRESHOLD)} have a receipt`}
+              >
+                Audit-ready {coverage.percent}%
+              </Badge>
+            ) : null}
           </div>
         </div>
       </div>
+
+      {!expensesLoading && missingReceipts.length > 0 ? (
+        <section className="space-y-2">
+          <div className="px-1">
+            <h2 className="flex items-center gap-1.5 text-lg font-semibold text-foreground">
+              <AlertCircle className="h-4 w-4 text-destructive" aria-hidden="true" />
+              {missingReceipts.length === 1
+                ? "1 expense needs a receipt"
+                : `${missingReceipts.length} expenses need a receipt`}
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Expenses over {formatCurrency(RECEIPT_REQUIRED_THRESHOLD)} generally need a receipt for audit defense.
+            </p>
+          </div>
+          <div className="divide-y divide-border/70 rounded-[22px] bg-card border border-card-border px-4">
+            {missingReceipts.map((expense) => (
+              <div key={expense.id} className="flex flex-wrap items-center justify-between gap-3 py-3.5">
+                <div className="min-w-0 space-y-0.5">
+                  <p className="truncate text-base font-medium text-foreground">
+                    {expense.vendor || expense.description || "Expense"}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    <span className="tabular-nums">{formatCurrency(expense.amount ?? 0)}</span>
+                    {formatDate(expense.date) ? ` · ${formatDate(expense.date)}` : ""}
+                  </p>
+                </div>
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="rounded-full"
+                    onClick={() => viewExpense(expense.id)}
+                  >
+                    View expense
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-full"
+                    onClick={() => startAttach(expense.id)}
+                  >
+                    Attach receipt
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {expensesLoading ? (
         <div className="rounded-[22px] bg-card border border-card-border px-5 py-8 text-center text-sm text-muted-foreground">
@@ -294,6 +412,11 @@ export default function ReceiptsLibrary() {
                   <div className="min-w-0 space-y-0.5">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="truncate text-base font-medium text-foreground">{merchant}</p>
+                      {typeof expense.amount === "number" ? (
+                        <p className="text-base font-medium tabular-nums text-foreground">
+                          {formatCurrency(expense.amount)}
+                        </p>
+                      ) : null}
                     </div>
                     <p className="text-sm text-muted-foreground">
                       {savedCategory
@@ -323,8 +446,39 @@ export default function ReceiptsLibrary() {
                         variant="outline"
                         className="rounded-full"
                         label="View receipt"
+                        details={(close) => (
+                          <div className="flex w-full max-w-md items-center justify-between gap-3 rounded-[22px] border border-card-border bg-card px-4 py-3">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-medium text-foreground">
+                                {merchant}
+                                {typeof expense.amount === "number" ? ` · ${formatCurrency(expense.amount)}` : ""}
+                              </p>
+                              <p className="truncate text-xs text-muted-foreground">
+                                {[savedCategory, occurredAtLabel].filter(Boolean).join(" · ")}
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              className="shrink-0 rounded-full"
+                              onClick={() => {
+                                close()
+                                viewExpense(expense.id)
+                              }}
+                            >
+                              View expense
+                            </Button>
+                          </div>
+                        )}
                       />
                     ) : null}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="rounded-full"
+                      onClick={() => viewExpense(expense.id)}
+                    >
+                      View expense
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -332,6 +486,14 @@ export default function ReceiptsLibrary() {
           })}
         </div>
       )}
+
+      <AttachReceiptDialog
+        open={attachExpenseId != null}
+        onOpenChange={(open) => !open && setAttachExpenseId(null)}
+        workspaceId={activeWorkspaceId}
+        expenseId={attachExpenseId ?? ""}
+        vendorLabel={missingReceipts.find((expense) => expense.id === attachExpenseId)?.vendor}
+      />
     </div>
   )
 }

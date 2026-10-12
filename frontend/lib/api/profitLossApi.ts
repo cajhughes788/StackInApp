@@ -3,10 +3,20 @@ import type {
   ProfitLossStatement,
 } from "@shared/schemas/profitLoss"
 
+import { ProfitLossInsightsSchema, type ProfitLossInsights } from "@shared/schemas/profitLossInsights"
+
 import { apiFetch, tryWrite } from "@/lib/api/core/client"
 import { API_ENDPOINTS } from "@/lib/api/core/endpoints"
 
 type ProfitLossResponse = { statements: ProfitLossStatement[] }
+
+export async function getProfitLossInsights(workspaceId: string): Promise<ProfitLossInsights> {
+  const data = await apiFetch<{ insights: unknown }>(
+    `${API_ENDPOINTS.profitLoss.insights}?workspaceId=${encodeURIComponent(workspaceId)}`,
+    { method: "GET" }
+  )
+  return ProfitLossInsightsSchema.parse(data.insights)
+}
 
 export async function getProfitLossStatements(
   workspaceId: string,

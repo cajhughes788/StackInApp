@@ -1,10 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { ChevronDown } from "lucide-react"
 
 import EntriesGrid from "@/components/entries-grid"
 import ExpensesGrid from "@/components/expenses-grid"
+import { useExpenseFocusStore } from "@/lib/stores/useExpenseFocusStore"
 
 /** The full entries / expenses grid, collapsed at the bottom of the
  * independent home page. The breakdowns above edit with the same pop-ups
@@ -19,6 +20,11 @@ export default function AllRecordsSection({ kind, count, defaultOpen = false, cl
     className?: string;
 }) {
     const [open, setOpen] = useState(defaultOpen);
+    // A "View expense" request opens the grid so the row can be shown.
+    const highlightExpenseId = useExpenseFocusStore((s) => s.highlightExpenseId);
+    useEffect(() => {
+        if (kind === "expenses" && highlightExpenseId) setOpen(true);
+    }, [kind, highlightExpenseId]);
     const title = kind === "entries" ? "All entries" : "All expenses";
     return (<section className={`${className} space-y-3`}>
       <button type="button" onClick={() => setOpen((current) => !current)} aria-expanded={open} className="flex w-full items-center justify-between gap-3 rounded-[22px] bg-card border border-card-border px-5 py-4 text-left">

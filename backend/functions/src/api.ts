@@ -325,6 +325,11 @@ export const getProfitLossStatements = withCorsAuth(async (req, res) => {
   await getProfitLossStatementsHandler(req, res)
 })
 
+export const getProfitLossInsights = withCorsAuth(async (req, res) => {
+  const { getProfitLossInsightsHandler } = await import("./routes/getProfitLossInsights.js")
+  await getProfitLossInsightsHandler(req, res)
+})
+
 export const generateProfitLossStatement = withCorsAuth(async (req, res) => {
   const { generateProfitLossStatementHandler } = await import(
     "./routes/generateProfitLossStatement.js"

@@ -23,8 +23,9 @@ import {
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore";
 import { useTaxProfileStore } from "@/lib/stores/useTaxProfileStore";
 import { usePayStubsStore } from "@/lib/stores/usePaystubsStore";
-import { getCalendarMonthBucketAt, getCalendarMonthBucketFromDate, getCurrentCalendarMonthPeriodAt, getCurrentEntryPeriod } from "@shared/payPeriods";
-import { useSelectedPeriod } from "@/lib/stores/usePeriodSelectionStore";
+import { getCalendarMonthBucketAt, getCalendarMonthBucketFromDate, getCurrentCalendarMonthPeriodAt, getCurrentEntryPeriod, listPeriodsBack } from "@shared/payPeriods";
+import { usePeriodSelectionStore, useSelectedPeriod } from "@/lib/stores/usePeriodSelectionStore";
+import { useExpenseFocusStore } from "@/lib/stores/useExpenseFocusStore";
 import ExpenseForm from "@/components/expense-form";
 import VenmoImportPanel from "@/components/venmo-import-panel";
 import { useReviewRequestNonce } from "@/lib/push/deepLinkStore";
@@ -85,6 +86,22 @@ export default function HomePage() {
         appliedReviewNonceRef.current = nonce;
         setMode(expensesReviewNonce != null ? "expenses" : "income");
     }, [expensesReviewNonce, incomeReviewNonce]);
+    // "View expense" from elsewhere (e.g. Receipts): show the Expenses tab
+    // for the expense's month, then hand off to the grid to scroll to it.
+    const expenseFocusRequest = useExpenseFocusStore((s) => s.request);
+    useEffect(() => {
+        if (!expenseFocusRequest || !settings || !activeWorkspace || !activeWorkspaceId) return;
+        if (expenseFocusRequest.workspaceId !== activeWorkspaceId) return;
+        const periods = listPeriodsBack(settings, activeWorkspace.type, activeWorkspace.createdAt ?? null);
+        const index = periods.findIndex((period) => getCalendarMonthBucketFromDate(period.start, settings) === expenseFocusRequest.month);
+        if (index >= 0) {
+            usePeriodSelectionStore.getState().setSelectedPeriod(activeWorkspaceId, index === 0 ? null : periods[index]);
+        }
+        setMode("expenses");
+        const focusStore = useExpenseFocusStore.getState();
+        focusStore.setHighlight(expenseFocusRequest.expenseId);
+        focusStore.clearRequest();
+    }, [expenseFocusRequest, settings, activeWorkspace, activeWorkspaceId]);
     // ---- ENTRIES STORE ----
     const entries = useEntriesData(activeWorkspaceId);
     const entriesState = useEntriesRenderState(activeWorkspaceId);

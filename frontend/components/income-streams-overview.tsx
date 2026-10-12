@@ -10,6 +10,9 @@ import { useExpensesData } from "@/lib/stores/useExpensesStore"
 import { useSettingsData, useSettingsRenderState } from "@/lib/stores/useSettingsStore"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import { computeIncomeGaugeForEntries } from "@shared/computeIncomeGauge"
+import { computeSafeToSpend, resolveTaxSetAsidePercent, SHOW_TAX_SET_ASIDE } from "@shared/taxSetAside"
+import { computeGoalPace } from "@shared/goalPace"
+import { useSelectedPeriod } from "@/lib/stores/usePeriodSelectionStore"
 import { categoryLabels } from "@/lib/incomeBreakdown"
 import {
   computeIncomeStreams,
@@ -60,7 +63,7 @@ function streamMeta(stream: IncomeStream): { label: string; icon: ReactNode } {
 
 const DAYS_SHOWN_COLLAPSED = 6
 
-// "Keep about" is an estimate, so it drops the cents.
+// "Keep about" / "Safe to spend" are estimates, so they drop the cents.
 const wholeDollars = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })
 
 function formatDay(date: string): string {
@@ -362,6 +365,11 @@ export default function IncomeStreamsOverview() {
       ? settings.independent.incomeTargetPerMonth
       : null
   const goalShare = targetIncome ? total / targetIncome : 0
+  // Month-end projection — only while viewing the current month (a picked
+  // past period is in the selection store; null means current).
+  const selectedPeriod = useSelectedPeriod(activeWorkspaceId)
+  const goalPace =
+    targetIncome && selectedPeriod === null ? computeGoalPace(total, targetIncome, settings) : null
   const editContext = useMemo<StreamEditContext | null>(
     () =>
       activeWorkspaceId
@@ -375,6 +383,16 @@ export default function IncomeStreamsOverview() {
     [activeWorkspaceId, entries, settings]
   )
   const totalExpenses = useMemo(() => expenses.reduce((sum, expense) => sum + (expense.amount ?? 0), 0), [expenses])
+  const taxSetAsidePercent = resolveTaxSetAsidePercent(settings?.independent?.taxSetAsidePercent)
+  const { profit, taxSetAside, safeToSpend } = computeSafeToSpend(total, totalExpenses, taxSetAsidePercent)
+  // Hourly rate after expenses — only with hours tracking on (Settings) and
+  // hours logged this period.
+  const trackHours = settings?.independent?.trackHours === true
+  const totalHours = useMemo(
+    () => entries.reduce((sum, entry) => sum + (Number(entry.independent?.hours) || 0), 0),
+    [entries]
+  )
+  const profitPerHour = trackHours && totalHours > 0 ? profit / totalHours : null
 
   if (
     workspaceState.status !== "ready" ||
@@ -407,13 +425,23 @@ export default function IncomeStreamsOverview() {
             <span className="block text-4xl font-semibold tracking-tight tabular-nums text-foreground sm:text-5xl">
               {formatCurrency(total)}
             </span>
-            <span className="mt-1 block text-sm text-muted-foreground">
-              Keep about{" "}
-              <span className="font-medium tabular-nums text-foreground">
-                {wholeDollars.format(total - totalExpenses)}
-              </span>{" "}
-              after expenses
-            </span>
+            {SHOW_TAX_SET_ASIDE ? (
+              <span className="mt-1 block text-sm text-muted-foreground">
+                Safe to spend about{" "}
+                <span className="font-medium tabular-nums text-foreground">
+                  {wholeDollars.format(safeToSpend)}
+                </span>{" "}
+                after expenses and a {taxSetAsidePercent}% tax set-aside
+              </span>
+            ) : (
+              <span className="mt-1 block text-sm text-muted-foreground">
+                Keep about{" "}
+                <span className="font-medium tabular-nums text-foreground">
+                  {wholeDollars.format(profit)}
+                </span>{" "}
+                after expenses
+              </span>
+            )}
           </span>
           <span className="flex shrink-0 items-center gap-1 pb-1.5 text-sm font-medium text-primary">
             {targetIncome ? `${Math.round(goalShare * 100)}% of goal` : "Details"}
@@ -432,6 +460,15 @@ export default function IncomeStreamsOverview() {
                   <span>{formatCurrency(total)}</span>
                   <span>Goal {formatCurrency(targetIncome)}</span>
                 </div>
+                {goalPace ? (
+                  <p className="pt-1 text-sm text-muted-foreground">
+                    {goalShare >= 1 ? "Goal reached — on pace for " : "On pace for "}
+                    <span className="font-medium tabular-nums text-foreground">
+                      {wholeDollars.format(goalPace.projected)}
+                    </span>{" "}
+                    by month end ({Math.round(goalPace.projectedShare * 100)}% of goal)
+                  </p>
+                ) : null}
               </div>
             ) : null}
             <dl className="grid grid-cols-3 divide-x divide-border/70 rounded-2xl bg-muted py-3 text-center">
@@ -448,6 +485,40 @@ export default function IncomeStreamsOverview() {
                 <dd className="text-lg font-semibold tabular-nums text-foreground">{formatCurrency(dayStats.avgPerDay)}</dd>
               </div>
             </dl>
+            <dl className="space-y-1.5 text-sm">
+              <div className="flex justify-between gap-3">
+                <dt className="text-muted-foreground">Income</dt>
+                <dd className="tabular-nums text-foreground">{formatCurrency(total)}</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-muted-foreground">Expenses</dt>
+                <dd className="tabular-nums text-foreground">−{formatCurrency(totalExpenses)}</dd>
+              </div>
+              {SHOW_TAX_SET_ASIDE ? (
+                <div className="flex justify-between gap-3">
+                  <dt className="text-muted-foreground">Set aside for taxes ({taxSetAsidePercent}%)</dt>
+                  <dd className="tabular-nums text-foreground">−{formatCurrency(taxSetAside)}</dd>
+                </div>
+              ) : null}
+              <div className="flex justify-between gap-3 border-t border-border/70 pt-1.5 font-medium">
+                <dt className="text-foreground">{SHOW_TAX_SET_ASIDE ? "Safe to spend" : "You keep"}</dt>
+                <dd className="tabular-nums text-foreground">
+                  {formatCurrency(SHOW_TAX_SET_ASIDE ? safeToSpend : profit)}
+                </dd>
+              </div>
+            </dl>
+            {profitPerHour !== null ? (
+              <p className="text-sm text-muted-foreground">
+                You made{" "}
+                <span className="font-medium tabular-nums text-foreground">{formatCurrency(profitPerHour)}/hr</span>{" "}
+                after expenses over {Math.round(totalHours * 10) / 10} hours.
+              </p>
+            ) : null}
+            {SHOW_TAX_SET_ASIDE ? (
+              <p className="text-xs text-muted-foreground">
+                Tax set-aside is a rough estimate, not tax advice. Change the % in Settings.
+              </p>
+            ) : null}
         </Expand>
       </section>
 

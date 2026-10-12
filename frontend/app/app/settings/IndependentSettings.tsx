@@ -5,6 +5,7 @@ import { Info } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { IndependentSettingsType } from "@shared/schemas/settings"
 import { isCashSourceEnabled, isPosSalesSourceEnabled } from "@shared/entryVisibility"
+import { SHOW_TAX_SET_ASIDE, TAX_SET_ASIDE_DEFAULT_PERCENT } from "@shared/taxSetAside"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Switch } from "@/components/ui/switch"
@@ -110,9 +111,69 @@ export default function IndependentSettingsSection({
             />
           </div>
 
+          {SHOW_TAX_SET_ASIDE ? (
+          <div className="space-y-2">
+            <Label htmlFor="taxSetAsidePercent">Set aside for taxes (% of profit)</Label>
+            <Input
+              id="taxSetAsidePercent"
+              type="number"
+              step="1"
+              min="0"
+              max="100"
+              placeholder={`${TAX_SET_ASIDE_DEFAULT_PERCENT} (default)`}
+              value={local.taxSetAsidePercent ?? ""}
+              onChange={(e) => {
+                const raw = e.target.value
+                if (raw === "") return update("taxSetAsidePercent", undefined, "deferred")
+                update("taxSetAsidePercent", Math.min(100, Math.max(0, Number(raw))), "deferred")
+              }}
+            />
+          </div>
+          ) : null}
+
           <p className="text-sm text-muted-foreground">
             Your home screen shows each month’s income as a % of the goal and expenses as a % of the budget.
+            {SHOW_TAX_SET_ASIDE
+              ? " “Safe to spend” is your profit minus the share you set aside for taxes — a rough estimate, not tax advice."
+              : null}
           </p>
+        </CardContent>
+      </Card>
+
+      {/* WEEKLY SUMMARY */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Notifications</CardTitle>
+        </CardHeader>
+
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <Label>Weekly summary</Label>
+              <p className="text-sm text-muted-foreground">
+                Monday morning: what you earned and kept last week, and anything that needs you.
+              </p>
+            </div>
+
+            <Switch
+              checked={local.weeklyDigest ?? true} // unset = on
+              onCheckedChange={(v) => update("weeklyDigest", v, "immediate")}
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <Label>Missing receipts in Needs you</Label>
+              <p className="text-sm text-muted-foreground">
+                Remind you about expenses over $75 that don&apos;t have a receipt yet.
+              </p>
+            </div>
+
+            <Switch
+              checked={local.missingReceiptsInNeedsYou ?? true} // unset = on
+              onCheckedChange={(v) => update("missingReceiptsInNeedsYou", v, "immediate")}
+            />
+          </div>
         </CardContent>
       </Card>
 

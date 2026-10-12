@@ -13,6 +13,9 @@ import {
 import AppLoader from "@/components/app-loader"
 import StackInHeader from "@/components/stackin-header"
 import HoursWorkedCard from "@/components/hours-worked-card"
+import MonthSoFarCard from "@/components/month-so-far-card"
+import IncomePatterns from "@/components/income-patterns"
+import { useProfitLossInsights } from "@/hooks/useProfitLossInsights"
 import {
   Accordion,
   AccordionContent,
@@ -425,6 +428,8 @@ export default function ProfitLossPage() {
   )
   const hydrateFromCacheOnce = useProfitLossStore((s) => s.hydrateFromCacheOnce)
   const refreshFromBackend = useProfitLossStore((s) => s.refreshFromBackend)
+  // "This month so far" and "Your patterns" — a small separate summary.
+  const insights = useProfitLossInsights(activeWorkspaceId, activeWorkspace?.type === "independent")
 
   const statements = entry?.statements ?? []
   const hasHydrated = entry?.hasHydrated ?? false
@@ -940,6 +945,8 @@ export default function ProfitLossPage() {
               </p>
             </div>
 
+            {insights ? <MonthSoFarCard insights={insights} /> : null}
+
             <div className="grid grid-cols-3 rounded-full bg-muted p-1" role="group" aria-label="Statement period">
               {periodOptions.map((option) => (
                 <button
@@ -1016,6 +1023,8 @@ export default function ProfitLossPage() {
                 </ul>
               ) : null}
             </section>
+
+            {insights ? <IncomePatterns insights={insights} /> : null}
           </>
         )}
       </div>

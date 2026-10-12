@@ -83,6 +83,8 @@ export const API_ENDPOINTS = {
   profitLoss: {
     get: "https://getprofitlossstatements-3lc2fwdgwq-uc.a.run.app",
     generate: "https://generateprofitlossstatement-3lc2fwdgwq-uc.a.run.app",
+    // New function — confirm the URL in the Firebase console after first deploy.
+    insights: "https://getprofitlossinsights-3lc2fwdgwq-uc.a.run.app",
   },
 
   subscription: {

@@ -11,3 +11,23 @@ export function needsReceiptForAuditDefense(
 ): boolean {
   return amount > RECEIPT_REQUIRED_THRESHOLD && !receiptAssetId
 }
+
+// "Audit-ready" score: of the expenses over the threshold, how many have a
+// receipt. null percent when nothing is over the threshold (nothing to score).
+export function computeReceiptCoverage(
+  expenses: ReadonlyArray<{ amount?: number | null; receiptAssetId?: string | null }>
+): { needed: number; covered: number; missing: number; percent: number | null } {
+  let needed = 0
+  let covered = 0
+  for (const expense of expenses) {
+    if ((expense.amount ?? 0) <= RECEIPT_REQUIRED_THRESHOLD) continue
+    needed += 1
+    if (expense.receiptAssetId) covered += 1
+  }
+  return {
+    needed,
+    covered,
+    missing: needed - covered,
+    percent: needed > 0 ? Math.round((covered / needed) * 100) : null,
+  }
+}

@@ -77,6 +77,10 @@ export function deepLinkRequestFromPushData(data: Record<string, unknown> | unde
   if (deepLink.startsWith("stackin://plaid/pending/")) {
     return { workspaceId, route: "/app/home", review: "expenses" }
   }
+  if (deepLink.startsWith("stackin://home")) {
+    // Weekly summary (sendWeeklyDigest.ts).
+    return { workspaceId, route: "/app/home", review: null }
+  }
   if (deepLink.startsWith("stackin://plaid/reconnect")) {
     // Reconnecting a bank happens on the Bank connections page.
     return { workspaceId, route: "/app/banks", review: null }

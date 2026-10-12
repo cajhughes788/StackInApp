@@ -16,6 +16,7 @@ import { formatCurrency, parseLocalDate } from "@/lib/helpers"
 import { thBase, tdBase } from "@/lib/tableStyles"
 import { cn } from "@/lib/utils"
 import AttachReceiptDialog from "@/components/attach-receipt-dialog"
+import { useExpenseFocusStore } from "@/lib/stores/useExpenseFocusStore"
 import SyncStatusIndicator from "@/components/sync-status-indicator"
 import { GridSkeleton } from "@/components/loading-skeletons"
 import { needsReceiptForAuditDefense, RECEIPT_REQUIRED_THRESHOLD } from "@shared/receiptRequirements"
@@ -145,6 +146,29 @@ export default function ExpensesGrid() {
     [expenses]
   )
 
+  // "View expense" (useExpenseFocusStore): once the row is rendered, scroll
+  // to it and flash it briefly. Waits a tick so AllRecordsSection has
+  // un-hidden the grid before scrolling.
+  const highlightExpenseId = useExpenseFocusStore((s) => s.highlightExpenseId)
+  const [flashExpenseId, setFlashExpenseId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!highlightExpenseId || !sorted.some((e) => e.id === highlightExpenseId)) return
+    const scrollTimer = window.setTimeout(() => {
+      const row = gridRootRef.current?.querySelector(
+        `[data-expense-id="${CSS.escape(highlightExpenseId)}"]`
+      )
+      row?.scrollIntoView({ behavior: "smooth", block: "center" })
+      setFlashExpenseId(highlightExpenseId)
+      useExpenseFocusStore.getState().setHighlight(null)
+    }, 150)
+    return () => window.clearTimeout(scrollTimer)
+  }, [highlightExpenseId, sorted])
+  useEffect(() => {
+    if (!flashExpenseId) return
+    const clearTimer = window.setTimeout(() => setFlashExpenseId(null), 2500)
+    return () => window.clearTimeout(clearTimer)
+  }, [flashExpenseId])
+
   const totalAmount = useMemo(() => {
     return sorted.reduce((acc, e) => acc + (e.amount ?? 0), 0)
   }, [sorted])
@@ -190,7 +214,13 @@ export default function ExpensesGrid() {
                     e.id ??
                     `${e.date ?? "no-date"}-${e.vendor ?? "no-vendor"}-${e.amount ?? 0}-${index}`
                   }
-                  className="bg-card even:bg-secondary/55 divide-x divide-border"
+                  data-expense-id={e.id}
+                  className={cn(
+                    "divide-x divide-border transition-colors duration-700",
+                    flashExpenseId != null && flashExpenseId === e.id
+                      ? "bg-emerald-100 dark:bg-emerald-500/15"
+                      : "bg-card even:bg-secondary/55"
+                  )}
                 >
                   {/* NOTES BUBBLE — always interactive so a receipt can be
                       attached to any expense after the fact, regardless of

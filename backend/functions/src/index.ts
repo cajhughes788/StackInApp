@@ -18,6 +18,7 @@ export {
   generatePayStub,
   generateCurrentPayStub,
   getProfitLossStatements,
+  getProfitLossInsights,
   generateProfitLossStatement,
   deleteUserData,
   createExpense,
@@ -73,5 +74,7 @@ export { generateProfitLossStatementsMonthly } from "./scheduled/generateProfitL
 export { deleteScheduledAccounts } from "./scheduled/deleteScheduledAccounts"
 export { cleanupOrphanReceiptAssets } from "./scheduled/cleanupOrphanReceiptAssets"
 export { flagStalePlaidItemsDaily } from "./scheduled/flagStalePlaidItemsDaily"
+export { sendWeeklyDigest } from "./scheduled/sendWeeklyDigest"
+export { sendOwnerReportWeekly } from "./scheduled/sendOwnerReportWeekly"
 export { notifySupportReportCreated } from "./triggers/notifySupportReportCreated"
 export { sendContentLogSignupRow } from "./triggers/sendContentLogSignupRow"
