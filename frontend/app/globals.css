@@ -38,116 +38,119 @@
   --stackin-z-message: 10000;
   --stackin-z-modal-overlay: 11000;
   --stackin-z-modal: 11010;
-  --background: oklch(0.96 0.005 260);
-  --foreground: oklch(0.18 0.01 260);
+  /* 521 brand: charcoal #161B1E, off-white #ECEBE6, green #2FA866 */
+  --background: #F4F3EF;
+  --foreground: #161B1E;
 
-  --card: oklch(0.99 0.003 260);
-  --card-foreground: oklch(0.18 0.01 260);
+  --card: #FBFAF7;
+  --card-foreground: #161B1E;
 
-  --popover: oklch(0.99 0.003 260);
-  --popover-foreground: oklch(0.18 0.01 260);
+  --popover: #FFFFFF;
+  --popover-foreground: #161B1E;
 
-  --primary: #2BAE8A;
-  --primary-foreground: oklch(0.08 0.01 260);
+  /* Dark text on green: off-white on #2FA866 fails contrast */
+  --primary: #2FA866;
+  --primary-foreground: #0B1F14;
 
-  --secondary: oklch(0.92 0.006 260);
-  --secondary-foreground: oklch(0.18 0.01 260);
+  --secondary: #E9E8E3;
+  --secondary-foreground: #161B1E;
 
-  --muted: oklch(0.93 0.004 260);
-  --muted-foreground: oklch(0.65 0 0);
+  --muted: #EFEEE9;
+  --muted-foreground: #5F6864;
 
-  --accent: oklch(0.95 0.02 169.64);
-  --accent-foreground: oklch(0.18 0.01 260);
+  --accent: #E1F1E7;
+  --accent-foreground: #161B1E;
 
-  --destructive: oklch(0.62 0.23 25);
-  --destructive-foreground: oklch(0.98 0 0);
+  --destructive: oklch(0.58 0.2 25);
+  --destructive-foreground: #FFFFFF;
 
-  --border: #2BAE8A;
-  --input: oklch(0.84 0.008 260);
-  --ring: #2BAE8A;
-  --soft-surface: oklch(0.84 0.008 260);
-  --soft-surface-foreground: oklch(0.18 0.01 260);
-  --soft-surface-muted: oklch(0.55 0 0);
+  /* Neutral hairlines; green is reserved for money in and primary actions */
+  --border: #DEDCD5;
+  --input: #D3D1CA;
+  --ring: #2FA866;
+  --soft-surface: #ECEBE6;
+  --soft-surface-foreground: #161B1E;
+  --soft-surface-muted: #5F6864;
 
-  --chart-1: #7c3aed;
-  --chart-2: #0ea5e9;
-  --chart-3: #2563eb;
-  --chart-4: #facc15;
-  --chart-5: #f59e0b;
+  --chart-1: #2FA866;
+  --chart-2: #3B82C4;
+  --chart-3: #C98A2B;
+  --chart-4: #7A6BC8;
+  --chart-5: #C8574A;
 
-  --radius: 0.625rem;
+  --radius: 0.75rem;
 
-  --sidebar: oklch(0.92 0.006 260);
-  --sidebar-foreground: oklch(0.18 0.01 260);
-  --sidebar-primary: #2BAE8A;
-  --sidebar-primary-foreground: oklch(0.08 0.01 260);
-  --sidebar-accent: oklch(0.95 0.02 169.64);
-  --sidebar-accent-foreground: oklch(0.18 0.01 260);
-  --sidebar-border: #2BAE8A;
-  --sidebar-ring: #2BAE8A;
+  --sidebar: #ECEBE6;
+  --sidebar-foreground: #161B1E;
+  --sidebar-primary: #2FA866;
+  --sidebar-primary-foreground: #0B1F14;
+  --sidebar-accent: #E1F1E7;
+  --sidebar-accent-foreground: #161B1E;
+  --sidebar-border: #DEDCD5;
+  --sidebar-ring: #2FA866;
 }
 
 .dark {
-  --background: oklch(0.16 0.01 260);
-  --foreground: oklch(0.98 0 0);
+  --background: #161B1E;
+  --foreground: #ECEBE6;
 
-  --card: oklch(0.28 0.01 260);
-  --card-foreground: oklch(0.98 0 0);
+  --card: #1F262A;
+  --card-foreground: #ECEBE6;
 
-  --popover: oklch(0.30 0.01 260);
-  --popover-foreground: oklch(0.98 0 0);
+  --popover: #242C30;
+  --popover-foreground: #ECEBE6;
 
-  --primary: #2BAE8A;
-  --primary-foreground: oklch(0.08 0.01 260);
+  --primary: #2FA866;
+  --primary-foreground: #0B1F14;
 
-  --secondary: oklch(0.32 0.01 260);
-  --secondary-foreground: oklch(0.98 0 0);
+  --secondary: #2A3236;
+  --secondary-foreground: #ECEBE6;
 
-  --muted: oklch(0.33 0.01 260);
-  --muted-foreground: oklch(0.78 0 0);
+  --muted: #262E33;
+  --muted-foreground: #8C948F;
 
-  --accent: oklch(0.34 0.03 169.64);
-  --accent-foreground: oklch(0.98 0 0);
+  --accent: #1D3528;
+  --accent-foreground: #ECEBE6;
 
-  --destructive: oklch(0.58 0.23 25);
-  --destructive-foreground: oklch(0.98 0 0);
+  --destructive: oklch(0.62 0.19 25);
+  --destructive-foreground: #FFFFFF;
 
-  --border: #2BAE8A;
-  --input: oklch(0.84 0.008 260);
-  --ring: #2BAE8A;
-  --soft-surface: oklch(0.84 0.008 260);
-  --soft-surface-foreground: oklch(0.18 0.01 260);
-  --soft-surface-muted: oklch(0.55 0 0);
+  --border: #2C3438;
+  --input: #343D42;
+  --ring: #2FA866;
+  --soft-surface: #262E33;
+  --soft-surface-foreground: #ECEBE6;
+  --soft-surface-muted: #8C948F;
 
-  --chart-1: #6366f1;
-  --chart-2: #22d3ee;
-  --chart-3: #f59e0b;
-  --chart-4: #9333ea;
-  --chart-5: #f43f5e;
+  --chart-1: #2FA866;
+  --chart-2: #5B9BD5;
+  --chart-3: #D9A04A;
+  --chart-4: #9488DA;
+  --chart-5: #DB6F62;
 
-  --sidebar: oklch(0.26 0.01 260);
-  --sidebar-foreground: oklch(0.98 0 0);
-  --sidebar-primary: #2BAE8A;
-  --sidebar-primary-foreground: oklch(0.08 0.01 260);
-  --sidebar-accent: oklch(0.32 0.01 260);
-  --sidebar-accent-foreground: oklch(0.98 0 0);
-  --sidebar-border: #2BAE8A;
-  --sidebar-ring: #2BAE8A;
+  --sidebar: #121619;
+  --sidebar-foreground: #ECEBE6;
+  --sidebar-primary: #2FA866;
+  --sidebar-primary-foreground: #0B1F14;
+  --sidebar-accent: #2A3236;
+  --sidebar-accent-foreground: #ECEBE6;
+  --sidebar-border: #2C3438;
+  --sidebar-ring: #2FA866;
 }
 
-/* StackIn green (#2BAE8A at 500) replaces Tailwind's emerald scale app-wide */
+/* 521 green (#2FA866 at 500) replaces Tailwind's emerald scale app-wide */
 @theme {
-  --color-emerald-50: #EFFCF6;
-  --color-emerald-100: #D7F7EA;
-  --color-emerald-200: #B4EFD9;
-  --color-emerald-300: #8BE0C2;
-  --color-emerald-400: #59CBA7;
-  --color-emerald-500: #2BAE8A;
-  --color-emerald-600: #2A9375;
-  --color-emerald-700: #26755E;
-  --color-emerald-800: #215C4A;
-  --color-emerald-900: #1F4B3D;
-  --color-emerald-950: #102A22;
+  --color-emerald-50: #EDF8F1;
+  --color-emerald-100: #D3EFDE;
+  --color-emerald-200: #A9DFC0;
+  --color-emerald-300: #7ACB9E;
+  --color-emerald-400: #4EB87F;
+  --color-emerald-500: #2FA866;
+  --color-emerald-600: #268C55;
+  --color-emerald-700: #207046;
+  --color-emerald-800: #1C5939;
+  --color-emerald-900: #184A30;
+  --color-emerald-950: #0B2A1A;
 }
 
 @theme inline {
@@ -211,10 +214,6 @@
 
   .app-soft-surface-muted {
     color: var(--soft-surface-muted);
-  }
-
-  .dark input[type="number"] {
-    color-scheme: light;
   }
 
   [data-stackin-date-input="true"] {
@@ -338,12 +337,7 @@
 
 /* Custom styles for spreadsheet grid */
 .grid-row-even {
-  background-color: #f8fafc;
-  /* Slate 50 - zebra striping */
-}
-
-.dark .grid-row-even {
-  background-color: color-mix(in oklch, var(--card) 92%, white 8%);
+  background-color: var(--muted);
 }
 
 /* Numeric cell alignment */
@@ -371,7 +365,6 @@
     width: 100%;
     max-width: 800px;
     margin: 0 auto;
-    background: #ffffff;
     overflow: visible !important;
     height: auto !important;
     box-shadow: none !important;
@@ -420,46 +413,53 @@
 }
 
 .overflow-x-auto::-webkit-scrollbar-thumb {
-  background-color: #a3a3a3;
+  background-color: var(--muted-foreground);
   border-radius: 4px;
 }
 
-/* StackIn mark loader: the three ledger books settle onto the stack in turn */
-.stackin-mark-book {
-  transform-box: view-box;
-  animation: stackin-book-settle 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite both;
+/* 521 mark loader: the digits fade in, then the green bar draws across under the 1 */
+.stackin-mark-digits {
+  animation: stackin-digits-fade 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite both;
 }
 
-.stackin-mark-book-bottom {
-  animation-delay: 0s;
+.stackin-mark-bar {
+  transform-box: fill-box;
+  transform-origin: left center;
+  animation: stackin-bar-draw 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite both;
 }
 
-.stackin-mark-book-middle {
-  animation-delay: 0.18s;
-}
-
-.stackin-mark-book-top {
-  animation-delay: 0.36s;
-}
-
-@keyframes stackin-book-settle {
+@keyframes stackin-digits-fade {
   0% {
     opacity: 0;
-    transform: translateY(-10px);
   }
-  22%,
-  78% {
+  18%,
+  82% {
     opacity: 1;
-    transform: translateY(0);
   }
   100% {
     opacity: 0;
-    transform: translateY(0);
+  }
+}
+
+@keyframes stackin-bar-draw {
+  0%,
+  12% {
+    transform: scaleX(0);
+  }
+  40%,
+  82% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scaleX(1);
+    opacity: 0;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .stackin-mark-book {
+  .stackin-mark-digits,
+  .stackin-mark-bar {
     animation: none;
   }
 }

@@ -5,13 +5,10 @@ type StackInMarkProps = {
   className?: string
 }
 
-// The StackIn app icon: three ledger books on a navy tile. Paths mirror
-// public/brand/stackin-icon.svg. When animated, the books settle onto the
-// stack bottom-up (see .stackin-mark-book in app/globals.css).
-export default function StackInMark({ size = 64, animated = false, label = "StackIn", className }: StackInMarkProps) {
-  const book = (position: "top" | "middle" | "bottom") =>
-    animated ? `stackin-mark-book stackin-mark-book-${position}` : undefined
-
+// The 521 app icon: the "521" wordmark with a green bar under the 1, on a
+// charcoal tile. Paths mirror public/brand/521-icon.svg. When animated, the
+// digits fade in and the bar draws across (see .stackin-mark-* in app/globals.css).
+export default function StackInMark({ size = 64, animated = false, label = "521", className }: StackInMarkProps) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -22,22 +19,22 @@ export default function StackInMark({ size = 64, animated = false, label = "Stac
       aria-label={label}
       className={className}
     >
-      <rect width="64" height="64" rx="14" fill="#0E1A2B" />
-      <path
-        className={book("top")}
-        d="M16.4 16.8H18.9V26.2H16.4A2.6 2.6 0 0 1 13.8 23.6V19.4A2.6 2.6 0 0 1 16.4 16.8ZM20.2 16.8H49.6A2.6 2.6 0 0 1 52.2 19.4V23.6A2.6 2.6 0 0 1 49.6 26.2H20.2V16.8Z"
-        fill="#2BAE8A"
-      />
-      <path
-        className={book("middle")}
-        d="M13.5 26.8H16V36.2H13.5A2.6 2.6 0 0 1 10.9 33.6V29.4A2.6 2.6 0 0 1 13.5 26.8ZM17.3 26.8H45.7A2.6 2.6 0 0 1 48.3 29.4V33.6A2.6 2.6 0 0 1 45.7 36.2H17.3V26.8Z"
-        fill="#C5CCD5"
-      />
-      <path
-        className={book("bottom")}
-        d="M16.1 36.8H17.8V46.2H16.1A2.6 2.6 0 0 1 13.5 43.6V39.4A2.6 2.6 0 0 1 16.1 36.8ZM19.1 36.8H49A2.6 2.6 0 0 1 51.6 39.4V43.6A2.6 2.6 0 0 1 49 46.2H19.1V36.8Z"
-        fill="#FFFFFF"
-      />
+      <rect width="64" height="64" rx="14" fill="#161B1E" />
+      <g transform="translate(9.9 36.52) scale(0.2221)">
+        <path
+          className={animated ? "stackin-mark-digits" : undefined}
+          d="M40.50 1.20L40.50 1.20Q28.80 1.20 20.75-1.75Q12.70-4.70 8.55-9.95Q4.40-15.20 4.40-22L4.40-22L22.40-22Q22.50-18.70 24.60-16.30Q26.70-13.90 30.35-12.60Q34-11.30 38.70-11.30L38.70-11.30Q43.10-11.30 46.80-12.60Q50.50-13.90 52.75-16.45Q55-19 55-22.90L55-22.90Q55-26.70 53.05-29.20Q51.10-31.70 47.55-32.95Q44-34.20 39.10-34.20L39.10-34.20Q35.60-34.20 32.65-33.55Q29.70-32.90 27.50-31.60Q25.30-30.30 23.90-28.30L23.90-28.30L8-30.30L11.60-68.80L68.30-68.80L68.30-53.60L26-53.60L24.70-40.70Q26.30-41.80 29.25-42.95Q32.20-44.10 36.20-45Q40.20-45.90 45-45.90L45-45.90Q53.80-45.90 60.35-43.25Q66.90-40.60 70.60-35.45Q74.30-30.30 74.30-22.60L74.30-22.60Q74.30-15.70 70.20-10.30Q66.10-4.90 58.50-1.85Q50.90 1.20 40.50 1.20ZM150 0L82 0L82-4.40Q82-9.40 84.40-13.40Q86.80-17.40 90.75-20.75Q94.70-24.10 99.45-27Q104.20-29.90 108.90-32.60L108.90-32.60Q114.30-35.70 119-38.25Q123.70-40.80 126.70-43.45Q129.70-46.10 129.70-49.20L129.70-49.20Q129.70-51.60 128.20-53.40Q126.70-55.20 123.70-56.20Q120.70-57.20 115.80-57.20L115.80-57.20Q110.90-57.20 107.55-55.80Q104.20-54.40 102.55-52.10Q100.90-49.80 100.90-47L100.90-47L100.90-44.60L82.60-44.60Q82.50-45.30 82.45-45.85Q82.40-46.40 82.40-47.10L82.40-47.10Q82.40-54.30 86.55-59.35Q90.70-64.40 98.60-67.20Q106.50-70 117.80-70L117.80-70Q124.90-70 130.65-68.70Q136.40-67.40 140.60-64.90Q144.80-62.40 147-58.60Q149.20-54.80 149.20-49.70L149.20-49.70Q149.20-44.80 146.75-40.80Q144.30-36.80 140.25-33.55Q136.20-30.30 131.35-27.70Q126.50-25.10 121.70-22.90L121.70-22.90Q118.90-21.60 116.10-20.35Q113.30-19.10 111.05-17.90Q108.80-16.70 107.40-15.40L107.40-15.40L150-15.40L150 0ZM194.60 0L174.60 0L174.60 -48.4L154.00 -48.4L154.00 -58.6Q159.80 -58.9 165.80 -60.25Q171.80 -61.6 177.50 -63.85Q183.20 -66.1 187.80 -68.9L194.60 -68.9Z"
+          fill="#ECEBE6"
+        />
+        <rect
+          className={animated ? "stackin-mark-bar" : undefined}
+          x="154"
+          y="11"
+          width="40.6"
+          height="11"
+          fill="#2FA866"
+        />
+      </g>
     </svg>
   )
 }

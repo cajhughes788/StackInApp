@@ -12,7 +12,7 @@ type AppLoaderProps = {
 
 export default function AppLoader({
   className,
-  label = "Loading StackIn...",
+  label = "Loading 521...",
   fullscreen = true,
   size = 280,
 }: AppLoaderProps) {
@@ -20,7 +20,7 @@ export default function AppLoader({
     <div
       className={cn(
         fullscreen
-          ? "min-h-screen bg-[#0E1A2B] px-6 py-10"
+          ? "min-h-screen bg-[#161B1E] px-6 py-10"
           : "min-h-[16rem] bg-transparent px-4 py-6",
         "flex items-center justify-center",
         className,

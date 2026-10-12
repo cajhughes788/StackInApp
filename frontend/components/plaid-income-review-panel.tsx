@@ -140,7 +140,7 @@ function IncomeReviewCard({
   const displayName = resolvePlaidDisplayName(transaction.merchantName, transaction.rawName)
 
   return (
-    <div className="space-y-3 rounded-xl border border-muted bg-card p-4">
+    <div className="space-y-3 rounded-[18px] bg-card p-4">
       <div className="flex items-start justify-between gap-3">
         {/* min-w-0 + break-words: a long unbroken bank descriptor must wrap
             instead of pushing the amount off-screen and making the page
@@ -168,7 +168,7 @@ function IncomeReviewCard({
             ) : null}
           </div>
         </div>
-        <div className="shrink-0 font-semibold text-emerald-700">+{formatCurrency(transaction.amount)}</div>
+        <div className="shrink-0 font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">+{formatCurrency(transaction.amount)}</div>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
@@ -176,7 +176,7 @@ function IncomeReviewCard({
           value={choice.incomeCategory}
           onValueChange={(value) => onChoiceChange({ incomeCategory: value as IncomeCategory })}
         >
-          <SelectTrigger aria-label="Income category">
+          <SelectTrigger aria-label="Income category" className="w-full rounded-xl border-0 bg-muted shadow-none">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -191,7 +191,7 @@ function IncomeReviewCard({
           value={choice.paymentMethod}
           onValueChange={(value) => onChoiceChange({ paymentMethod: value as PaymentMethod })}
         >
-          <SelectTrigger aria-label="Paid via">
+          <SelectTrigger aria-label="Paid via" className="w-full rounded-xl border-0 bg-muted shadow-none">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -215,12 +215,12 @@ function IncomeReviewCard({
         />
       ) : null}
 
-      <div className="flex justify-end gap-1">
-        <Button type="button" variant="outline" size="icon" aria-label="Add as income" onClick={onConfirm}>
-          <Check className="h-4 w-4" />
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" size="sm" className="rounded-full px-4 font-semibold" onClick={onConfirm}>
+          <Check className="h-4 w-4" /> It&apos;s income
         </Button>
-        <Button type="button" variant="outline" size="icon" aria-label="Not income" onClick={onDismiss}>
-          <X className="h-4 w-4" />
+        <Button type="button" variant="ghost" size="sm" className="rounded-full px-4" onClick={onDismiss}>
+          Not income
         </Button>
       </div>
     </div>
@@ -434,9 +434,10 @@ export default function PlaidIncomeReviewPanel() {
       <button
         type="button"
         onClick={() => setCollapsed((current) => !current)}
-        className="flex w-full items-center justify-between rounded-lg border border-muted bg-card px-3 py-2 text-sm font-medium"
+        className="flex w-full items-center justify-between px-1 text-sm font-medium text-muted-foreground"
+        aria-expanded={!collapsed}
       >
-        <span>Bank deposits to review{transactions.length ? ` (${transactions.length})` : ""}</span>
+        <span>Deposits{transactions.length ? ` · ${transactions.length}` : ""}</span>
         {collapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
       </button>
 
@@ -445,7 +446,7 @@ export default function PlaidIncomeReviewPanel() {
         // (expectsPending) — see the early return above.
         <div className="space-y-3" aria-hidden="true">
           {[0, 1].map((i) => (
-            <div key={i} className="space-y-3 rounded-xl border border-muted bg-card p-4">
+            <div key={i} className="space-y-3 rounded-[18px] bg-card p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="space-y-2">
                   <Skeleton className="h-4 w-32" />
@@ -477,7 +478,7 @@ export default function PlaidIncomeReviewPanel() {
       ) : null}
 
       {selectedIds.size > 0 ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-muted bg-muted/40 p-3">
+        <div className="flex flex-wrap items-center gap-2 rounded-[18px] bg-card p-3">
           <span className="text-sm font-medium">{selectedIds.size} selected</span>
           <Button type="button" size="sm" disabled={isBulkWorking} onClick={() => void handleBulkDecision(true)}>
             <Check className="h-4 w-4 mr-1" /> Add as income

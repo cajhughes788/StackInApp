@@ -14,12 +14,12 @@ export type StackInLoaderWebProps = {
 
 export default function StackInLoaderWeb({
   className,
-  label = "Loading StackIn...",
+  label = "Loading 521...",
   showLabel = true,
   size = 260,
   background = "transparent",
-  cardBackground = "#0E1A2B",
-  textColor = "#C5CCD5",
+  cardBackground = "#161B1E",
+  textColor = "#C9C7C0",
 }: StackInLoaderWebProps) {
   return (
     <div

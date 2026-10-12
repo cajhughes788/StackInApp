@@ -44,11 +44,11 @@ export default function EarningsPositionBreakdown({ lines }: { lines: PositionBr
         return null;
     const totalHours = lines.reduce((sum, l) => sum + l.hours, 0);
     const totalPay = lines.reduce((sum, l) => sum + l.pay, 0);
-    return (<section className="rounded-[1.75rem] border border-slate-200 bg-slate-50/70 p-4 md:p-5">
-      <h2 className="text-lg font-semibold text-slate-900">Hours by Position</h2>
-      <div className="mt-3 overflow-hidden rounded-[1.1rem] border border-slate-200 bg-white">
+    return (<section className="rounded-[1.75rem] border border-border bg-muted/70 p-4 md:p-5">
+      <h2 className="text-lg font-semibold text-foreground">Hours by Position</h2>
+      <div className="mt-3 overflow-hidden rounded-[1.1rem] border border-border bg-card">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+          <thead className="bg-muted text-left text-xs uppercase tracking-wide text-muted-foreground">
             <tr>
               <th className="px-3 py-2 font-medium">Position</th>
               <th className="px-3 py-2 text-right font-medium">Rate</th>
@@ -57,15 +57,15 @@ export default function EarningsPositionBreakdown({ lines }: { lines: PositionBr
             </tr>
           </thead>
           <tbody>
-            {lines.map((l) => (<tr key={`${l.title}|${l.rate}`} className="border-t border-slate-100">
-                <td className="max-w-[9rem] truncate px-3 py-2 text-slate-900">{l.title}</td>
+            {lines.map((l) => (<tr key={`${l.title}|${l.rate}`} className="border-t border-border">
+                <td className="max-w-[9rem] truncate px-3 py-2 text-foreground">{l.title}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(l.rate)}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{l.hours.toFixed(2)}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(l.pay)}</td>
               </tr>))}
           </tbody>
           <tfoot>
-            <tr className="border-t border-slate-200 font-semibold text-slate-900">
+            <tr className="border-t border-border font-semibold text-foreground">
               <td className="px-3 py-2">Total</td>
               <td className="px-3 py-2"/>
               <td className="px-3 py-2 text-right tabular-nums">{totalHours.toFixed(2)}</td>

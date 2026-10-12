@@ -1,11 +1,11 @@
 {
-  "name": "StackIn",
-  "short_name": "StackIn",
+  "name": "521",
+  "short_name": "521",
   "description": "Track your income, tips, and pay effortlessly.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0E1A2B",
-  "theme_color": "#0E1A2B",
+  "background_color": "#161B1E",
+  "theme_color": "#161B1E",
   "orientation": "portrait-primary",
   "icons": [
     {

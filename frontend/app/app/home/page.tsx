@@ -1,12 +1,13 @@
 // /app/home/page.tsx
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AppLoader from "@/components/app-loader";
 import StackInHeader from "@/components/stackin-header";
 import IncomeGauge from "@/components/income-gauge";
 import IncomeStreamsOverview from "@/components/income-streams-overview";
-import IndependentExpenseGauge from "@/components/independent-expense-gauge";
+import ExpenseCategoriesOverview from "@/components/expense-categories-overview";
+import NeedsYouPanel from "@/components/needs-you-panel";
 import EntryForm from "@/components/entry-form";
 import EntriesGrid from "@/components/entries-grid";
 import { useAuth } from "@/contexts/auth-context";
@@ -26,19 +27,15 @@ import { usePayStubsStore } from "@/lib/stores/usePaystubsStore";
 import { getCalendarMonthBucketAt, getCalendarMonthBucketFromDate, getCurrentCalendarMonthPeriodAt, getCurrentEntryPeriod } from "@shared/payPeriods";
 import { useSelectedPeriod } from "@/lib/stores/usePeriodSelectionStore";
 import ExpenseForm from "@/components/expense-form";
-import ExpensesGrid from "@/components/expenses-grid";
 import VenmoImportPanel from "@/components/venmo-import-panel";
-import PlaidPendingTransactionsPanel from "@/components/plaid-pending-transactions-panel";
-import PlaidIncomeReviewPanel from "@/components/plaid-income-review-panel";
 import { useReviewRequestNonce } from "@/lib/push/deepLinkStore";
-import { useReviewCountsStore } from "@/lib/stores/useReviewCountsStore";
 import {
     useExpensesData,
     useExpensesRenderState,
     useExpensesStore,
 } from "@/lib/stores/useExpensesStore";
 import { debugLog, debugRender } from "@/lib/debugLoop";
-import { formatCurrency } from "@/lib/helpers";
+import AllRecordsSection from "@/components/all-records-section";
 import { getActiveProfileTrace } from "@/lib/observability/profileTrace";
 import { useAppBootstrapState } from "@/contexts/app-bootstrap-context";
 import { useHomepageLayoutShiftDiagnostics } from "@/hooks/useHomepageLayoutShiftDiagnostics";
@@ -66,7 +63,6 @@ export default function HomePage() {
         : true;
     // ---- INCOME vs EXPENSES TOGGLE ----
     const [mode, setMode] = useState<"income" | "expenses">("income");
-    const [showNet, setShowNet] = useState(false);
     // Lets a link land directly on the Expenses tab via
     // /app/home?mode=expenses (web). Reads window.location directly rather
     // than useSearchParams() so this page doesn't need a Suspense boundary.
@@ -90,12 +86,6 @@ export default function HomePage() {
         appliedReviewNonceRef.current = nonce;
         setMode(expensesReviewNonce != null ? "expenses" : "income");
     }, [expensesReviewNonce, incomeReviewNonce]);
-    // Bank transactions waiting in each tab's review list — badges the tab
-    // buttons so, e.g., deposits from a mixed notification aren't missed
-    // behind the Income tab while Expenses is open.
-    const reviewCounts = useReviewCountsStore((s) => activeWorkspaceId ? s.byWorkspaceId[activeWorkspaceId] : undefined);
-    const incomeReviewCount = supportsExpenses ? reviewCounts?.income ?? 0 : 0;
-    const expensesReviewCount = supportsExpenses ? reviewCounts?.expenses ?? 0 : 0;
     // ---- ENTRIES STORE ----
     const entries = useEntriesData(activeWorkspaceId);
     const entriesState = useEntriesRenderState(activeWorkspaceId);
@@ -168,13 +158,6 @@ export default function HomePage() {
         });
         didHydrateKeyRef.current = null;
     }, [activeWorkspaceId]);
-    useEffect(() => {
-        debugLog("home-page", "mode_or_workspace_reset_show_net", {
-            mode,
-            activeWorkspaceId,
-        });
-        setShowNet(false);
-    }, [mode, activeWorkspaceId]);
     useEffect(() => {
         if (didMarkUsefulRenderRef.current)
             return;
@@ -288,22 +271,50 @@ export default function HomePage() {
     // Layout already gates on workspace ready; this is a safety net for direct navigation.
     const showBlockingLoader = workspaceState.status !== "ready";
     const showDashboardShell = !showBlockingLoader && !!user;
-    const independentNet = useMemo(() => {
-        const grossIncome = entries.reduce((sum, entry) => sum + (entry.totals?.dayTotal ?? 0), 0);
-        const grossExpenses = expenses.reduce((sum, expense) => sum + (expense.amount ?? 0), 0);
-        return grossIncome - grossExpenses;
-    }, [entries, expenses]);
     if (showBlockingLoader) {
         return <AppLoader label="Loading your dashboard..."/>;
     }
     if (!showDashboardShell) {
         return null;
     }
+    if (supportsExpenses) {
+        // Independent home: Income/Expenses switch, the period's total, the bank
+        // review ("Needs you", shared by both tabs), the breakdown, the entry
+        // form, and the full grid tucked away at the bottom. The overviews
+        // return order-1 (total) and order-3 (breakdown) sections so the review
+        // can sit between them while staying mounted across tab switches.
+        return (<div className="min-h-screen bg-background flex flex-col">
+      <StackInHeader />
+
+      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-5 px-4 pb-10 pt-4">
+        <div className="order-0 grid grid-cols-2 rounded-full bg-muted p-1" role="group" aria-label="Show income or expenses">
+          {(["income", "expenses"] as const).map((tab) => (<button key={tab} type="button" aria-pressed={mode === tab} onClick={() => setMode(tab)} className={`rounded-full py-2 text-sm font-medium transition-colors ${mode === tab
+                ? "bg-foreground text-background shadow-sm"
+                : "text-muted-foreground hover:text-foreground"}`}>
+              {tab === "income" ? "Income" : "Expenses"}
+            </button>))}
+        </div>
+
+        {mode === "income" ? <IncomeStreamsOverview /> : <ExpenseCategoriesOverview />}
+
+        <div className="order-2 space-y-5">
+          <NeedsYouPanel />
+          {showVenmoImportPanel ? <VenmoImportPanel /> : null}
+        </div>
+
+        <div className="order-4">
+          {mode === "income" ? <EntryForm /> : <ExpenseForm />}
+        </div>
+
+        <AllRecordsSection kind={mode === "income" ? "entries" : "expenses"} count={mode === "income" ? entries.length : expenses.length}/>
+      </main>
+    </div>);
+    }
     return (<div className="min-h-screen bg-background flex flex-col">
       <StackInHeader />
 
       <main className="flex-1 px-4 pb-6 pt-4 max-w-3xl mx-auto w-full space-y-4">
-        {activeWorkspace?.type === "independent" ? (mode === "income" ? <IncomeStreamsOverview /> : <IndependentExpenseGauge />) : (<IncomeGauge />)}
+        <IncomeGauge />
 
         {/* Toggle */}
         <div className="flex justify-center gap-3 mt-4">
@@ -311,62 +322,16 @@ export default function HomePage() {
       ${mode === "income"
             ? "border-border bg-primary text-primary-foreground"
             : "bg-card text-card-foreground border-border hover:bg-accent"}
-    `} aria-label={incomeReviewCount > 0 ? `Income, ${incomeReviewCount} to review` : undefined}>
+    `}>
             Income
-            <ReviewCountBadge count={incomeReviewCount} active={mode === "income"}/>
           </button>
-
-          {supportsExpenses && (<button onClick={() => setMode("expenses")} className={`px-4 py-2 rounded-lg border font-medium transition
-      ${mode === "expenses"
-                ? "border-border bg-primary text-primary-foreground"
-                : "bg-card text-card-foreground border-border hover:bg-accent"}
-    `} aria-label={expensesReviewCount > 0 ? `Expenses, ${expensesReviewCount} to review` : undefined}>
-              Expenses
-              <ReviewCountBadge count={expensesReviewCount} active={mode === "expenses"}/>
-            </button>)}
         </div>
-
-        {supportsExpenses && (<div className="flex justify-center">
-            <button onClick={() => setShowNet((current) => !current)} className="text-sm font-medium text-emerald-700 hover:text-emerald-800 transition-colors">
-              {showNet
-                ? `Net: ${formatCurrency(independentNet)}`
-                : "Net $"}
-            </button>
-          </div>)}
-
-        {supportsExpenses ? (<div className="space-y-3">
-            <div className={mode === "expenses" ? undefined : "hidden"}>
-              <PlaidPendingTransactionsPanel />
-            </div>
-            <div className={mode === "income" ? undefined : "hidden"}>
-              <PlaidIncomeReviewPanel />
-            </div>
-            {showVenmoImportPanel ? <VenmoImportPanel /> : null}
-            {/* ReceiptCapturePanel removed — receipt attachment now happens inside ExpenseForm */}
-          </div>) : null}
 
         {/* Mode */}
         <div className="space-y-4 mt-6">
-          {mode === "income" && (<>
-              <EntryForm />
-              <EntriesGrid />
-            </>)}
-
-          {supportsExpenses && mode === "expenses" && (<>
-              <ExpenseForm />
-              <ExpensesGrid />
-            </>)}
+          <EntryForm />
+          <EntriesGrid />
         </div>
       </main>
     </div>);
-}
-
-// Small count pill on the Income/Expenses toggle — see reviewCounts above.
-function ReviewCountBadge({ count, active }: { count: number; active: boolean }) {
-    if (count <= 0) return null;
-    return (<span aria-hidden="true" className={`ml-2 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-semibold tabular-nums ${active
-            ? "bg-primary-foreground/20 text-primary-foreground"
-            : "bg-primary text-primary-foreground"}`}>
-            {count > 99 ? "99+" : count}
-        </span>);
 }

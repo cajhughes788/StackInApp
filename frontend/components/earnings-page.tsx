@@ -49,29 +49,29 @@ function SimpleMenu({ onPrint, onDownload, onShare }: {
         return () => document.removeEventListener("click", handleClick);
     }, []);
     return (<div ref={ref} className="relative">
-      <Button variant="ghost" size="icon" className="rounded-full text-slate-900 hover:bg-slate-100 hover:text-slate-900" onClick={() => setOpen(!open)}>
+      <Button variant="ghost" size="icon" className="rounded-full text-foreground hover:bg-muted hover:text-foreground" onClick={() => setOpen(!open)}>
         <MoreVertical className="h-5 w-5"/>
       </Button>
 
-      {open && (<div className="absolute right-0 mt-2 w-40 rounded-md border border-slate-200 bg-white text-slate-900 shadow-lg z-[9999]">
+      {open && (<div className="absolute right-0 mt-2 w-40 rounded-md border border-border bg-card text-foreground shadow-lg z-[9999]">
           <button onClick={() => {
                 setOpen(false);
                 onPrint();
-            }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-slate-100">
+            }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-muted">
             <Printer className="h-4 w-4"/>
             Print
           </button>
           <button onClick={() => {
                 setOpen(false);
                 onShare();
-            }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-slate-100">
+            }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-muted">
             <Share2 className="h-4 w-4"/>
             Share
           </button>
           <button onClick={() => {
                 setOpen(false);
                 onDownload();
-            }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-slate-100">
+            }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-muted">
             <FileSpreadsheet className="h-4 w-4"/>
             Export CSV
           </button>
@@ -96,7 +96,7 @@ function SummaryStatCard({
         ? "border-emerald-200 bg-emerald-50 text-emerald-950"
         : tone === "muted"
             ? "border-amber-200 bg-amber-50 text-amber-950"
-            : "border-slate-200 bg-white text-slate-950";
+            : "border-border bg-card text-foreground";
     const labelClasses = scale === "compact"
         ? "text-[10px] tracking-[0.17em]"
         : "text-[11px] tracking-[0.2em]";
@@ -109,7 +109,7 @@ function SummaryStatCard({
 
     return (
         <div className={`flex min-w-0 flex-col justify-between rounded-3xl border px-4 py-3.5 shadow-sm min-[420px]:px-4 min-[420px]:py-4 ${heightClasses} ${toneClasses}`}>
-            <div className={`uppercase text-slate-500 ${labelClasses}`}>
+            <div className={`uppercase text-muted-foreground ${labelClasses}`}>
                 {label}
             </div>
             <div className={`mt-2 w-full min-w-0 whitespace-nowrap font-semibold leading-tight tracking-tight tabular-nums ${valueClasses}`}>
@@ -127,11 +127,11 @@ type MetricCellProps = {
 
 function MetricCell({ label, value, subtle = false }: MetricCellProps) {
     return (
-        <div className="rounded-2xl border border-slate-200 bg-slate-50/90 px-3 py-3">
-            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+        <div className="rounded-2xl border border-border bg-muted/90 px-3 py-3">
+            <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
                 {label}
             </div>
-            <div className={`mt-2 text-sm font-semibold tabular-nums ${subtle ? "text-slate-600" : "text-slate-900"}`}>
+            <div className={`mt-2 text-sm font-semibold tabular-nums ${subtle ? "text-muted-foreground" : "text-foreground"}`}>
                 {value}
             </div>
         </div>
@@ -643,10 +643,10 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
         return (<>
         <StackInHeader />
         <div className="mx-auto max-w-3xl space-y-4 p-4">
-          <div className="rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="rounded-[1.75rem] border border-border bg-card p-6 shadow-sm">
             <div className="space-y-2">
-              <h1 className="text-2xl font-bold text-slate-900">Pay period not found</h1>
-              <p className="text-sm text-slate-600">
+              <h1 className="text-2xl font-bold text-foreground">Pay period not found</h1>
+              <p className="text-sm text-muted-foreground">
                 We couldn&apos;t find an earnings detail view for this pay period.
               </p>
             </div>
@@ -731,25 +731,25 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
         };
         return (<>
         <StackInHeader />
-        <div className="mx-auto w-full max-w-6xl px-3 py-4 text-slate-900 md:px-5 xl:max-w-7xl">
-          <div id="earnings-content" className="space-y-5 rounded-[2rem] border border-slate-200/80 bg-white/95 p-4 shadow-sm backdrop-blur md:p-6">
+        <div className="mx-auto w-full max-w-6xl px-3 py-4 text-foreground md:px-5 xl:max-w-7xl">
+          <div id="earnings-content" className="space-y-5 rounded-[2rem] border border-border/80 bg-card/95 p-4 shadow-sm backdrop-blur md:p-6">
             <div className="flex items-start justify-between gap-3 no-print">
-              <Button variant="outline" size="sm" onClick={handleBackToList} className="shrink-0 rounded-full border-slate-200 bg-white text-slate-900 hover:bg-slate-100 hover:text-slate-900">
+              <Button variant="outline" size="sm" onClick={handleBackToList} className="shrink-0 rounded-full border-border bg-card text-foreground hover:bg-muted hover:text-foreground">
                 ← Back
               </Button>
               <SimpleMenu onPrint={handlePrint} onDownload={handleDownloadPDF} onShare={handleShare}/>
             </div>
 
-            <div className="rounded-[1.75rem] border border-slate-200 bg-[linear-gradient(135deg,rgba(43,174,138,0.12),rgba(255,255,255,0.98)_42%,rgba(15,23,42,0.04))] p-5">
+            <div className="rounded-[1.75rem] border border-border bg-[linear-gradient(135deg,rgba(52,168,106,0.12),rgba(255,255,255,0.98)_42%,rgba(15,23,42,0.04))] p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="space-y-2">
-                  <Badge variant="secondary" className="rounded-full border border-emerald-200 bg-white/80 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-emerald-800">
+                  <Badge variant="secondary" className="rounded-full border border-emerald-200 bg-card/80 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-emerald-800">
                     Pay Period
                   </Badge>
                   <h1 className="text-2xl font-bold md:text-3xl">
                     Estimated Earnings
                   </h1>
-                  <p className="text-sm text-slate-600">
+                  <p className="text-sm text-muted-foreground">
                     {formatHeaderDateRange(selected.periodStart, selected.periodEnd)}
                   </p>
                 </div>
@@ -786,7 +786,7 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
                 ) : null}
               </div>
 
-              <div className="mt-4 text-xs text-slate-500">
+              <div className="mt-4 text-xs text-muted-foreground">
                 <p>Calculated from current pay period entries.</p>
                 {needsMarylandCounty ? (
                   <p className="mt-1 text-amber-700">
@@ -798,14 +798,14 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
 
             <EarningsPositionBreakdown lines={positionLines}/>
 
-            <section className="rounded-[1.75rem] border border-slate-200 bg-slate-50/70 p-4 md:p-5">
+            <section className="rounded-[1.75rem] border border-border bg-muted/70 p-4 md:p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-lg font-semibold text-slate-900">
+                  <h2 className="text-lg font-semibold text-foreground">
                     Pay Period Activity
                   </h2>
                 </div>
-                <Badge variant="outline" className="rounded-full border-slate-300 bg-white px-3 py-1 text-slate-700">
+                <Badge variant="outline" className="rounded-full border-border bg-card px-3 py-1 text-foreground/80">
                   {rows.length} {rows.length === 1 ? "entry" : "entries"}
                 </Badge>
               </div>
@@ -834,7 +834,7 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
                         <motion.article
                           key={rowKey}
                           layout
-                          className="overflow-hidden rounded-[1.35rem] border border-slate-200 bg-white shadow-sm"
+                          className="overflow-hidden rounded-[1.35rem] border border-border bg-card shadow-sm"
                         >
                           <button
                             type="button"
@@ -843,7 +843,7 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
                             aria-expanded={isExpanded}
                           >
                             <div className="min-w-0">
-                              <p className="text-base font-semibold leading-tight text-slate-900 sm:text-[1.05rem]">
+                              <p className="text-base font-semibold leading-tight text-foreground sm:text-[1.05rem]">
                                 {entryDateLabel}
                               </p>
                             </div>
@@ -851,7 +851,7 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
                             <motion.span
                               animate={{ rotate: isExpanded ? 180 : 0 }}
                               transition={{ duration: 0.2, ease: "easeOut" }}
-                              className="row-span-2 flex h-9 w-9 items-center justify-center self-center rounded-full border border-slate-200 bg-slate-50 text-slate-600 sm:row-span-1"
+                              className="row-span-2 flex h-9 w-9 items-center justify-center self-center rounded-full border border-border bg-muted text-muted-foreground sm:row-span-1"
                             >
                               <ChevronDown className="h-4 w-4" />
                             </motion.span>
@@ -875,7 +875,7 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
                                 animate={{ height: "auto", opacity: 1 }}
                                 exit={{ height: 0, opacity: 0 }}
                                 transition={{ duration: 0.22, ease: "easeOut" }}
-                                className="overflow-hidden border-t border-slate-100"
+                                className="overflow-hidden border-t border-border"
                               >
                                 <div className="space-y-2 px-4 py-3">
                                   {detailRows.length > 0 ? (
@@ -885,19 +885,19 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
                                         className={`flex items-center justify-between gap-3 rounded-2xl border px-3 py-3 ${
                                           metric.subtle === true
                                             ? "border-amber-200/70 bg-amber-50/70"
-                                            : "border-slate-200 bg-slate-50/90"
+                                            : "border-border bg-muted/90"
                                         }`}
                                       >
-                                        <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                                        <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
                                           {metric.label}
                                         </div>
-                                        <div className={`text-sm font-semibold tabular-nums ${metric.subtle === true ? "text-amber-900" : "text-slate-900"}`}>
+                                        <div className={`text-sm font-semibold tabular-nums ${metric.subtle === true ? "text-amber-900" : "text-foreground"}`}>
                                           {metric.value}
                                         </div>
                                       </div>
                                     ))
                                   ) : (
-                                    <p className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-500">
+                                    <p className="rounded-2xl border border-border bg-muted px-3 py-3 text-sm text-muted-foreground">
                                       No additional pay details were recorded for this entry.
                                     </p>
                                   )}
@@ -910,13 +910,13 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
                 })}
               </div>
 
-              <div className={`mt-4 grid gap-2 rounded-[1.5rem] border border-slate-200 bg-white p-4 ${activitySummary.length >= 5 ? "md:grid-cols-3 xl:grid-cols-6" : "sm:grid-cols-2 xl:grid-cols-4"}`}>
+              <div className={`mt-4 grid gap-2 rounded-[1.5rem] border border-border bg-card p-4 ${activitySummary.length >= 5 ? "md:grid-cols-3 xl:grid-cols-6" : "sm:grid-cols-2 xl:grid-cols-4"}`}>
                 {activitySummary.map((item) => (
-                  <div key={item.label} className="rounded-2xl bg-slate-50 px-3 py-3">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                  <div key={item.label} className="rounded-2xl bg-muted px-3 py-3">
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
                       {item.label}
                     </div>
-                    <div className="mt-2 text-sm font-semibold tabular-nums text-slate-900">
+                    <div className="mt-2 text-sm font-semibold tabular-nums text-foreground">
                       {item.value}
                     </div>
                   </div>
@@ -926,43 +926,43 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
 
             {taxEnabled ? (
               <section className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(18rem,0.85fr)]">
-                <div className="overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-sm deduction-box">
-                  <div className="border-b border-slate-200 bg-slate-50 px-4 py-4">
-                    <h2 className="text-lg font-semibold text-slate-900">
+                <div className="overflow-hidden rounded-[1.75rem] border border-border bg-card shadow-sm deduction-box">
+                  <div className="border-b border-border bg-muted px-4 py-4">
+                    <h2 className="text-lg font-semibold text-foreground">
                       Estimated Taxes and Deductions
                     </h2>
                   </div>
 
-                  <div className="divide-y divide-slate-200">
+                  <div className="divide-y divide-border">
                     {deductionRows.map((item) => (
                       <div key={item.label} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
-                        <span className="text-slate-600">{item.label}</span>
-                        <span className="font-semibold tabular-nums text-slate-900">
+                        <span className="text-muted-foreground">{item.label}</span>
+                        <span className="font-semibold tabular-nums text-foreground">
                           {formatSummaryCurrency(item.amount)}
                         </span>
                       </div>
                     ))}
                     {dedFica > 0 ? (
-                      <div className="bg-slate-50 px-4 py-3 text-xs text-slate-600">
+                      <div className="bg-muted px-4 py-3 text-xs text-muted-foreground">
                         Includes Medicare {formatSummaryCurrency(dedMedicare)} and Social Security {formatSummaryCurrency(dedSocialSecurity)}.
                       </div>
                     ) : null}
-                    <div className="flex items-center justify-between gap-3 bg-slate-50 px-4 py-3 font-semibold">
+                    <div className="flex items-center justify-between gap-3 bg-muted px-4 py-3 font-semibold">
                       <span>Total Deductions</span>
                       <span className="tabular-nums">{formatCurrency(totalDeductions)}</span>
                     </div>
                   </div>
                 </div>
 
-                <div className="overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-sm">
-                  <div className="border-b border-slate-200 bg-slate-50 px-4 py-4">
+                <div className="overflow-hidden rounded-[1.75rem] border border-border bg-card shadow-sm">
+                  <div className="border-b border-border bg-muted px-4 py-4">
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <h2 className="text-lg font-semibold text-slate-900">
+                        <h2 className="text-lg font-semibold text-foreground">
                           Year-to-Date
                         </h2>
                       </div>
-                      <button type="button" onClick={() => setShowYTD((prev) => !prev)} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-900">
+                      <button type="button" onClick={() => setShowYTD((prev) => !prev)} className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-2 text-sm font-medium text-foreground/80 transition hover:bg-muted hover:text-foreground">
                         <motion.span
                           animate={{ rotate: showYTD ? 180 : 0 }}
                           transition={{ duration: 0.2, ease: "easeOut" }}
@@ -981,7 +981,7 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
                   </div>
 
                   {showYTD ? (
-                    <div className="grid gap-2 border-t border-slate-200 px-4 py-4 sm:grid-cols-2">
+                    <div className="grid gap-2 border-t border-border px-4 py-4 sm:grid-cols-2">
                       <MetricCell label="YTD Deductions" value={formatCurrency(ytd.totalDeductions)} />
                       <MetricCell label="YTD Tips" value={formatCurrency(ytd.tips)} />
                       <MetricCell label="YTD Reported Cash" value={formatCurrency(ytd.reportedCash)} />

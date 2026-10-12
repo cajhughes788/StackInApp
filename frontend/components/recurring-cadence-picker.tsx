@@ -107,7 +107,7 @@ export default function RecurringCadencePicker({
   label = "Repeats",
 }: Props) {
   return (
-    <div className="space-y-3 rounded-xl border border-border bg-muted/10 px-4 py-3">
+    <div className="space-y-3 rounded-2xl bg-muted px-4 py-3">
       <div className="flex items-center justify-between gap-4">
         <Label htmlFor={`${idPrefix}-repeat-toggle`}>{label}</Label>
         <Switch

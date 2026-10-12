@@ -17,7 +17,7 @@ const metadataBase = new URL("https://stackin-app.com")
 
 export const metadata: Metadata = {
   metadataBase,
-  title: "StackIn",
+  title: "521",
   description: "Track your income across pay periods",
   icons: {
     icon: [
@@ -29,28 +29,28 @@ export const metadata: Metadata = {
     shortcut: ["/favicon.ico"],
   },
   openGraph: {
-    title: "StackIn",
+    title: "521",
     description: "Track your income across pay periods",
     url: metadataBase,
     images: [
       {
-        url: "/stackin-share.png",
+        url: "/521-share.png",
         width: 1200,
         height: 630,
-        alt: "StackIn logo",
+        alt: "521 logo",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "StackIn",
+    title: "521",
     description: "Track your income across pay periods",
-    images: ["/stackin-share.png"],
+    images: ["/521-share.png"],
   },
 }
 
 export const viewport = {
-  themeColor: "#0E1A2B",
+  themeColor: "#161B1E",
   viewportFit: "cover" as const,
   width: "device-width",
   initialScale: 1,
@@ -66,7 +66,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
 
       <body className={`${inter.variable} font-sans antialiased`}>
-        <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} storageKey="stackin-theme">
+        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false} storageKey="stackin-theme">
           <AuthProvider>
             <AccountAuthorityProvider>
               <PointerEventsGuard />

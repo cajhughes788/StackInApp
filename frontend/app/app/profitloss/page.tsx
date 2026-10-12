@@ -161,7 +161,7 @@ function StatementDetailList({ items, emptyLabel }: {
 }) {
   if (items.length === 0) {
     return (
-      <div className="border-t border-[rgba(16,24,40,0.08)] px-4 py-3 text-sm text-slate-500">
+      <div className="border-t border-[rgba(16,24,40,0.08)] px-4 py-3 text-sm text-muted-foreground">
         {emptyLabel}
       </div>
     )
@@ -174,18 +174,18 @@ function StatementDetailList({ items, emptyLabel }: {
           key={item.id}
           className="grid gap-2 border-b border-[rgba(16,24,40,0.08)] px-4 py-3 text-sm last:border-b-0 sm:grid-cols-[110px_minmax(0,1fr)_120px] sm:gap-3"
         >
-          <div className="text-slate-500 sm:self-start">{formatDate(item.date)}</div>
+          <div className="text-muted-foreground sm:self-start">{formatDate(item.date)}</div>
           <div className="min-w-0">
-            <div className="whitespace-normal break-words font-medium text-slate-900">
+            <div className="whitespace-normal break-words font-medium text-foreground">
               {item.label}
             </div>
             {item.description ? (
-              <div className="mt-0.5 whitespace-normal break-words text-xs text-slate-500">
+              <div className="mt-0.5 whitespace-normal break-words text-xs text-muted-foreground">
                 {item.description}
               </div>
             ) : null}
           </div>
-          <div className="font-medium text-slate-900 sm:text-right">
+          <div className="font-medium text-foreground sm:text-right">
             {formatCurrency(item.amount)}
           </div>
         </div>
@@ -203,7 +203,7 @@ function StatementSubcategoryList({
 }) {
   if (subcategories.length === 0) {
     return (
-      <div className="border-t border-[rgba(16,24,40,0.08)] px-4 py-3 text-sm text-slate-500">
+      <div className="border-t border-[rgba(16,24,40,0.08)] px-4 py-3 text-sm text-muted-foreground">
         {emptyLabel}
       </div>
     )
@@ -215,14 +215,14 @@ function StatementSubcategoryList({
         <div key={subcategory.label} className="border-b border-[rgba(16,24,40,0.08)] last:border-b-0">
           <div className="grid grid-cols-1 gap-1 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_120px] sm:gap-3">
             <div>
-              <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              <div className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                 {subcategory.label}
               </div>
-              <div className="mt-1 text-xs text-slate-500">
+              <div className="mt-1 text-xs text-muted-foreground">
                 {subcategory.count} {subcategory.count === 1 ? "expense" : "expenses"}
               </div>
             </div>
-            <div className="font-medium tabular-nums text-slate-900 sm:text-right">
+            <div className="font-medium tabular-nums text-foreground sm:text-right">
               {formatCurrency(subcategory.amount)}
             </div>
           </div>
@@ -256,8 +256,8 @@ function StatementCategoryRow({
   if (!expandable) {
     return (
       <div className="grid grid-cols-1 items-start gap-1 border-b border-[rgba(16,24,40,0.08)] px-4 py-3 text-sm sm:grid-cols-[minmax(0,1fr)_140px] sm:items-center sm:gap-4">
-        <div className="font-medium text-slate-900">{label}</div>
-        <div className="font-medium tabular-nums text-slate-900 sm:text-right">{formatCurrency(amount)}</div>
+        <div className="font-medium text-foreground">{label}</div>
+        <div className="font-medium tabular-nums text-foreground sm:text-right">{formatCurrency(amount)}</div>
       </div>
     )
   }
@@ -266,11 +266,11 @@ function StatementCategoryRow({
     <AccordionItem value={rowKey} className="border-b-0">
       <AccordionTrigger className="grid grid-cols-[minmax(0,1fr)_16px] items-start gap-3 px-4 py-3 hover:no-underline sm:grid-cols-[minmax(0,1fr)_140px_16px] sm:items-center sm:gap-4">
         <div className="min-w-0">
-          <div className="font-medium text-slate-900">{label}</div>
-          <div className="mt-1 text-xs text-slate-500">{countLabel}</div>
+          <div className="font-medium text-foreground">{label}</div>
+          <div className="mt-1 text-xs text-muted-foreground">{countLabel}</div>
         </div>
-        <div className="hidden font-medium tabular-nums text-slate-900 sm:block sm:text-right">{formatCurrency(amount)}</div>
-        <div className="col-span-2 -mt-1 font-medium tabular-nums text-slate-900 sm:hidden">{formatCurrency(amount)}</div>
+        <div className="hidden font-medium tabular-nums text-foreground sm:block sm:text-right">{formatCurrency(amount)}</div>
+        <div className="col-span-2 -mt-1 font-medium tabular-nums text-foreground sm:hidden">{formatCurrency(amount)}</div>
       </AccordionTrigger>
       <AccordionContent className="pb-0">
         {subcategories && subcategories.length > 0 ? (
@@ -307,7 +307,7 @@ function StatementSection({
         {title}
       </div>
       {rows.length === 0 ? (
-        <div className="px-4 py-4 text-sm text-slate-500">
+        <div className="px-4 py-4 text-sm text-muted-foreground">
           {emptyLabel}
         </div>
       ) : (
@@ -362,7 +362,7 @@ function StatementActionMenu({
       </Button>
 
       {open ? (
-        <div className="absolute right-0 top-full z-[9999] mt-2 w-40 rounded-md border border-slate-200 bg-white text-slate-900 shadow-lg">
+        <div className="absolute right-0 top-full z-[9999] mt-2 w-40 rounded-md border border-border bg-card text-foreground shadow-lg">
           <button
             type="button"
             onClick={(event) => {
@@ -370,7 +370,7 @@ function StatementActionMenu({
               setOpen(false)
               onPrint()
             }}
-            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-slate-100"
+            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-muted"
           >
             <Printer className="h-4 w-4" />
             Print
@@ -382,7 +382,7 @@ function StatementActionMenu({
               setOpen(false)
               onShare()
             }}
-            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-slate-100"
+            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-muted"
           >
             <Share2 className="h-4 w-4" />
             Share
@@ -394,7 +394,7 @@ function StatementActionMenu({
               setOpen(false)
               onExportCsv()
             }}
-            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-slate-100"
+            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-muted"
           >
             <FileSpreadsheet className="h-4 w-4" />
             Export CSV
@@ -894,9 +894,9 @@ export default function ProfitLossPage() {
           hideWhenEmpty
         />
 
-        <Card className="border-slate-200 bg-white text-slate-900 shadow-sm">
+        <Card className="border-border bg-card text-foreground shadow-sm">
           <CardHeader className="pb-4">
-            <CardTitle className="text-lg text-slate-900">
+            <CardTitle className="text-lg text-foreground">
               {periodType === "month"
                 ? "Monthly Statements"
                 : periodType === "quarter"
@@ -906,7 +906,7 @@ export default function ProfitLossPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="space-y-2">
-              <div className="text-sm font-medium text-slate-900">
+              <div className="text-sm font-medium text-foreground">
                 Select a {periodType === "month" ? "month" : periodType === "quarter" ? "quarter" : "year"}
               </div>
               <Select
@@ -916,7 +916,7 @@ export default function ProfitLossPage() {
                   setDetailsCollapsed(false)
                 }}
               >
-                <SelectTrigger className="w-full justify-between rounded-xl border-slate-200 bg-white text-slate-900 hover:bg-slate-50 data-[placeholder]:text-slate-500 [&_svg]:text-slate-500">
+                <SelectTrigger className="w-full justify-between rounded-xl border-border bg-card text-foreground hover:bg-muted data-[placeholder]:text-muted-foreground [&_svg]:text-muted-foreground">
                   <SelectValue
                     placeholder={
                       statements.length > 0
@@ -928,17 +928,17 @@ export default function ProfitLossPage() {
                 <SelectContent
                   sideOffset={12}
                   collisionPadding={{ top: 88, bottom: 16, left: 16, right: 16 }}
-                  className="z-[3000] border-slate-200 bg-white text-slate-900 shadow-lg"
+                  className="z-[3000] border-border bg-card text-foreground shadow-lg"
                 >
                   {statements.map((statement) => (
                     <SelectItem
                       key={statement.id}
                       value={statement.id}
-                      className="text-slate-900 focus:bg-slate-100 focus:text-slate-900"
+                      className="text-foreground focus:bg-muted focus:text-foreground"
                     >
                       <span className="flex min-w-0 flex-col">
                         <span className="font-medium">{statement.label}</span>
-                        <span className="text-xs text-slate-500">
+                        <span className="text-xs text-muted-foreground">
                           Net {formatCurrency(statement.netProfit)}
                         </span>
                       </span>
@@ -949,27 +949,27 @@ export default function ProfitLossPage() {
             </div>
 
             {loading && statements.length === 0 ? (
-              <div className="flex items-center text-sm text-slate-500">
+              <div className="flex items-center text-sm text-muted-foreground">
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Loading saved statements...
               </div>
             ) : null}
 
             {!loading && statements.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">
+              <div className="rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground">
                 No {periodType} statements available yet.
               </div>
             ) : null}
 
             {selected ? (
-              <div className="rounded-xl border border-slate-200 bg-[rgba(248,250,252,0.7)] px-4 py-3 text-sm text-slate-900">
-                <div className="font-medium text-slate-900">{selected.label}</div>
-                <div className="mt-1 text-slate-500 sm:hidden">
+              <div className="rounded-xl border border-border bg-[rgba(248,250,252,0.7)] px-4 py-3 text-sm text-foreground">
+                <div className="font-medium text-foreground">{selected.label}</div>
+                <div className="mt-1 text-muted-foreground sm:hidden">
                   <div className="tabular-nums">Income {formatCurrency(selected.income.total)}</div>
                   <div className="tabular-nums">Expenses {formatCurrency(selected.expenses.total)}</div>
                   <div className="tabular-nums">Net {formatCurrency(selected.netProfit)}</div>
                 </div>
-                <div className="mt-1 hidden text-slate-500 sm:block">
+                <div className="mt-1 hidden text-muted-foreground sm:block">
                   Income {formatCurrency(selected.income.total)} · Expenses{" "}
                   {formatCurrency(selected.expenses.total)} · Net {formatCurrency(selected.netProfit)}
                 </div>
@@ -981,11 +981,11 @@ export default function ProfitLossPage() {
         <div className="items-start grid gap-6">
           <Card
             id="profit-loss-content"
-            className="self-start overflow-hidden border-slate-200 bg-white text-slate-900 shadow-sm"
+            className="self-start overflow-hidden border-border bg-card text-foreground shadow-sm"
           >
             {selected ? (
               <>
-                <CardHeader className="relative flex flex-col items-center gap-4 border-b border-slate-200 bg-[linear-gradient(180deg,#fefefe_0%,#f8fafc_100%)] pr-16 text-center sm:items-start sm:pr-20 sm:text-left">
+                <CardHeader className="relative flex flex-col items-center gap-4 border-b border-border bg-[linear-gradient(180deg,#fefefe_0%,#f8fafc_100%)] pr-16 text-center sm:items-start sm:pr-20 sm:text-left">
                   <StatementActionMenu
                     className="absolute right-6 top-6"
                     onPrint={() => handlePrint(selected)}
@@ -993,15 +993,15 @@ export default function ProfitLossPage() {
                     onExportCsv={() => handleExportCsv(selected)}
                   />
                   <div className="w-full text-center sm:text-left">
-                    <p className="text-lg font-semibold text-slate-900">Profit &amp; Loss Statement</p>
-                    <p className="mt-2 text-base font-semibold text-slate-900">{activeWorkspace?.name}</p>
-                    <p className="mt-1 text-sm text-slate-500">{selected.label}</p>
+                    <p className="text-lg font-semibold text-foreground">Profit &amp; Loss Statement</p>
+                    <p className="mt-2 text-base font-semibold text-foreground">{activeWorkspace?.name}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">{selected.label}</p>
                   </div>
                   <div className="flex w-full shrink-0 flex-wrap items-center justify-center gap-2 sm:justify-start">
                     <Button
                       type="button"
                       variant="outline"
-                      className="border-slate-200 bg-white text-slate-900 hover:bg-slate-50 hover:text-slate-900"
+                      className="border-border bg-card text-foreground hover:bg-muted hover:text-foreground"
                       onClick={() => setDetailsCollapsed((current) => !current)}
                     >
                       {detailsCollapsed ? (
@@ -1034,7 +1034,7 @@ export default function ProfitLossPage() {
 
                   <div className="grid grid-cols-1 gap-1 border-t border-[rgba(16,24,40,0.14)] border-b border-[rgba(16,24,40,0.08)] bg-[rgba(248,250,252,0.85)] px-4 py-3 text-xs font-semibold uppercase tracking-[0.16em] text-[rgba(17,24,39,0.7)] sm:grid-cols-[minmax(0,1fr)_140px] sm:gap-4">
                     <div>Gross Profit</div>
-                    <div className="normal-case tracking-normal text-sm font-semibold tabular-nums text-slate-900 sm:text-right">
+                    <div className="normal-case tracking-normal text-sm font-semibold tabular-nums text-foreground sm:text-right">
                       <StatementValue value={selected.income.total} />
                     </div>
                   </div>
@@ -1047,18 +1047,18 @@ export default function ProfitLossPage() {
 
                   <div className="grid grid-cols-1 gap-1 border-t border-[rgba(16,24,40,0.14)] border-b border-[rgba(16,24,40,0.08)] bg-[rgba(248,250,252,0.85)] px-4 py-3 text-xs font-semibold uppercase tracking-[0.16em] text-[rgba(17,24,39,0.7)] sm:grid-cols-[minmax(0,1fr)_140px] sm:gap-4">
                     <div>Total Operating Expenses</div>
-                    <div className="normal-case tracking-normal text-sm font-semibold tabular-nums text-slate-900 sm:text-right">
+                    <div className="normal-case tracking-normal text-sm font-semibold tabular-nums text-foreground sm:text-right">
                       <StatementValue value={selected.expenses.total} />
                     </div>
                   </div>
-                  <div className="grid grid-cols-1 gap-1 border-t border-[rgba(16,24,40,0.14)] bg-[linear-gradient(180deg,rgba(255,251,235,0.72)_0%,rgba(255,247,237,0.92)_100%)] px-4 py-4 text-sm font-semibold text-slate-900 sm:grid-cols-[minmax(0,1fr)_140px] sm:gap-4">
+                  <div className="grid grid-cols-1 gap-1 border-t border-[rgba(16,24,40,0.14)] bg-[linear-gradient(180deg,rgba(255,251,235,0.72)_0%,rgba(255,247,237,0.92)_100%)] px-4 py-4 text-sm font-semibold text-foreground sm:grid-cols-[minmax(0,1fr)_140px] sm:gap-4">
                     <div className="font-serif text-lg tracking-[0.01em]">Net Income</div>
                     <div className="font-serif text-lg tabular-nums sm:text-right">
                       <StatementValue value={selected.netProfit} />
                     </div>
                   </div>
 
-                  <div className="text-xs text-slate-500">
+                  <div className="text-xs text-muted-foreground">
                     Generated {new Date(selected.meta.generatedAt).toLocaleString()}.
                   </div>
                 </CardContent>
@@ -1066,13 +1066,13 @@ export default function ProfitLossPage() {
               </>
               ) : (
                 <>
-                  <CardHeader className="border-b border-slate-200 bg-[linear-gradient(180deg,#fefefe_0%,#f8fafc_100%)]">
-                    <CardTitle className="text-xl text-slate-900">{detailLabel}</CardTitle>
-                    <p className="mt-2 text-sm text-slate-500">
+                  <CardHeader className="border-b border-border bg-[linear-gradient(180deg,#fefefe_0%,#f8fafc_100%)]">
+                    <CardTitle className="text-xl text-foreground">{detailLabel}</CardTitle>
+                    <p className="mt-2 text-sm text-muted-foreground">
                       Choose a saved {periodType === "month" ? "monthly" : periodType === "quarter" ? "quarterly" : "yearly"} statement above to open the full view.
                     </p>
                   </CardHeader>
-                  <CardContent className="flex min-h-[520px] items-center justify-center p-8 text-sm text-slate-500">
+                  <CardContent className="flex min-h-[520px] items-center justify-center p-8 text-sm text-muted-foreground">
                     Select a statement from the dropdown to open the full profit &amp; loss view.
                   </CardContent>
                 </>

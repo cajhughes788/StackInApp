@@ -1,7 +1,7 @@
 // /components/entry-form.tsx
 "use client";
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
-import { Plus, Minus, Info } from "lucide-react";
+import { Plus, Minus, X } from "lucide-react";
 import { debounce } from "@/lib/timing";
 import { formatCurrency, getLocalDateInputValue } from "@/lib/helpers";
 import {
@@ -32,7 +32,6 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SettingsDocSchema } from "@shared/schemas/settings";
 import { debugLog, debugRender } from "@/lib/debugLoop";
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore";
@@ -93,6 +92,11 @@ function resolvePositionRate(settings: Parameters<typeof getRateOptions>[0], pos
     if (option.id === null)
         return { positionId: null, rate: settings?.w2?.defaultHourlyRate?.toString() ?? currentRate };
     return { positionId: option.id, rate: option.rate.toString() };
+}
+/** Width for a big amount input so the "$" sits right beside the number. */
+function amountWidth(value: string | undefined): string {
+    // Empty shows the "0.00" placeholder, which needs four characters.
+    return `${(value ?? "").length || 4}ch`;
 }
 const PAYMENT_REPEAT_FIELDS = ["venmo", "appleCash", "zelle", "posSales", "cashSales"] as const;
 type PaymentField = (typeof PAYMENT_REPEAT_FIELDS)[number];
@@ -260,6 +264,22 @@ export default function EntryForm() {
     // Only the payment field being worked on shows its full category split;
     // the rest collapse to a one-line summary so the form stays readable.
     const [openBreakdownField, setOpenBreakdownField] = useState<PaymentField | null>(null);
+    // Display only: the payment sources tapped open from the "How were you
+    // paid?" chips. A source with an amount always shows, opened or not, so
+    // nothing typed can end up hidden.
+    const [openSources, setOpenSources] = useState<ReadonlySet<PaymentField | "personalCash">>(() => new Set());
+    const openSource = useCallback((source: PaymentField | "personalCash") => {
+        setOpenSources((prev) => new Set(prev).add(source));
+        const inputId = source === "personalCash" ? "independentUnreportedCash" : source;
+        window.setTimeout(() => document.getElementById(inputId)?.focus(), 0);
+    }, []);
+    const closeSource = useCallback((source: PaymentField | "personalCash") => {
+        setOpenSources((prev) => {
+            const next = new Set(prev);
+            next.delete(source);
+            return next;
+        });
+    }, []);
     useEffect(() => {
         if (!openBreakdownField)
             return;
@@ -358,37 +378,43 @@ export default function EntryForm() {
             const summary = draft.selected
                 .map((category) => `${categoryLabels[category]} ${formatCurrency(parseMoney(draft[category]))}`)
                 .join(" · ");
-            return (<button type="button" onClick={() => setOpenBreakdownField(field)} className="mt-2 flex w-full items-center justify-between gap-2 rounded-md border bg-secondary/50 px-3 py-2 text-left text-xs text-muted-foreground">
+            return (<button type="button" onClick={() => setOpenBreakdownField(field)} className="mt-2 flex w-full items-center justify-between gap-2 text-left text-xs text-muted-foreground">
           <span className="truncate">{summary || "No categories selected"}</span>
-          <span className="shrink-0 font-medium text-foreground">Edit split</span>
+          <span className="shrink-0 font-medium text-primary">Edit split</span>
         </button>);
         }
-        return (<div className="mt-3 space-y-3 rounded-md border bg-secondary/80 p-3">
-        <div className="text-sm font-medium">
-          Split {config.entryStyle === "salesPlusTips" ? `${config.label.replace(/ Sales$/, "")} sales` : config.label} into categories
+        const splitMatches = Math.abs(draftSum(draft) - total) <= 0.009;
+        return (<div className="mt-3 space-y-3 border-t border-border/70 pt-3">
+        <div className="text-xs font-medium text-muted-foreground">
+          What was the {config.entryStyle === "salesPlusTips" ? `${config.label.replace(/ Sales$/, "").toLowerCase()} sales` : config.label} for?
         </div>
 
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {splitCategories.map((category) => (<label key={`${field}-${category}`} className="flex items-center gap-2 text-sm">
-              <Checkbox checked={draft.selected.includes(category)} onCheckedChange={(checked) => toggleBreakdownCategory(field, category, checked === true)}/>
-              <span>{categoryLabels[category]}</span>
-            </label>))}
+        <div className="flex flex-wrap gap-2" role="group" aria-label={`${config.label} categories`}>
+          {splitCategories.map((category) => {
+                const selected = draft.selected.includes(category);
+                return (<button key={`${field}-${category}`} type="button" aria-pressed={selected} onClick={() => toggleBreakdownCategory(field, category, !selected)} className={`rounded-full px-3 py-1.5 text-sm transition-colors ${selected ? "bg-foreground text-background" : "bg-card text-foreground hover:bg-secondary"}`}>
+                {categoryLabels[category]}
+              </button>);
+            })}
         </div>
 
-        {draft.selected.length > 0 && (<div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {draft.selected.length > 1 && (<div className="space-y-1.5">
             {splitCategories
                     .filter((category) => draft.selected.includes(category))
-                    .map((category) => (<div key={`${field}-${category}-amount`}>
-                  <Label htmlFor={`${field}-${category}`}>
-                    {categoryLabels[category]} Amount
+                    .map((category) => (<div key={`${field}-${category}-amount`} className="flex items-center justify-between gap-3 rounded-xl bg-card px-3 py-1.5">
+                  <Label htmlFor={`${field}-${category}`} className="text-sm font-normal">
+                    {categoryLabels[category]}
                   </Label>
-                  <Input id={`${field}-${category}`} type="number" step="0.01" value={draft[category]} onChange={(e) => updateBreakdownAmount(field, category, e.target.value)}/>
+                  <div className="flex items-baseline gap-0.5">
+                    <span className="text-sm text-muted-foreground">$</span>
+                    <input id={`${field}-${category}`} type="number" step="0.01" inputMode="decimal" placeholder="0.00" style={{ width: amountWidth(draft[category]) }} value={draft[category]} onChange={(e) => updateBreakdownAmount(field, category, e.target.value)} className="max-w-28 bg-transparent text-right text-base tabular-nums outline-none placeholder:text-muted-foreground/50"/>
+                  </div>
                 </div>))}
           </div>)}
 
-        <p className="text-xs text-muted-foreground">
-          Category split: {formatCurrency(draftSum(draft))} of {formatCurrency(total)}
-        </p>
+        {draft.selected.length > 1 ? (<p className={`text-xs tabular-nums ${splitMatches ? "text-muted-foreground" : "text-amber-500"}`}>
+            Split {formatCurrency(draftSum(draft))} of {formatCurrency(total)}
+          </p>) : null}
       </div>);
     };
     /** POS and Cash ("salesPlusTips"): tips entered on top of sales, with the
@@ -400,13 +426,18 @@ export default function EntryForm() {
         const tipsKey = field === "posSales" ? "posTips" : "cashTips";
         const sales = parseMoney(form[field]);
         const tips = parseMoney(form[tipsKey]);
-        return (<div className="mt-2 space-y-1">
-        <Label htmlFor={`${field}-tips`} className="text-xs font-normal text-muted-foreground">
-          + Tips (on top of sales)
-        </Label>
-        <Input id={`${field}-tips`} type="number" step="0.01" value={form[tipsKey]} onChange={(e) => setForm((prev) => ({ ...prev, [tipsKey]: e.target.value }))}/>
-        {sales > 0 && tips > 0 ? (<p className="text-xs text-muted-foreground">
-            {paymentCategoryConfig[field].label} total:{" "}
+        return (<div className="mt-3 space-y-1 border-t border-border/70 pt-3">
+        <div className="flex items-center justify-between gap-3">
+          <Label htmlFor={`${field}-tips`} className="text-sm font-normal text-muted-foreground">
+            + Tips <span className="text-xs">(on top of sales)</span>
+          </Label>
+          <div className="flex items-baseline gap-0.5">
+            <span className="text-sm text-muted-foreground">$</span>
+            <input id={`${field}-tips`} type="number" step="0.01" inputMode="decimal" placeholder="0.00" style={{ width: amountWidth(form[tipsKey]) }} value={form[tipsKey]} onChange={(e) => setForm((prev) => ({ ...prev, [tipsKey]: e.target.value }))} className="max-w-28 bg-transparent text-right text-base tabular-nums outline-none placeholder:text-muted-foreground/50"/>
+          </div>
+        </div>
+        {sales > 0 && tips > 0 ? (<p className="text-right text-xs text-muted-foreground">
+            {paymentCategoryConfig[field].label} total{" "}
             <span className="font-medium text-foreground tabular-nums">{formatCurrency(sales + tips)}</span>
           </p>) : null}
       </div>);
@@ -490,9 +521,9 @@ export default function EntryForm() {
         setRepeatSourceField(field);
     }, [form, getRecurringIneligibilityReason]);
     function renderRepeatSwitch(field: RecurringIncomeSource) {
-        return (<div className="mt-1 flex items-center gap-2">
+        return (<div className="mt-3 flex items-center justify-between gap-2 border-t border-border/70 pt-3">
+        <Label htmlFor={`${field}-repeat`} className="text-sm font-normal text-muted-foreground">Repeats</Label>
         <Switch id={`${field}-repeat`} checked={repeatSourceField === field} onCheckedChange={(checked) => handleRepeatSwitchChange(field, checked)}/>
-        <Label htmlFor={`${field}-repeat`} className="text-xs font-normal text-muted-foreground">Repeats</Label>
       </div>);
     }
     /** Once a field is marked recurring, every other income-affecting field is
@@ -556,6 +587,7 @@ export default function EntryForm() {
     }, [settings]);
     const handleClearForm = useCallback(() => {
         setForm((prev) => buildClearedFormState(prev));
+        setOpenSources(new Set());
         setRepeatSourceField(null);
         setRepeatCadence({ freq: "monthly" });
         setRepeatEndDate("");
@@ -808,6 +840,7 @@ export default function EntryForm() {
             }
             /** Reset raw form fields */
             setForm((prev) => buildClearedFormState(prev));
+            setOpenSources(new Set());
             setExpanded(false);
             setRepeatSourceField(null);
             setRepeatCadence({ freq: "monthly" });
@@ -842,41 +875,39 @@ export default function EntryForm() {
         Loading settings…
       </div>);
     }
-    return (<Card className={`relative overflow-hidden ${expanded ? "gap-6 py-6" : "gap-0 py-4"}`}>
-      <CardHeader className={`flex flex-row items-center justify-between space-y-0 ${expanded ? "" : "px-5"}`}>
-        <div className="flex items-center gap-2">
-          <CardTitle>Add Entry</CardTitle>
-          <Popover>
-            <PopoverTrigger asChild>
-              <button type="button" className="text-muted-foreground hover:text-foreground" aria-label="Entry form help">
-                <Info className="h-4 w-4"/>
-              </button>
-            </PopoverTrigger>
-            <PopoverContent className="w-64 text-sm">
-              Tap the plus button to expand and add a new entry.
-            </PopoverContent>
-          </Popover>
-        </div>
+    // Display only: what this entry adds up to across every source.
+    const independentEntryTotal = visibility.mode === "independent"
+        ? PAYMENT_REPEAT_FIELDS.reduce((sum, field) => sum + parseMoney(form[field]), 0)
+            + (tipsEnabled ? parseMoney(form.posTips) + parseMoney(form.cashTips) : 0)
+            + (form.customIncome ?? []).reduce((sum, item) => sum + parseMoney(item.amount ?? ""), 0)
+        : 0;
+    const independentPersonalCash = visibility.mode === "independent" ? parseMoney(form.unreportedCash) : 0;
+    return (<Card className={`relative overflow-hidden rounded-[22px] border-0 shadow-none ${expanded ? "gap-5 py-5" : "gap-0 py-4"}`}>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 px-5">
+        <button type="button" onClick={() => setExpanded((current) => !current)} disabled={submitting} className="flex min-w-0 flex-col items-start gap-0.5 text-left" aria-hidden="true" tabIndex={-1}>
+          <CardTitle className="text-lg">Add entry</CardTitle>
+          {!expanded ? (<span className="text-sm text-muted-foreground">Log income for any day</span>) : null}
+        </button>
 
-        <Button type="button" variant="outline" size="icon" onClick={() => setExpanded((current) => !current)} aria-label={expanded ? "Collapse entry form" : "Expand entry form"} disabled={submitting}>
+        <Button type="button" variant={expanded ? "ghost" : "default"} size="icon" className="size-10 shrink-0 rounded-full" onClick={() => setExpanded((current) => !current)} aria-label={expanded ? "Collapse entry form" : "Expand entry form"} disabled={submitting}>
           {expanded ? <Minus /> : <Plus />}
         </Button>
       </CardHeader>
 
-      {!expanded ? (<CardContent className="px-5 pt-0 pb-0"/>) : (<CardContent>
+      {!expanded ? (<CardContent className="px-5 pt-0 pb-0"/>) : (<CardContent className="px-5">
         <form onSubmit={handleSubmit} className="space-y-4">
           {submitting ? (<p className="text-sm text-muted-foreground">
               Adding your entry and syncing in the background...
             </p>) : null}
 
           {/* Date */}
-          <div>
-            <Label htmlFor="date">Date</Label>
+          <div className="flex items-center justify-between gap-3 rounded-2xl bg-muted px-4 py-1.5">
+            <Label htmlFor="date" className="shrink-0 text-sm font-normal text-muted-foreground">Date</Label>
             <Input
               id="date"
               type="date"
               data-stackin-date-input="true"
-              className="w-full min-w-0"
+              className="h-9 w-auto min-w-0 border-0 bg-transparent px-0 text-right font-medium shadow-none focus-visible:ring-0"
               value={form.date}
               onChange={(e) => setForm({ ...form, date: e.target.value })}
               min={dateInputBounds?.start}
@@ -1010,103 +1041,135 @@ export default function EntryForm() {
                 and uses the new independent visibility flags. */}
           {visibility?.mode === "independent" && (<>
               {/* Independent Hours */}
-              {visibility.showHours && showNonSourceIncomeField && (<div>
-                  <Label htmlFor="independentHours">Hours Worked</Label>
-                  <Input id="independentHours" type="number" step="0.1" value={form.independentHours} onChange={(e) => setForm({ ...form, independentHours: e.target.value })}/>
+              {visibility.showHours && showNonSourceIncomeField && (<div className="flex items-center justify-between gap-3 rounded-2xl bg-muted px-4 py-1.5">
+                  <Label htmlFor="independentHours" className="text-sm font-normal text-muted-foreground">Hours worked</Label>
+                  <input id="independentHours" type="number" step="0.1" inputMode="decimal" placeholder="0" value={form.independentHours} onChange={(e) => setForm({ ...form, independentHours: e.target.value })} className="h-9 w-24 bg-transparent text-right text-base font-medium tabular-nums outline-none placeholder:text-muted-foreground/50"/>
                 </div>)}
 
-              {/* Venmo */}
-              {visibility.showVenmo && showIncomeSource("venmo") && (<div data-breakdown-field="venmo">
-                  <Label htmlFor="venmo">Venmo</Label>
-                  <Input id="venmo" type="number" step="0.01" value={form.venmo} onFocus={() => setOpenBreakdownField("venmo")} onChange={(e) => updateCategorizedPaymentAmount("venmo", e.target.value)}/>
-                  {renderPaymentBreakdownFields("venmo")}
-                  {renderRepeatSwitch("venmo")}
-                </div>)}
+              {(() => {
+                    // Settings decide which sources exist; the chips only decide
+                    // which of those are open. Anything with an amount stays open.
+                    const paymentSources = ([
+                        { field: "venmo", enabled: visibility.showVenmo, label: "Venmo", chip: "Venmo" },
+                        { field: "appleCash", enabled: visibility.showAppleCash, label: "Apple Pay", chip: "Apple Pay" },
+                        { field: "zelle", enabled: visibility.showZelle, label: "Zelle", chip: "Zelle" },
+                        { field: "posSales", enabled: visibility.showPosSales, label: paymentCategoryConfig.posSales.label, chip: "Card / POS" },
+                        { field: "cashSales", enabled: visibility.showCashSales, label: `${paymentCategoryConfig.cashSales.label} sales`, chip: paymentCategoryConfig.cashSales.label },
+                    ] as const).filter((source) => source.enabled && showIncomeSource(source.field));
+                    const showPersonalCash = visibility.showIndependentUnreportedCash && showNonSourceIncomeField;
+                    const showCustom = visibility.showCustomIncome && showIncomeSource("custom");
+                    const onlyOneSource = paymentSources.length + (showPersonalCash ? 1 : 0) === 1 && !showCustom;
+                    const isPaymentShown = (field: PaymentField) => onlyOneSource || openSources.has(field) || repeatSourceField === field ||
+                        parseMoney(form[field]) > 0 || (field === "posSales" && parseMoney(form.posTips) > 0) || (field === "cashSales" && parseMoney(form.cashTips) > 0);
+                    const isPersonalCashShown = onlyOneSource || openSources.has("personalCash") || parseMoney(form.unreportedCash) > 0;
+                    const chipClass = (on: boolean) => `rounded-full px-3.5 py-2 text-sm font-medium transition-colors ${on ? "bg-foreground text-background" : "bg-muted text-foreground hover:bg-secondary"}`;
+                    const amountInputClass = "min-w-[1ch] max-w-36 bg-transparent text-right text-2xl font-semibold tabular-nums outline-none placeholder:text-muted-foreground/40";
+                    const removeButton = (label: string, onRemove: () => void) => (<button type="button" onClick={onRemove} aria-label={`Remove ${label}`} className="-mr-1 flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-card hover:text-foreground">
+                      <X className="size-4"/>
+                    </button>);
+                    return (<>
+                  {!onlyOneSource && (paymentSources.length > 0 || showPersonalCash || showCustom) && (<div className="space-y-2">
+                      <p className="text-sm font-medium">How were you paid?</p>
+                      <div className="flex flex-wrap gap-2">
+                        {paymentSources.map(({ field, chip }) => {
+                                const shown = isPaymentShown(field);
+                                return (<button key={field} type="button" aria-pressed={shown} className={chipClass(shown)} onClick={() => shown ? document.getElementById(field)?.focus() : openSource(field)}>
+                              {chip}
+                            </button>);
+                            })}
+                        {showPersonalCash && (<button type="button" aria-pressed={isPersonalCashShown} className={chipClass(isPersonalCashShown)} onClick={() => isPersonalCashShown ? document.getElementById("independentUnreportedCash")?.focus() : openSource("personalCash")}>
+                            Personal Cash
+                          </button>)}
+                        {showCustom && (settings.independent?.customIncomeFields ?? []).map((field, idx) => (<button key={`${field.label}-${idx}`} type="button" className={chipClass(false)} onClick={() => addCustomIncomeRow(field.label)}>
+                            + {field.label}
+                          </button>))}
+                        {showCustom && (<button type="button" className={chipClass(false)} onClick={() => addCustomIncomeRow()}>
+                            + Other income
+                          </button>)}
+                      </div>
+                    </div>)}
 
-              {/* Apple Pay */}
-              {visibility.showAppleCash && showIncomeSource("appleCash") && (<div data-breakdown-field="appleCash">
-                  <Label htmlFor="appleCash">Apple Pay</Label>
-                  <Input id="appleCash" type="number" step="0.01" value={form.appleCash} onFocus={() => setOpenBreakdownField("appleCash")} onChange={(e) => updateCategorizedPaymentAmount("appleCash", e.target.value)}/>
-                  {renderPaymentBreakdownFields("appleCash")}
-                  {renderRepeatSwitch("appleCash")}
-                </div>)}
-
-              {visibility.showZelle && showIncomeSource("zelle") && (<div data-breakdown-field="zelle">
-                  <Label htmlFor="zelle">Zelle</Label>
-                  <Input id="zelle" type="number" step="0.01" value={form.zelle} onFocus={() => setOpenBreakdownField("zelle")} onChange={(e) => updateCategorizedPaymentAmount("zelle", e.target.value)}/>
-                  {renderPaymentBreakdownFields("zelle")}
-                  {renderRepeatSwitch("zelle")}
-                </div>)}
-
-              {/* POS Sales */}
-              {visibility.showPosSales && showIncomeSource("posSales") && (<div data-breakdown-field="posSales">
-                  <Label htmlFor="posSales">{paymentCategoryConfig.posSales.label}</Label>
-                  <Input id="posSales" type="number" step="0.01" value={form.posSales} onFocus={() => setOpenBreakdownField("posSales")} onChange={(e) => updateCategorizedPaymentAmount("posSales", e.target.value)}/>
-                  {renderPaymentBreakdownFields("posSales")}
-                  {renderSalesTipsField("posSales")}
-                  {renderRepeatSwitch("posSales")}
-                </div>)}
-
-              {visibility.showCashSales && showIncomeSource("cashSales") && (<div data-breakdown-field="cashSales">
-                  <Label htmlFor="cashSales">{paymentCategoryConfig.cashSales.label} sales</Label>
-                  <Input id="cashSales" type="number" step="0.01" value={form.cashSales} onFocus={() => setOpenBreakdownField("cashSales")} onChange={(e) => updateCategorizedPaymentAmount("cashSales", e.target.value)}/>
-                  {renderPaymentBreakdownFields("cashSales")}
-                  {renderSalesTipsField("cashSales")}
-                  {renderRepeatSwitch("cashSales")}
-                </div>)}
-
-              {/* Personal Cash — its own option, no longer a kind of tip */}
-              {visibility.showIndependentUnreportedCash && showNonSourceIncomeField && (<div>
-                  <Label htmlFor="independentUnreportedCash">Personal Cash</Label>
-                  <Input id="independentUnreportedCash" type="number" step="0.01" value={form.unreportedCash} onChange={(e) => setForm({ ...form, unreportedCash: e.target.value })}/>
-                </div>)}
-
-              {/* Independent Custom Income Repeater */}
-              {visibility.showCustomIncome && showIncomeSource("custom") && (<div className="space-y-2">
-                  <Label>Other income</Label>
-                  {/* Name on its own line — it's the part that matters for
-                      matching 1099s, so it shouldn't be squeezed. */}
-                  {(form.customIncome ?? []).map((item, idx) => (<div key={idx} className="grid grid-cols-[1fr_auto] gap-2">
-                      <IncomeNameInput className="col-span-2" value={item.label} savedNames={getSavedIncomeNames(settings)} aria-label="Who paid you?" onChange={(label) => {
-                            const next = [...form.customIncome];
-                            next[idx] = { ...next[idx], label };
-                            setForm({ ...form, customIncome: next });
-                        }}/>
-                      <Input placeholder="Amount" type="number" step="0.01" value={item.amount} onChange={(e) => {
-                            const next = [...form.customIncome];
-                            next[idx] = {
-                                ...next[idx],
-                                amount: e.target.value,
-                            };
-                            setForm({ ...form, customIncome: next });
-                        }}/>
-                      <select value={item.category} onChange={(e) => {
-                            const next = [...form.customIncome];
-                            next[idx] = {
-                                ...next[idx],
-                                category: e.target.value as IncomeCategory,
-                            };
-                            setForm({ ...form, customIncome: next });
-                        }} className="rounded border border-border bg-secondary px-2 py-1 text-sm">
-                        <option value="services">Services</option>
-                        {tipsEnabled || item.category === "tips" ? <option value="tips">Tips</option> : null}
-                        <option value="products">Products</option>
-                        <option value="other">Other</option>
-                      </select>
+                  {paymentSources.filter(({ field }) => isPaymentShown(field)).map(({ field, label }) => (<div key={field} data-breakdown-field={field} className="rounded-2xl bg-muted px-4 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <Label htmlFor={field} className="text-base font-medium">{label}</Label>
+                        <div className="flex items-center gap-1">
+                          <div className="flex items-baseline gap-0.5">
+                            <span className="text-lg text-muted-foreground">$</span>
+                            <input id={field} type="number" step="0.01" inputMode="decimal" placeholder="0.00" style={{ width: amountWidth(form[field]) }} value={form[field]} onFocus={() => setOpenBreakdownField(field)} onChange={(e) => updateCategorizedPaymentAmount(field, e.target.value)} className={amountInputClass}/>
+                          </div>
+                          {!onlyOneSource && removeButton(label, () => {
+                                    updateCategorizedPaymentAmount(field, "");
+                                    if (field === "posSales" || field === "cashSales") {
+                                        const tipsKey = field === "posSales" ? "posTips" : "cashTips";
+                                        setForm((prev) => ({ ...prev, [tipsKey]: "" }));
+                                    }
+                                    if (repeatSourceField === field)
+                                        setRepeatSourceField(null);
+                                    closeSource(field);
+                                })}
+                        </div>
+                      </div>
+                      {renderPaymentBreakdownFields(field)}
+                      {(field === "posSales" || field === "cashSales") && renderSalesTipsField(field)}
+                      {renderRepeatSwitch(field)}
                     </div>))}
-                  <div className="flex flex-wrap gap-2">
-                    {(settings.independent?.customIncomeFields ?? []).map((field, idx) => (<Button key={`${field.label}-${idx}`} type="button" variant="outline" size="sm" onClick={() => addCustomIncomeRow(field.label)}>
-                        + {field.label}
-                      </Button>))}
-                    <Button type="button" variant="outline" size="sm" onClick={() => addCustomIncomeRow()}>
-                      + Other income
-                    </Button>
-                  </div>
 
-                  {(form.customIncome ?? []).length === 1 ? renderRepeatSwitch("custom") : null}
-                </div>)}
+                  {/* Personal Cash — its own option, no longer a kind of tip */}
+                  {showPersonalCash && isPersonalCashShown && (<div className="flex items-center justify-between gap-3 rounded-2xl bg-muted px-4 py-3">
+                      <Label htmlFor="independentUnreportedCash" className="text-base font-medium">Personal Cash</Label>
+                      <div className="flex items-center gap-1">
+                        <div className="flex items-baseline gap-0.5">
+                          <span className="text-lg text-muted-foreground">$</span>
+                          <input id="independentUnreportedCash" type="number" step="0.01" inputMode="decimal" placeholder="0.00" style={{ width: amountWidth(form.unreportedCash) }} value={form.unreportedCash} onChange={(e) => setForm({ ...form, unreportedCash: e.target.value })} className={amountInputClass}/>
+                        </div>
+                        {!onlyOneSource && removeButton("Personal Cash", () => {
+                                setForm((prev) => ({ ...prev, unreportedCash: "" }));
+                                closeSource("personalCash");
+                            })}
+                      </div>
+                    </div>)}
 
-              {repeatSourceField ? (<div className="space-y-3 rounded-xl border border-border bg-muted/10 px-4 py-3">
+                  {/* Independent Custom Income Repeater */}
+                  {showCustom && (form.customIncome ?? []).map((item, idx) => (<div key={idx} className="space-y-2 rounded-2xl bg-muted px-4 py-3">
+                      {/* Name on its own line — it's the part that matters for
+                          matching 1099s, so it shouldn't be squeezed. */}
+                      <IncomeNameInput className="h-10 rounded-xl border-0 bg-card shadow-none" value={item.label} savedNames={getSavedIncomeNames(settings)} aria-label="Who paid you?" onChange={(label) => {
+                                const next = [...form.customIncome];
+                                next[idx] = { ...next[idx], label };
+                                setForm({ ...form, customIncome: next });
+                            }}/>
+                      <div className="flex items-center justify-between gap-3">
+                        <select value={item.category} aria-label="Income category" onChange={(e) => {
+                                const next = [...form.customIncome];
+                                next[idx] = {
+                                    ...next[idx],
+                                    category: e.target.value as IncomeCategory,
+                                };
+                                setForm({ ...form, customIncome: next });
+                            }} className="rounded-full border-0 bg-card px-3 py-1.5 text-sm">
+                          <option value="services">Services</option>
+                          {tipsEnabled || item.category === "tips" ? <option value="tips">Tips</option> : null}
+                          <option value="products">Products</option>
+                          <option value="other">Other</option>
+                        </select>
+                        <div className="flex items-baseline gap-0.5">
+                          <span className="text-lg text-muted-foreground">$</span>
+                          <input type="number" step="0.01" inputMode="decimal" placeholder="0.00" aria-label="Amount" style={{ width: amountWidth(item.amount) }} value={item.amount} onChange={(e) => {
+                                const next = [...form.customIncome];
+                                next[idx] = {
+                                    ...next[idx],
+                                    amount: e.target.value,
+                                };
+                                setForm({ ...form, customIncome: next });
+                            }} className={amountInputClass}/>
+                        </div>
+                      </div>
+                      {(form.customIncome ?? []).length === 1 ? renderRepeatSwitch("custom") : null}
+                    </div>))}
+                </>);
+                })()}
+
+              {repeatSourceField ? (<div className="space-y-3 rounded-2xl bg-accent px-4 py-3">
                   <div className="text-sm font-medium">
                     Repeats: {repeatSourceField === "custom"
                         ? (form.customIncome[0]?.label || "Custom Income")
@@ -1114,19 +1177,29 @@ export default function EntryForm() {
                   </div>
                   <RecurringCadenceFields idPrefix="income" cadence={repeatCadence} onCadenceChange={setRepeatCadence} endDate={repeatEndDate} onEndDateChange={setRepeatEndDate} minEndDate={form.date}/>
                 </div>) : null}
+
+              {independentEntryTotal > 0 || independentPersonalCash > 0 ? (<div className="flex items-baseline justify-between gap-3 px-1 pt-1">
+                  <span className="text-sm text-muted-foreground">Entry total</span>
+                  <span className="text-right">
+                    <span className="text-2xl font-semibold tabular-nums">{formatCurrency(independentEntryTotal)}</span>
+                    {independentPersonalCash > 0 ? (<span className="block text-xs text-muted-foreground tabular-nums">
+                        + {formatCurrency(independentPersonalCash)} personal cash
+                      </span>) : null}
+                  </span>
+                </div>) : null}
             </>)}
 
-          {visibility?.showNotes && (<div>
-              <Label htmlFor="notes">Notes</Label>
-              <Input id="notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Optional notes" type="text"/>
+          {visibility?.showNotes && (<div className="flex items-center justify-between gap-3 rounded-2xl bg-muted px-4 py-1.5">
+              <Label htmlFor="notes" className="shrink-0 text-sm font-normal text-muted-foreground">Notes</Label>
+              <Input id="notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Optional" type="text" className="h-9 border-0 bg-transparent px-0 text-right shadow-none focus-visible:ring-0"/>
             </div>)}
 
-          <div className="flex gap-2">
-            <Button type="button" variant="outline" className="flex-1" onClick={handleClearForm} disabled={submitting}>
-              Clear Form
+          <div className="flex gap-2 pt-1">
+            <Button type="button" variant="ghost" className="h-12 rounded-2xl px-5 text-muted-foreground" onClick={handleClearForm} disabled={submitting}>
+              Clear
             </Button>
-            <Button type="submit" disabled={submitting} className="flex-1">
-              {submitting ? "Saving..." : repeatSourceField ? "Add Recurring Income" : "Add Entry"}
+            <Button type="submit" disabled={submitting} className="h-12 flex-1 rounded-2xl text-base font-semibold">
+              {submitting ? "Saving..." : repeatSourceField ? "Add recurring income" : "Add entry"}
             </Button>
           </div>
         </form>

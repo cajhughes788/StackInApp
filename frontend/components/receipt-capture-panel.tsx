@@ -1621,7 +1621,7 @@ export default function ReceiptCapturePanel() {
                     showLabel
                     size={210}
                     cardBackground="transparent"
-                    textColor="#2BAE8A"
+                    textColor="#2FA866"
                   />
                 </div>
               ) : (

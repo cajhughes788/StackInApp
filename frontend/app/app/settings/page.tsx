@@ -1032,7 +1032,7 @@ export default function SettingsPage() {
             </div>) : null}
           {isInitialSettingsSetup ? (<Button className={cn("w-full", isInitialSetupReadyToSave
                 ? "bg-emerald-600 text-white hover:bg-emerald-600 focus-visible:ring-emerald-300 disabled:bg-emerald-600/75 disabled:text-white"
-                : "bg-slate-200 text-slate-700 hover:bg-slate-200 focus-visible:ring-slate-300 disabled:bg-slate-200 disabled:text-slate-700")} onClick={handleSaveAndContinue} disabled={isPrimarySaveDisabled} variant="default">
+                : "bg-secondary text-foreground/80 hover:bg-secondary focus-visible:ring-ring/40 disabled:bg-secondary disabled:text-foreground/80")} onClick={handleSaveAndContinue} disabled={isPrimarySaveDisabled} variant="default">
               {saveState.status === "error"
                     ? "Retry Save and Continue"
                     : isSaving
@@ -1052,7 +1052,7 @@ export default function SettingsPage() {
         <DialogContent className="max-w-md text-center space-y-4">
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">
-              Welcome to StackIn!
+              Welcome to 521!
             </DialogTitle>
             <DialogDescription>
               Configure your settings to start tracking your earnings

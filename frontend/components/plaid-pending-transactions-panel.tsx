@@ -129,7 +129,7 @@ function TransactionReviewCard({
   const isRefund = transaction.isRefund === true
 
   return (
-    <div className="space-y-3 rounded-xl border border-muted bg-card p-4">
+    <div className="space-y-3 rounded-[18px] bg-card p-4">
       <div className="flex items-start justify-between gap-3">
         {/* min-w-0 + break-words: a long unbroken bank descriptor must wrap
             instead of pushing the amount off-screen and making the page
@@ -156,7 +156,7 @@ function TransactionReviewCard({
         {/* Capped at half the row, with the category badge allowed to wrap —
             a long custom category would otherwise squeeze the name instead. */}
         <div className="max-w-[50%] shrink-0 text-right">
-          <div className={`font-semibold ${isRefund ? "text-emerald-700" : ""}`}>
+          <div className={`font-semibold tabular-nums ${isRefund ? "text-emerald-600 dark:text-emerald-400" : ""}`}>
             {isRefund ? `Refund ${formatCurrency(transaction.amount)}` : formatCurrency(transaction.amount)}
           </div>
           {transaction.suggestedExpenseAccount ? (
@@ -169,7 +169,7 @@ function TransactionReviewCard({
 
       <div>
         <Select value={categoryValue} onValueChange={onCategoryChange}>
-          <SelectTrigger>
+          <SelectTrigger className="w-full rounded-xl border-0 bg-muted shadow-none">
             <SelectValue placeholder="Choose expense category" />
           </SelectTrigger>
           <SelectContent>
@@ -188,36 +188,25 @@ function TransactionReviewCard({
         </div>
       ) : null}
 
-      <div className="flex justify-end gap-1">
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          aria-label={isRefund ? "Apply refund to business expenses" : "Confirm as business"}
-          onClick={onConfirm}
-        >
-          <Check className="h-4 w-4" />
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" size="sm" className="rounded-full px-4 font-semibold" onClick={onConfirm}>
+          <Check className="h-4 w-4" /> {isRefund ? "Apply refund" : "Business"}
+        </Button>
+        <Button type="button" variant="ghost" size="sm" className="rounded-full px-4" onClick={onDismiss}>
+          {isRefund ? "Not a refund" : "Personal"}
         </Button>
         {isRefund ? null : (
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
             size="icon"
+            className="ml-auto rounded-full text-muted-foreground"
             aria-label={isReceiptRowOpen ? "Remove receipt" : "Attach receipt"}
             onClick={onToggleReceiptRow}
           >
             <Paperclip className="h-4 w-4" />
           </Button>
         )}
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          aria-label={isRefund ? "Not a business refund" : "Not business"}
-          onClick={onDismiss}
-        >
-          <X className="h-4 w-4" />
-        </Button>
       </div>
     </div>
   )
@@ -590,18 +579,17 @@ export default function PlaidPendingTransactionsPanel() {
       <button
         type="button"
         onClick={() => setCollapsed((current) => !current)}
-        className="flex w-full items-center justify-between rounded-lg border border-muted bg-card px-3 py-2 text-sm font-medium"
+        className="flex w-full items-center justify-between px-1 text-sm font-medium text-muted-foreground"
+        aria-expanded={!collapsed}
       >
-        <span>
-          Bank transactions to review{transactions.length ? ` (${transactions.length})` : ""}
-        </span>
+        <span>Charges{transactions.length ? ` · ${transactions.length}` : ""}</span>
         {collapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
       </button>
 
       {!collapsed && isLoading && transactions.length === 0 ? (
         <div className="space-y-3" aria-hidden="true">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="space-y-3 rounded-xl border border-muted bg-card p-4">
+            <div key={i} className="space-y-3 rounded-[18px] bg-card p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="space-y-2">
                   <Skeleton className="h-4 w-32" />
@@ -651,10 +639,10 @@ export default function PlaidPendingTransactionsPanel() {
       ) : null}
 
       {selectedIds.size > 0 ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-muted bg-muted/40 p-3">
+        <div className="flex flex-wrap items-center gap-2 rounded-[18px] bg-card p-3">
           <span className="text-sm font-medium">{selectedIds.size} selected</span>
           <Select value={bulkCategory} onValueChange={setBulkCategory}>
-            <SelectTrigger className="w-[200px]">
+            <SelectTrigger className="w-[200px] rounded-xl border-0 bg-muted shadow-none">
               <SelectValue placeholder="Choose expense category" />
             </SelectTrigger>
             <SelectContent>

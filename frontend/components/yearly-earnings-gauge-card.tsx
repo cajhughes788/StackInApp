@@ -104,7 +104,7 @@ export default function YearlyEarningsGaugeCard({
         id: "cash",
         label: "Cash",
         value: breakdown.cash,
-        color: "#2BAE8A",
+        color: "#2FA866",
         iconColor: "#26755E",
         icon: Banknote,
         note: "Reported and personal cash earnings",
@@ -183,38 +183,38 @@ export default function YearlyEarningsGaugeCard({
       : null
 
   return (
-    <div className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] shadow-[0_18px_60px_-32px_rgba(15,23,42,0.45)] dark:border-slate-700/80 dark:bg-card dark:bg-none dark:shadow-none">
+    <div className="overflow-hidden rounded-[28px] border border-border/80 bg-card shadow-[0_18px_60px_-32px_rgba(15,23,42,0.45)] dark:bg-none dark:shadow-none">
       <button
         type="button"
         onClick={() => setIsExpanded((current) => !current)}
-        className="flex w-full items-center justify-between gap-4 px-4 py-4 text-left transition hover:bg-slate-50/70 dark:hover:bg-slate-800/50 min-[420px]:px-5 sm:px-6"
+        className="flex w-full items-center justify-between gap-4 px-4 py-4 text-left transition hover:bg-muted/70 min-[420px]:px-5 sm:px-6"
         aria-expanded={isExpanded}
       >
         <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
             {year}
           </p>
-          <h2 className="mt-1 whitespace-nowrap text-[clamp(1.35rem,4.2vw,2.35rem)] font-semibold tracking-tight text-slate-950 dark:text-white">
+          <h2 className="mt-1 whitespace-nowrap text-[clamp(1.35rem,4.2vw,2.35rem)] font-semibold tracking-tight text-foreground">
             Yearly Earnings Overview
           </h2>
-          <div className="mt-2 text-[clamp(2.05rem,5vw,3.3rem)] font-semibold tracking-tight text-[#2BAE8A] [text-shadow:0_0_12px_rgba(43,174,138,0.18)]">
+          <div className="mt-2 text-[clamp(2.05rem,5vw,3.3rem)] font-semibold tracking-tight text-[#2FA866] [text-shadow:0_0_12px_rgba(47,168,102,0.18)]">
             {formatCurrency(totalGross)}
           </div>
         </div>
 
         <div className="flex shrink-0 items-center gap-3">
           <div className="hidden text-right sm:block">
-            <div className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+            <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
               Pay periods
             </div>
-            <div className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">
+            <div className="mt-1 text-sm font-semibold text-foreground">
               {payPeriods}
             </div>
           </div>
           <motion.span
             animate={{ rotate: isExpanded ? 180 : 0 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
-            className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+            className="flex h-11 w-11 items-center justify-center rounded-full border border-border bg-card text-foreground/80 shadow-sm"
           >
             <ChevronDown className="h-5 w-5" />
           </motion.span>
@@ -229,7 +229,7 @@ export default function YearlyEarningsGaugeCard({
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-            className="overflow-hidden border-t border-slate-200/70 dark:border-slate-700/70"
+            className="overflow-hidden border-t border-border/70"
           >
             <div className="px-4 py-5 min-[420px]:px-5 sm:px-6 lg:px-8">
               <div className="mx-auto flex w-full max-w-[22rem] flex-col items-center gap-4 min-[420px]:max-w-[24rem] sm:max-w-[28rem] lg:max-w-[34rem]">
@@ -307,7 +307,7 @@ export default function YearlyEarningsGaugeCard({
                         animate={{ opacity: 1, scale: 1 }}
                         exit={{ opacity: 0, scale: 0.92 }}
                         transition={{ duration: 0.18, ease: "easeOut" }}
-                        className="flex h-[4.6rem] w-[4.6rem] flex-col items-center justify-center rounded-[1.55rem] border border-white/90 bg-white/95 px-1 shadow-[0_18px_36px_-28px_rgba(15,23,42,0.55)] backdrop-blur sm:h-[5.35rem] sm:w-[5.35rem] dark:border-slate-700/60 dark:bg-slate-800/95"
+                        className="flex h-[4.6rem] w-[4.6rem] flex-col items-center justify-center rounded-[1.55rem] border border-border/60 bg-card/95 px-1 shadow-[0_18px_36px_-28px_rgba(15,23,42,0.55)] backdrop-blur sm:h-[5.35rem] sm:w-[5.35rem]"
                       >
                         <div
                           className="flex h-10 w-10 items-center justify-center rounded-[1rem] text-white shadow-sm sm:h-12 sm:w-12"
@@ -318,7 +318,7 @@ export default function YearlyEarningsGaugeCard({
                           <CenterIcon className="h-5 w-5 sm:h-6 sm:w-6" />
                         </div>
                         {selectedPercentage ? (
-                          <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400 sm:text-[11px]">
+                          <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground sm:text-[11px]">
                             {selectedPercentage}
                           </div>
                         ) : null}
@@ -333,13 +333,13 @@ export default function YearlyEarningsGaugeCard({
                   }`}
                 >
                   {selectedSegment ? (
-                    <div className="rounded-2xl border border-slate-200/80 bg-white/90 p-3.5 shadow-sm min-[420px]:p-4 dark:border-slate-700/80 dark:bg-slate-800/60">
+                    <div className="rounded-2xl border border-border/80 bg-card/90 p-3.5 shadow-sm min-[420px]:p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                             Selected
                           </div>
-                          <div className="mt-1.5 text-base font-semibold text-slate-950 dark:text-white">
+                          <div className="mt-1.5 text-base font-semibold text-foreground">
                             {selectedSegment.label}
                           </div>
                         </div>
@@ -352,58 +352,58 @@ export default function YearlyEarningsGaugeCard({
                           {SelectedIcon ? <SelectedIcon className="h-4 w-4" /> : null}
                         </div>
                       </div>
-                      <div className="mt-2 text-2xl font-semibold tabular-nums text-[#2BAE8A] [text-shadow:0_0_10px_rgba(43,174,138,0.16)]">
+                      <div className="mt-2 text-2xl font-semibold tabular-nums text-[#2FA866] [text-shadow:0_0_10px_rgba(47,168,102,0.16)]">
                         {formatCurrency(selectedSegment.value)}
                       </div>
                       {selectedSegment.id === "cash" ? (
-                        <div className="mt-2.5 grid gap-1.5 text-sm text-slate-600 dark:text-slate-300">
+                        <div className="mt-2.5 grid gap-1.5 text-sm text-muted-foreground">
                           <div className="flex items-center justify-between gap-3">
-                            <span className="uppercase tracking-[0.18em] text-[11px] text-slate-500 dark:text-slate-400">
+                            <span className="uppercase tracking-[0.18em] text-[11px] text-muted-foreground">
                               Reported
                             </span>
-                            <span className="font-semibold tabular-nums text-slate-900 dark:text-white">
+                            <span className="font-semibold tabular-nums text-foreground">
                               {formatCurrency(cashBreakdown.reported)}
                             </span>
                           </div>
                           <div className="flex items-center justify-between gap-3">
-                            <span className="uppercase tracking-[0.18em] text-[11px] text-slate-500 dark:text-slate-400">
+                            <span className="uppercase tracking-[0.18em] text-[11px] text-muted-foreground">
                               Personal
                             </span>
-                            <span className="font-semibold tabular-nums text-slate-900 dark:text-white">
+                            <span className="font-semibold tabular-nums text-foreground">
                               {formatCurrency(cashBreakdown.unreported)}
                             </span>
                           </div>
                         </div>
                       ) : (
-                        <div className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                        <div className="mt-2 text-sm text-muted-foreground">
                           {selectedSegment.note}
                         </div>
                       )}
                     </div>
                   ) : null}
 
-                  <div className="rounded-2xl border border-slate-200/80 bg-white/90 p-3.5 shadow-sm min-[420px]:p-4 dark:border-slate-700/80 dark:bg-slate-800/60">
-                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+                  <div className="rounded-2xl border border-border/80 bg-card/90 p-3.5 shadow-sm min-[420px]:p-4">
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                       Total Gross
                     </div>
-                    <div className="mt-1.5 text-[clamp(1.85rem,4vw,2.45rem)] font-semibold tabular-nums leading-none text-slate-950 dark:text-white">
+                    <div className="mt-1.5 text-[clamp(1.85rem,4vw,2.45rem)] font-semibold tabular-nums leading-none text-foreground">
                       {formatCurrency(totalGross)}
                     </div>
-                    <div className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                    <div className="mt-2 text-sm text-muted-foreground">
                       {selectedSegment
                         ? `Across ${payPeriods} ${payPeriods === 1 ? "pay period" : "pay periods"} this year.`
                         : "Tap a segment to inspect the yearly mix."}
                     </div>
                   </div>
 
-                  <div className="rounded-2xl border border-slate-200/80 bg-white/90 p-3.5 shadow-sm min-[420px]:p-4 dark:border-slate-700/80 dark:bg-slate-800/60">
-                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+                  <div className="rounded-2xl border border-border/80 bg-card/90 p-3.5 shadow-sm min-[420px]:p-4">
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                       Avg / Hour
                     </div>
-                    <div className="mt-1.5 text-[clamp(1.85rem,4vw,2.45rem)] font-semibold tabular-nums leading-none text-slate-950 dark:text-white">
+                    <div className="mt-1.5 text-[clamp(1.85rem,4vw,2.45rem)] font-semibold tabular-nums leading-none text-foreground">
                       {avgPerHour > 0 ? formatCurrency(avgPerHour) : "—"}
                     </div>
-                    <div className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                    <div className="mt-2 text-sm text-muted-foreground">
                       Total gross earnings divided by hours worked.
                     </div>
                   </div>

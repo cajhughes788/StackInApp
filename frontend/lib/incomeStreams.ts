@@ -26,8 +26,10 @@ export type IncomeStream = {
   share: number
   // Personal Cash has no category split; it's all zeros there.
   categories: IncomeStreamCategories
-  // One row per date with income in this stream, newest first.
-  days: Array<{ date: string; amount: number }>
+  // One row per date with income in this stream, newest first, with what
+  // each entry that day put into this stream (so a day row can be edited
+  // one entry at a time, like a grid cell).
+  days: Array<{ date: string; amount: number; entries: Array<{ entryId: string; amount: number }> }>
 }
 
 const CATEGORIES: IncomeCategory[] = ["services", "tips", "products", "other"]
@@ -44,27 +46,32 @@ export function computeIncomeStreams(
   entries: EntryType[],
   options: { includePersonalCash: boolean }
 ): { total: number; streams: IncomeStream[] } {
-  const byKey = new Map<IncomeStreamKey, { name?: string; amount: number; categories: IncomeStreamCategories; days: Map<string, number> }>()
+  type DayTally = { amount: number; byEntry: Map<string, number> }
+  const byKey = new Map<IncomeStreamKey, { name?: string; amount: number; categories: IncomeStreamCategories; days: Map<string, DayTally> }>()
 
-  const add = (key: IncomeStreamKey, date: string, amount: number, categories?: Partial<IncomeStreamCategories>, name?: string) => {
+  const add = (key: IncomeStreamKey, entryId: string, date: string, amount: number, categories?: Partial<IncomeStreamCategories>, name?: string) => {
     if (!amount) return
     const stream = byKey.get(key) ?? { name, amount: 0, categories: emptyCategories(), days: new Map() }
     stream.amount += amount
     for (const category of CATEGORIES) stream.categories[category] += Number(categories?.[category] ?? 0)
-    stream.days.set(date, (stream.days.get(date) ?? 0) + amount)
+    const day = stream.days.get(date) ?? { amount: 0, byEntry: new Map() }
+    day.amount += amount
+    day.byEntry.set(entryId, (day.byEntry.get(entryId) ?? 0) + amount)
+    stream.days.set(date, day)
     byKey.set(key, stream)
   }
 
   for (const entry of entries) {
     const independent = entry.independent
     if (entry.workspace !== "independent" || !independent) continue
+    const entryId = entry.id ?? ""
     for (const breakdown of independent.incomeBreakdowns ?? []) {
       // "other" lines are handled below, split into named and unnamed.
       if (breakdown.paymentMethod === "other") continue
       // Card money — old card tips, or a deposit marked "Card" — counts
       // under Card / POS, like the entries grid's Card / POS column.
       const key = breakdown.paymentMethod === "card" ? "pos" : breakdown.paymentMethod
-      add(key, entry.date, getIncomeBreakdownTotal(breakdown), breakdown)
+      add(key, entryId, entry.date, getIncomeBreakdownTotal(breakdown), breakdown)
     }
     // Named amounts can only be what the "other" lines actually hold: an
     // entry whose customIncome was never mirrored into them (old data) never
@@ -78,13 +85,13 @@ export function computeIncomeStreams(
       const name = item.label?.trim() || "Other income"
       const amount = Math.max(0, Number(item.amount ?? 0)) * namedScale
       // Grouped case-insensitively; the first spelling seen is displayed.
-      add(`named:${name.toLowerCase()}`, entry.date, amount, { [item.category ?? "other"]: amount }, name)
+      add(`named:${name.toLowerCase()}`, entryId, entry.date, amount, { [item.category ?? "other"]: amount }, name)
     }
     const unnamedOther = getNonCustomOtherIncome(independent)
-    add("other", entry.date, unnamedOther.total, unnamedOther)
+    add("other", entryId, entry.date, unnamedOther.total, unnamedOther)
     if (options.includePersonalCash) {
       // Same field the total uses (computeIndependentDayTotal).
-      add("personal_cash", entry.date, Number(independent.unreportedCash ?? 0))
+      add("personal_cash", entryId, entry.date, Number(independent.unreportedCash ?? 0))
     }
   }
 
@@ -99,7 +106,13 @@ export function computeIncomeStreams(
         CATEGORIES.map((category) => [category, round2(stream.categories[category])])
       ) as IncomeStreamCategories,
       days: [...stream.days.entries()]
-        .map(([date, amount]) => ({ date, amount: round2(amount) }))
+        .map(([date, day]) => ({
+          date,
+          amount: round2(day.amount),
+          entries: [...day.byEntry.entries()]
+            .map(([entryId, amount]) => ({ entryId, amount: round2(amount) }))
+            .filter((item) => item.amount !== 0),
+        }))
         .filter((day) => day.amount !== 0)
         .sort((a, b) => b.date.localeCompare(a.date)),
     }))
