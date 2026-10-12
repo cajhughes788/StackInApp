@@ -538,14 +538,14 @@ export default function CommonSettingsSection({
 
   return (
     <>
-      <div className="space-y-8">
+      <div className="space-y-5">
       <Card>
         <CardHeader>
           <CardTitle>Notes</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex items-center justify-between">
-            <Label>Enable Notes on Entries</Label>
+            <Label>Enable notes on entries</Label>
             <Switch
               checked={local.useNotes ?? false}
               onCheckedChange={(value) => updateField("useNotes", value, "immediate")}
@@ -557,11 +557,11 @@ export default function CommonSettingsSection({
       {showEntryReminderControls ? (
       <Card>
         <CardHeader>
-          <CardTitle>Entry Reminders</CardTitle>
+          <CardTitle>Entry reminders</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between">
-            <Label>Enable Entry Reminders</Label>
+            <Label>Enable entry reminders</Label>
             <Switch
               checked={remindersEnabled}
               onCheckedChange={async (value) => {
@@ -613,7 +613,7 @@ export default function CommonSettingsSection({
               <div className="space-y-4 border-l pl-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <Label className="block text-sm">Time-Based Reminder</Label>
+                    <Label className="block text-sm">Time-based reminder</Label>
                     <Switch
                       checked={hasEnabledTimeReminder}
                       onCheckedChange={async (value) => {
@@ -666,11 +666,11 @@ export default function CommonSettingsSection({
                 </div>
 
                 {timeReminderExpanded && timeReminder ? (
-                  <div className="rounded-md border border-border bg-card px-3 py-3">
+                  <div className="rounded-2xl bg-muted px-4 py-3">
                     <div className="flex items-end justify-between gap-3">
                       <div className="w-[8.5rem] max-w-full space-y-2">
                         <Label htmlFor={`time-reminder-${timeReminder.id}`}>
-                          Reminder Time
+                          Reminder time
                         </Label>
                         <Input
                           className="w-full"
@@ -695,7 +695,7 @@ export default function CommonSettingsSection({
                       </Button>
                     </div>
                     <div className="mt-4 space-y-2">
-                      <Label>Reminder Behavior</Label>
+                      <Label>Reminder behavior</Label>
                       <Select
                         value={
                           timeReminderDraft?.deliveryMode ??
@@ -742,7 +742,7 @@ export default function CommonSettingsSection({
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
                     <Label className="block text-sm">
-                      Location-Based Reminders
+                      Location-based reminders
                     </Label>
                     <Switch
                       checked={hasEnabledLocationReminder}
@@ -782,10 +782,10 @@ export default function CommonSettingsSection({
                 </div>
 
                 {locationReminderExpanded && locationReminder ? (
-                  <div className="space-y-4 rounded-md border border-border bg-card px-3 py-3">
+                  <div className="space-y-4 rounded-2xl bg-muted px-4 py-3">
                     <div className="space-y-2">
                       <Label htmlFor={`location-label-${locationReminder.id}`}>
-                        Work Location Name
+                        Work location name
                       </Label>
                       <Input
                         id={`location-label-${locationReminder.id}`}
@@ -851,7 +851,7 @@ export default function CommonSettingsSection({
                     </div>
 
                     <div className="space-y-2">
-                      <Label>Reminder Behavior</Label>
+                      <Label>Reminder behavior</Label>
                       <Select
                         value={
                           locationReminderDraft?.deliveryMode ??
@@ -883,7 +883,7 @@ export default function CommonSettingsSection({
                     {nativePlatform === "android" ? (
                       <p className="text-sm text-muted-foreground">
                         On Android, location reminders may not work unless you
-                        allow StackIn to auto-launch in your phone settings.
+                        allow 521 to auto-launch in your phone settings.
                       </p>
                     ) : null}
 
@@ -927,7 +927,7 @@ export default function CommonSettingsSection({
             <AlertDialogTitle>Turn On &ldquo;Always&rdquo; Location Access</AlertDialogTitle>
             <AlertDialogDescription>
               Location-based reminders need location access set to{" "}
-              <strong>Always</strong>, but StackIn currently only has partial
+              <strong>Always</strong>, but 521 currently only has partial
               or no access.
               <br />
               <br />
@@ -935,7 +935,7 @@ export default function CommonSettingsSection({
               <br />
               1. Open the <strong>Settings</strong> app
               <br />
-              2. Tap <strong>StackIn</strong>
+              2. Tap <strong>521</strong>
               <br />
               3. Tap <strong>Location</strong>
               <br />

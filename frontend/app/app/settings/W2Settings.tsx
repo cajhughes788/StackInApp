@@ -82,13 +82,13 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
         const cents = digits.slice(-2);
         return Number(`${dollars}.${cents}`);
     }
-    return (<div className="space-y-8">
+    return (<div className="space-y-5">
       <Card>
         <CardHeader>
-          <CardTitle>Income Gauge Target</CardTitle>
+          <CardTitle>Pay period goal</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
-          <Label htmlFor="incomeTargetPerPeriod">Target Income Per Pay Period ($)</Label>
+          <Label htmlFor="incomeTargetPerPeriod">Income goal per pay period ($)</Label>
           <Input id="incomeTargetPerPeriod" type="number" step="0.01" min="0" placeholder="Optional" value={local.incomeTargetPerPeriod ?? ""} onChange={(e) => {
             const raw = e.target.value;
             if (raw === "")
@@ -96,7 +96,7 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
             update("incomeTargetPerPeriod", Number(raw), "deferred");
         }}/>
           <p className="text-sm text-muted-foreground">
-            If you set a target, your pay period income gauge will fill based on progress toward that amount.
+            Your home screen shows each pay period’s gross pay as a % of this goal.
           </p>
         </CardContent>
       </Card>
@@ -104,7 +104,7 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
       {/* Hourly Employee */}
       <Card>
         <CardHeader>
-          <CardTitle>Hourly Income</CardTitle>
+          <CardTitle>Hourly income</CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="flex items-center justify-between">
@@ -121,7 +121,7 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
           {local.useHours && (<div className="space-y-6">
               {/* Default Hourly Rate */}
               <div className="space-y-2">
-                <Label htmlFor="defaultHourlyRate">Default Hourly Rate ($)</Label>
+                <Label htmlFor="defaultHourlyRate">Default hourly rate ($)</Label>
                 <Input id="defaultHourlyRate" type="number" step="0.01" placeholder="0.00" value={local.defaultHourlyRate ?? ""} // FIX: sparse optional numeric
          onChange={(e) => {
                 const raw = e.target.value;
@@ -149,7 +149,7 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
 
               {/* Additional Rates */}
               <div className="space-y-3">
-                <Label>Additional Rates</Label>
+                <Label>Additional rates</Label>
                 <p className="text-xs text-muted-foreground">
                   Add other positions you work (like bartender or trainer). New
                   entries use your default rate, and you can pick one of these
@@ -160,7 +160,7 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
                 const isEditing = editingRateId === r.id;
                 const list = local.additionalRates ?? [];
                 if (!isEditing) {
-                    return (<div key={r.id} className="flex items-center justify-between rounded-md border bg-secondary/70 px-4 py-3">
+                    return (<div key={r.id} className="flex items-center justify-between rounded-2xl bg-muted px-4 py-3">
                         <div className="flex min-w-0 items-center space-x-3">
                           <Label className="truncate">{r.title}</Label>
                           <span className="text-sm text-muted-foreground">
@@ -211,7 +211,7 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
 
               {/* Hour Input Mode */}
               <div ref={hourInputModeRef} className="space-y-2">
-                <Label>Hour Input Mode</Label>
+                <Label>Hour input mode</Label>
                 <Select open={isHourInputModeOpen} onOpenChange={setIsHourInputModeOpen} value={local.workInputMode} onValueChange={(v) => {
                 update("workInputMode", v as W2SettingsType["workInputMode"], "immediate");
                 setIsHourInputModeOpen(false);
@@ -235,7 +235,7 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <div>
-                    <Label htmlFor="autoBreakDeduction">Break Deduction</Label>
+                    <Label htmlFor="autoBreakDeduction">Break deduction</Label>
                     <p className="text-sm text-muted-foreground">
                       Automatically deduct selected break duration.
                     </p>
@@ -258,7 +258,7 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
               {/* Additional Deductions */}
               <div className="space-y-3 pt-2">
                 <div className="flex items-center justify-between">
-                  <Label>Additional Deductions</Label>
+                  <Label>Additional deductions</Label>
                   <div className="text-sm text-muted-foreground cursor-default">
                     i
                   </div>
@@ -277,7 +277,7 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
                 {(local.customDeductions ?? []).map((d, index) => {
                 const isEditing = editingRow === index;
                 if (!isEditing) {
-                    return (<div key={index} className="flex items-center justify-between rounded-md border bg-secondary/70 px-4 py-3">
+                    return (<div key={index} className="flex items-center justify-between rounded-2xl bg-muted px-4 py-3">
                         <div className="flex items-center space-x-3">
                           <Label>{d.label}</Label>
                           <span className="text-sm text-muted-foreground">
@@ -374,7 +374,7 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
       {/* Tipped Employee */}
       <Card>
         <CardHeader>
-          <CardTitle>Tip Income</CardTitle>
+          <CardTitle>Tip income</CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="flex items-center justify-between">
@@ -396,13 +396,13 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
               </p>
 
               <div className="flex items-center justify-between">
-                <Label htmlFor="askCardTips">Credit Card Tips</Label>
+                <Label htmlFor="askCardTips">Credit card tips</Label>
                 <Switch id="askCardTips" checked={local.askCardTips ?? false} // FIX
          onCheckedChange={(v) => update("askCardTips", v, "immediate")}/>
               </div>
 
               <div className="flex items-center justify-between">
-                <Label htmlFor="askReportedCash">Reported Cash</Label>
+                <Label htmlFor="askReportedCash">Reported cash</Label>
                 <Switch id="askReportedCash" checked={local.askReportedCash ?? false} // FIX
          onCheckedChange={(v) => update("askReportedCash", v, "immediate")}/>
               </div>
@@ -410,7 +410,7 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
               <div className="flex items-center justify-between">
                 <div>
                   <Label htmlFor="askUnreportedCash">
-                    Personal Cash
+                    Personal cash
                   </Label>
                   <p className="text-xs text-muted-foreground">
                     For personal tracking only — your data stays yours.
@@ -441,7 +441,7 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
       <Card>
         <CardHeader>
           <div className="flex items-center gap-2">
-            <CardTitle>Paycheck Preview</CardTitle>
+            <CardTitle>Paycheck preview</CardTitle>
             <Popover>
               <PopoverTrigger asChild>
                 <button type="button" className="text-muted-foreground hover:text-foreground" aria-label="Paycheck preview info">
@@ -473,7 +473,7 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
           {local.autoTaxCalculation && (<>
               {showTaxForm ? (<div className="mt-4 space-y-4">
                   <TaxForm onClose={() => setShowTaxForm(false)}/>
-                </div>) : savedTaxProfile ? (<div className="mt-4 flex flex-col gap-3 rounded-lg border p-3 bg-muted/30 sm:flex-row sm:items-center sm:justify-between">
+                </div>) : savedTaxProfile ? (<div className="mt-4 flex flex-col gap-3 rounded-2xl bg-muted p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
                     <p className="font-medium">Paycheck estimate profile saved</p>
                     <p className="text-sm text-muted-foreground">
@@ -489,7 +489,7 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
                   <Button variant="outline" size="sm" className="w-full sm:w-auto" onClick={() => setShowTaxForm(true)}>
                     Edit Details
                   </Button>
-                </div>) : (<div className="mt-4 flex flex-col gap-3 rounded-lg border p-3 bg-muted/30 sm:flex-row sm:items-center sm:justify-between">
+                </div>) : (<div className="mt-4 flex flex-col gap-3 rounded-2xl bg-muted p-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
                     <p className="font-medium">Paycheck estimate details needed</p>
                     <p className="text-sm text-muted-foreground">
@@ -507,11 +507,11 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
       {/* Pay Schedule */}
       <Card>
         <CardHeader>
-          <CardTitle>Pay Schedule</CardTitle>
+          <CardTitle>Pay schedule</CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="space-y-2">
-            <Label htmlFor="payFrequency">Pay Frequency</Label>
+            <Label htmlFor="payFrequency">Pay frequency</Label>
             <Select value={local.payFrequency} onValueChange={(v) => update("payFrequency", v as W2SettingsType["payFrequency"], "immediate")}>
               <SelectTrigger id="payFrequency">
                 <SelectValue />
@@ -527,7 +527,7 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
 
           <div className="space-y-2">
             <Label htmlFor="payPeriodStartDate">
-              Pay Period Start Date
+              Pay period start date
             </Label>
             <Input id="payPeriodStartDate" type="date" value={local.payPeriodStartDate} onChange={(e) => update("payPeriodStartDate", e.target.value, "deferred")}/>
             <p className="text-sm text-muted-foreground">

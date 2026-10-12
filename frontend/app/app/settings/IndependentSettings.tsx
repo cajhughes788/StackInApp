@@ -69,15 +69,15 @@ export default function IndependentSettingsSection({
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-5">
       <Card>
         <CardHeader>
-          <CardTitle>Gauge Targets</CardTitle>
+          <CardTitle>Monthly targets</CardTitle>
         </CardHeader>
 
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="incomeTargetPerMonth">Target Income Per Month ($)</Label>
+            <Label htmlFor="incomeTargetPerMonth">Income goal per month ($)</Label>
             <Input
               id="incomeTargetPerMonth"
               type="number"
@@ -94,7 +94,7 @@ export default function IndependentSettingsSection({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="expenseTargetPerMonth">Expense Budget Per Month ($)</Label>
+            <Label htmlFor="expenseTargetPerMonth">Expense budget per month ($)</Label>
             <Input
               id="expenseTargetPerMonth"
               type="number"
@@ -111,7 +111,7 @@ export default function IndependentSettingsSection({
           </div>
 
           <p className="text-sm text-muted-foreground">
-            When targets are set, your monthly income and expense gauges will scale based on progress toward those amounts.
+            Your home screen shows each month’s income as a % of the goal and expenses as a % of the budget.
           </p>
         </CardContent>
       </Card>
@@ -119,13 +119,13 @@ export default function IndependentSettingsSection({
       {/* HOURS TRACKING */}
       <Card>
         <CardHeader>
-          <CardTitle>Hours Tracking</CardTitle>
+          <CardTitle>Hours tracking</CardTitle>
         </CardHeader>
 
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
-              <Label>Track Hours</Label>
+              <Label>Track hours</Label>
               <p className="text-sm text-muted-foreground">
                 Enable manual hour tracking for daily entries.
               </p>
@@ -142,7 +142,7 @@ export default function IndependentSettingsSection({
       {/* TIPS */}
       <Card>
         <CardHeader>
-          <CardTitle>Tip Settings</CardTitle>
+          <CardTitle>Tips</CardTitle>
         </CardHeader>
 
         <CardContent className="space-y-6">
@@ -153,7 +153,7 @@ export default function IndependentSettingsSection({
               which now just count as those sources being on. */}
           <div className="flex items-center justify-between gap-4">
             <div className="space-y-0.5">
-              <Label>Receives Tips</Label>
+              <Label>Receives tips</Label>
               <p className="text-sm text-muted-foreground">
                 Adds a Tips line to each income source below. For Card / POS and Cash, tips are entered on top of
                 sales.
@@ -176,7 +176,7 @@ export default function IndependentSettingsSection({
           !local.enableZelle &&
           !isPosSalesSourceEnabled(local) &&
           !isCashSourceEnabled(local) ? (
-            <p className="rounded-md bg-secondary/60 px-3 py-2 text-sm text-muted-foreground">
+            <p className="rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">
               Turn on the income sources you&apos;re paid through below — that&apos;s where tips are entered.
             </p>
           ) : null}
@@ -186,7 +186,7 @@ export default function IndependentSettingsSection({
       {/* BUILT-IN INCOME SOURCES */}
       <Card>
         <CardHeader>
-          <CardTitle>Built-In Income Sources</CardTitle>
+          <CardTitle>Income sources</CardTitle>
         </CardHeader>
 
         <CardContent className="space-y-4">
@@ -245,7 +245,7 @@ export default function IndependentSettingsSection({
 
           <div className="flex items-center justify-between gap-4">
             <div>
-              <Label>Personal Cash</Label>
+              <Label>Personal cash</Label>
               <p className="text-xs text-muted-foreground">
                 For personal tracking only — not used in taxes.
               </p>
@@ -286,7 +286,7 @@ export default function IndependentSettingsSection({
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <div className="flex items-center gap-2">
-                <Label>Enable Vehicle Tracking</Label>
+                <Label>Enable vehicle tracking</Label>
                 <Popover>
                   <PopoverTrigger asChild>
                     <button
@@ -332,7 +332,7 @@ export default function IndependentSettingsSection({
       {/* CUSTOM INCOME FIELDS */}
       <Card>
         <CardHeader>
-          <CardTitle>Other Income Names</CardTitle>
+          <CardTitle>Other income names</CardTitle>
         </CardHeader>
 
         <CardContent className="space-y-4">
@@ -372,7 +372,7 @@ export default function IndependentSettingsSection({
       {/* RECURRING */}
       <Card>
         <CardHeader>
-          <CardTitle>Recurring Expenses & Income</CardTitle>
+          <CardTitle>Recurring expenses and income</CardTitle>
         </CardHeader>
         <CardContent>
           <p className="mb-3 text-sm text-muted-foreground">
