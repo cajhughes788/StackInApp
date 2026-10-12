@@ -20,6 +20,8 @@ import {
 import { computeIncomeGaugeForEntries } from "@shared/computeIncomeGauge";
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore";
 import SyncStatusIndicator from "@/components/sync-status-indicator";
+import { TotalCardSkeleton } from "@/components/loading-skeletons";
+import Expand from "@/components/expand";
 import PeriodSelector from "@/components/period-selector";
 import { getEntryGross } from "@shared/entryPay";
 export default function IncomeGauge() {
@@ -155,9 +157,7 @@ export default function IncomeGauge() {
         !activeWorkspace ||
         (entriesHydrating && !hasRenderableEntries) ||
         (settingsHydrating && !hasRenderableSettings)) {
-        return (<div className="p-4 text-muted-foreground text-sm">
-        Loading pay summary…
-      </div>);
+        return <TotalCardSkeleton label="Loading pay summary…"/>;
     }
     // ------------------------------------------------------------
     // RENDER — laid out like the independent total card
@@ -196,7 +196,7 @@ export default function IncomeGauge() {
           {previewMessage}
         </div>)}
 
-      {detailsOpen ? (<div className="mt-4 space-y-4">
+      <Expand open={detailsOpen} className="mt-4 space-y-4">
           {targetIncome ? (<div className="space-y-1.5">
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted" aria-hidden="true">
                 <div className="h-full rounded-full bg-primary transition-[width] duration-500 ease-out" style={{ width: `${fillPercentage}%` }}/>
@@ -220,6 +220,6 @@ export default function IncomeGauge() {
               <dd className="text-lg font-semibold tabular-nums text-foreground">{formatCurrency(totals.avgPerHour)}</dd>
             </div>
           </dl>
-        </div>) : null}
+        </Expand>
     </div>);
 }

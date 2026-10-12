@@ -265,7 +265,7 @@ export function ExpenseDetails({
       {e.description ? <p className="whitespace-pre-wrap text-sm">{e.description}</p> : null}
       {Array.isArray(e.allocations) && e.allocations.length > 0 ? (
         <div className="space-y-2">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Category Breakdown</p>
+          <p className="text-xs font-medium text-muted-foreground">Category breakdown</p>
           <div className="space-y-1">
             {e.allocations.map((allocation: any, allocationIndex: number) => (
               <div

@@ -133,7 +133,7 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
                 {isInitialSetup &&
                     local.useHours &&
                     (local.defaultHourlyRate ?? 0) > 0 &&
-                    !local.workInputMode ? (<p className="text-sm font-medium text-emerald-700">
+                    !local.workInputMode ? (<p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
                     Next: choose how you want to enter your hours below.
                   </p>) : null}
                 <div className="space-y-1 pt-1">
@@ -226,7 +226,7 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
                     </SelectItem>
                   </SelectContent>
                 </Select>
-                {isInitialSetup && local.useHours && !local.workInputMode ? (<p className="text-sm text-emerald-800">
+                {isInitialSetup && local.useHours && !local.workInputMode ? (<p className="text-sm text-emerald-700 dark:text-emerald-400 dark:text-emerald-300">
                     Pick one to finish your hourly income setup.
                   </p>) : null}
               </div>

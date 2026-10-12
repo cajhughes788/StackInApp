@@ -17,6 +17,7 @@ import { thBase, tdBase } from "@/lib/tableStyles"
 import { cn } from "@/lib/utils"
 import AttachReceiptDialog from "@/components/attach-receipt-dialog"
 import SyncStatusIndicator from "@/components/sync-status-indicator"
+import { GridSkeleton } from "@/components/loading-skeletons"
 import { needsReceiptForAuditDefense, RECEIPT_REQUIRED_THRESHOLD } from "@shared/receiptRequirements"
 import {
   ExpenseDetails,
@@ -149,7 +150,7 @@ export default function ExpensesGrid() {
   }, [sorted])
 
   if (workspaceState.status !== "ready" || (expensesHydrating && !hasRenderableExpenses)) {
-    return <div className="p-4 text-muted-foreground text-sm">Loading expenses…</div>
+    return <GridSkeleton label="Loading expenses…" />
   }
 
   return (

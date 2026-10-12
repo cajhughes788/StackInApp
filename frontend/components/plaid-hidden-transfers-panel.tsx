@@ -132,7 +132,7 @@ export default function PlaidHiddenTransfersPanel({ workspaceId }: { workspaceId
                     {transaction.date} • {accountLabel(account)}
                   </div>
                 </div>
-                <div className={`text-sm font-semibold shrink-0 ${isIncome ? "text-emerald-700" : ""}`}>
+                <div className={`text-sm font-semibold shrink-0 ${isIncome ? "text-emerald-700 dark:text-emerald-400" : ""}`}>
                   {isIncome ? "+" : "−"}
                   {formatCurrency(transaction.amount)}
                 </div>

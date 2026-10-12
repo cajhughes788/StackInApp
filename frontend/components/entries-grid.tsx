@@ -21,6 +21,7 @@ import { computeIncomeGaugeForEntry } from "@shared/computeIncomeGauge";
 import { debugRender } from "@/lib/debugLoop";
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore";
 import SyncStatusIndicator from "@/components/sync-status-indicator";
+import { GridSkeleton } from "@/components/loading-skeletons";
 import { BreakdownCellEditor, HoursCellEditor, NumericCellEditor, deleteEntryWithConfirm, getIndependentColumnTotal, type PaymentField, } from "@/components/entry-cell-editors";
 // Short date formatter
 const formatShortDate = (iso: string) => parseLocalDate(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
@@ -249,10 +250,10 @@ export default function EntriesGrid() {
     }, [showNotesColumn, visibility, independentColumns]);
     const handleDelete = useCallback((entryId: string) => deleteEntryWithConfirm(activeWorkspaceId, entryId), [activeWorkspaceId]);
     if (!isWorkspaceReady) {
-        return <div className="p-4 text-muted-foreground text-sm">Loading workspace…</div>;
+        return <GridSkeleton label="Loading workspace…"/>;
     }
     if ((entriesHydrating && !hasRenderableEntries) || (settingsHydrating && !hasRenderableSettings)) {
-        return <div className="p-4 text-muted-foreground text-sm">Loading your entries…</div>;
+        return <GridSkeleton label="Loading your entries…"/>;
     }
     if (!settings) {
         return (<div className="p-4 text-muted-foreground text-sm">
@@ -644,7 +645,7 @@ export default function EntriesGrid() {
     {/* =========================== */}
     {/* ALWAYS SHOWN — COMBINED DAY TOTAL */}
     {/* =========================== */}
-    <td className="px-2 py-1.5 text-center sm:text-right tabular-nums whitespace-nowrap text-emerald-700 font-semibold">
+    <td className="px-2 py-1.5 text-center sm:text-right tabular-nums whitespace-nowrap text-emerald-700 dark:text-emerald-400 font-semibold">
       {formatCurrency(totals.dayTotal)}
     </td>
   </tr>

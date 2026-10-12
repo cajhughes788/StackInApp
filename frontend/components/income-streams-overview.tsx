@@ -1,5 +1,6 @@
 "use client"
 
+import { TotalCardSkeleton } from "@/components/loading-skeletons"
 import { useId, useMemo, useState, type ReactNode } from "react"
 import { Banknote, ChevronDown, CreditCard, Landmark, MoreHorizontal, Smartphone, Store, Wallet } from "lucide-react"
 
@@ -26,6 +27,7 @@ import {
   type CellEditorControl,
   type PaymentField,
 } from "@/components/entry-cell-editors"
+import Expand from "@/components/expand"
 import SyncStatusIndicator from "@/components/sync-status-indicator"
 import PeriodSelector from "@/components/period-selector"
 
@@ -175,8 +177,7 @@ function StreamDayEntry({
         </button>
       </div>
 
-      {detailsOpen ? (
-        <div className="mb-2 space-y-3 rounded-xl bg-muted p-3">
+      <Expand open={detailsOpen} className="mb-2 space-y-3 rounded-xl bg-muted p-3">
           {ctx.showHours || (entry.independent?.hours ?? 0) > 0 ? (
             <div className="flex items-center justify-between gap-3">
               <span className="text-muted-foreground">Hours</span>
@@ -200,8 +201,7 @@ function StreamDayEntry({
               Delete entry
             </Button>
           ) : null}
-        </div>
-      ) : null}
+      </Expand>
     </li>
   )
 }
@@ -245,8 +245,7 @@ function StreamRow({ stream, ctx }: { stream: IncomeStream; ctx: StreamEditConte
         />
       </button>
 
-      {expanded ? (
-        <div id={panelId} className="ml-14 mt-3 space-y-3 text-sm">
+      <Expand open={expanded} id={panelId} className="ml-14 mt-3 space-y-3 text-sm">
           {categoryRows.length > 0 ? (
             <dl className="grid grid-cols-2 gap-2">
               {categoryRows.map((category) => (
@@ -261,7 +260,7 @@ function StreamRow({ stream, ctx }: { stream: IncomeStream; ctx: StreamEditConte
           ) : null}
 
           <div>
-            <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            <div className="mb-1 text-xs font-medium text-muted-foreground">
               {stream.days.length} {stream.days.length === 1 ? "day" : "days"}
             </div>
             <ul className="divide-y divide-border/70">
@@ -324,8 +323,7 @@ function StreamRow({ stream, ctx }: { stream: IncomeStream; ctx: StreamEditConte
               </button>
             ) : null}
           </div>
-        </div>
-      ) : null}
+      </Expand>
     </li>
   )
 }
@@ -386,7 +384,7 @@ export default function IncomeStreamsOverview() {
     (entriesHydrating && entries.length === 0 && entriesLastSuccessfulSyncAt === null) ||
     (settingsHydrating && settings === null)
   ) {
-    return <div className="order-1 p-4 text-sm text-muted-foreground">Loading monthly income…</div>
+    return <TotalCardSkeleton label="Loading monthly income…" className="order-1" />
   }
 
   // A fragment so the home page can order these sections around its bank
@@ -426,8 +424,7 @@ export default function IncomeStreamsOverview() {
           </span>
         </button>
 
-        {totalExpanded ? (
-          <div id={totalPanelId} className="mt-4 space-y-4">
+        <Expand open={totalExpanded} id={totalPanelId} className="mt-4 space-y-4">
             {targetIncome ? (
               <div className="space-y-1.5">
                 <ShareBar share={goalShare} />
@@ -451,8 +448,7 @@ export default function IncomeStreamsOverview() {
                 <dd className="text-lg font-semibold tabular-nums text-foreground">{formatCurrency(dayStats.avgPerDay)}</dd>
               </div>
             </dl>
-          </div>
-        ) : null}
+        </Expand>
       </section>
 
       <section className="order-3" aria-labelledby="payment-streams-heading">

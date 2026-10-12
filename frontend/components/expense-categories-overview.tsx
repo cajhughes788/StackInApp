@@ -1,5 +1,6 @@
 "use client"
 
+import { TotalCardSkeleton } from "@/components/loading-skeletons"
 import { useId, useMemo, useState } from "react"
 import { ChevronDown, MoreHorizontal, Receipt } from "lucide-react"
 
@@ -18,6 +19,7 @@ import {
   expenseNeedsAttention,
   type ExpenseEditorControl,
 } from "@/components/expense-cell-editors"
+import Expand from "@/components/expand"
 import SyncStatusIndicator from "@/components/sync-status-indicator"
 import PeriodSelector from "@/components/period-selector"
 
@@ -138,8 +140,7 @@ function ExpenseDayItem({
         </button>
       </div>
 
-      {detailsOpen ? (
-        <div className="mb-2 space-y-3 rounded-xl bg-muted p-3">
+      <Expand open={detailsOpen} className="mb-2 space-y-3 rounded-xl bg-muted p-3">
           <div className="flex items-center justify-between gap-3">
             <span className="shrink-0 text-muted-foreground">Vendor</span>
             <ExpenseFieldEditor {...shared} field="vendor" {...vendorControl} />
@@ -164,8 +165,7 @@ function ExpenseDayItem({
               Delete expense
             </Button>
           ) : null}
-        </div>
-      ) : null}
+      </Expand>
     </li>
   )
 }
@@ -207,8 +207,7 @@ function CategoryRow({ category, ctx }: { category: ExpenseCategory; ctx: Expens
         />
       </button>
 
-      {expanded ? (
-        <div id={panelId} className="ml-14 mt-3 text-sm">
+      <Expand open={expanded} id={panelId} className="ml-14 mt-3 text-sm">
           <ul className="divide-y divide-border/70">
             {visibleDays.map((day) => {
               if (day.expenses.length === 1) {
@@ -255,8 +254,7 @@ function CategoryRow({ category, ctx }: { category: ExpenseCategory; ctx: Expens
               {showAllDays ? "Show fewer" : `Show all ${category.days.length} days`}
             </button>
           ) : null}
-        </div>
-      ) : null}
+      </Expand>
     </li>
   )
 }
@@ -331,7 +329,7 @@ export default function ExpenseCategoriesOverview() {
     (expensesHydrating && expenses.length === 0 && expensesLastSuccessfulSyncAt === null) ||
     (settingsHydrating && settings === null)
   ) {
-    return <div className="order-1 p-4 text-sm text-muted-foreground">Loading monthly expenses…</div>
+    return <TotalCardSkeleton label="Loading monthly expenses…" className="order-1" />
   }
 
   // A fragment so the home page can order these sections around its bank
@@ -367,8 +365,7 @@ export default function ExpenseCategoriesOverview() {
           </span>
         </button>
 
-        {totalExpanded ? (
-          <div id={totalPanelId} className="mt-4 space-y-4">
+        <Expand open={totalExpanded} id={totalPanelId} className="mt-4 space-y-4">
             {budget ? (
               <div className="space-y-1.5">
                 <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted" aria-hidden="true">
@@ -403,8 +400,7 @@ export default function ExpenseCategoriesOverview() {
                 </dd>
               </div>
             </dl>
-          </div>
-        ) : null}
+        </Expand>
       </section>
 
       <section className="order-3" aria-labelledby="expense-categories-heading">

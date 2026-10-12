@@ -1674,7 +1674,7 @@ export default function ReceiptCapturePanel() {
               )}
             </div>
 
-            {message ? <p className="mt-4 text-sm text-emerald-700">{message}</p> : null}
+            {message ? <p className="mt-4 text-sm text-emerald-700 dark:text-emerald-400">{message}</p> : null}
             {error ? <p className="mt-4 text-sm text-destructive">{error}</p> : null}
             {!uploading && ocrStatus ? (
               <p className="mt-4 text-sm text-muted-foreground">{ocrStatus}</p>
@@ -1724,14 +1724,14 @@ export default function ReceiptCapturePanel() {
               return (
                 <div key={cardKey} className="overflow-hidden rounded-xl border p-4">
                   {hasExactDuplicate && !duplicateConfirmed ? (
-                    <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
                       <Badge variant="outline">Possible duplicate</Badge>
                       <span>A matching expense already exists for this exact date and amount.</span>
                       <Button
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className="h-6 px-2 text-xs text-amber-800 hover:bg-amber-100"
+                        className="h-6 px-2 text-xs text-amber-700 hover:bg-amber-500/15 dark:text-amber-300"
                         onClick={() =>
                           setConfirmedDuplicateDraftIds((prev) => new Set([...prev, editableItem.id]))
                         }
@@ -1766,7 +1766,7 @@ export default function ReceiptCapturePanel() {
                       <div className={`grid gap-4 ${(editableItem.lineItems?.length ?? 0) >= 2 ? "sm:grid-cols-2" : ""}`}>
                         {(editableItem.lineItems?.length ?? 0) >= 2 ? (
                           <div className="space-y-1">
-                            <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                            <p className="text-xs text-muted-foreground">
                               Receipt Mode
                             </p>
                             {/* Segmented toggle instead of Select — avoids Radix portal/Dialog
@@ -1809,7 +1809,7 @@ export default function ReceiptCapturePanel() {
                           </div>
                         ) : null}
                         <div className="space-y-1">
-                          <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                          <p className="text-xs text-muted-foreground">
                             Category
                           </p>
                           <ExpenseCategoryPicker
@@ -1843,7 +1843,7 @@ export default function ReceiptCapturePanel() {
 
                       <div className="grid gap-4 xl:grid-cols-2">
                         <div className="space-y-1">
-                          <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                          <p className="text-xs text-muted-foreground">
                             Merchant
                           </p>
                           <Input
@@ -1865,7 +1865,7 @@ export default function ReceiptCapturePanel() {
                             buildModePatch populates this field from the line items. */}
                         {!isMultiCategory ? (
                           <div className="space-y-1">
-                            <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                            <p className="text-xs text-muted-foreground">
                               Description
                             </p>
                             <Input
@@ -1879,7 +1879,7 @@ export default function ReceiptCapturePanel() {
                           </div>
                         ) : null}
                         <div className="space-y-1">
-                          <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                          <p className="text-xs text-muted-foreground">
                             Total
                           </p>
                           <Input
@@ -1902,7 +1902,7 @@ export default function ReceiptCapturePanel() {
                           ) : null}
                         </div>
                         <div className="space-y-1">
-                          <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                          <p className="text-xs text-muted-foreground">
                             Date
                           </p>
                           <Input
@@ -1973,7 +1973,7 @@ export default function ReceiptCapturePanel() {
                                   }
                                 >
                                   <div className="min-w-0 space-y-1">
-                                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                                    <p className="text-[11px] text-muted-foreground">
                                       Description
                                     </p>
                                     <Input
@@ -1987,7 +1987,7 @@ export default function ReceiptCapturePanel() {
                                   </div>
                                   {showQuantity ? (
                                     <div className="space-y-1">
-                                      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                                      <p className="text-[11px] text-muted-foreground">
                                         Qty
                                       </p>
                                       <Input
@@ -2006,7 +2006,7 @@ export default function ReceiptCapturePanel() {
                                     </div>
                                   ) : null}
                                   <div className="space-y-1">
-                                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                                    <p className="text-[11px] text-muted-foreground">
                                       Amount
                                     </p>
                                     <Input
@@ -2024,7 +2024,7 @@ export default function ReceiptCapturePanel() {
                                     />
                                   </div>
                                   <div className="space-y-1">
-                                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                                    <p className="text-[11px] text-muted-foreground">
                                       Category
                                     </p>
                                     <ExpenseCategoryPicker
@@ -2064,12 +2064,12 @@ export default function ReceiptCapturePanel() {
                           asset={editableItem.receiptAsset}
                           label="View uploaded receipt"
                           variant="ghost"
-                          className="px-0 text-xs text-sky-700 hover:text-sky-600"
+                          className="px-0 text-xs text-sky-700 hover:text-sky-600 dark:text-sky-400"
                         />
                       ) : null}
 
                       {!isStuck && editableItem.parseWarnings.length > 0 ? (
-                        <p className="text-xs text-amber-700">
+                        <p className="text-xs text-amber-700 dark:text-amber-300">
                           {editableItem.parseWarnings.join(" • ")}
                         </p>
                       ) : null}
@@ -2081,7 +2081,7 @@ export default function ReceiptCapturePanel() {
                       ) : null}
 
                       {isStuck ? (
-                        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
                           Receipt analysis didn&apos;t complete — the app was likely closed before it finished.
                           Dismiss this draft or retake the photo to try again.
                         </div>
