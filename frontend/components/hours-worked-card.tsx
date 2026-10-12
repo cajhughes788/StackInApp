@@ -203,7 +203,7 @@ function HoursWorkedShell({ subtitle, children }: { subtitle: string; children: 
   const [isExpanded, setIsExpanded] = useState(false)
 
   return (
-    <div className="overflow-hidden rounded-[22px] bg-card">
+    <div className="overflow-hidden rounded-[22px] bg-card border border-card-border">
       <button
         type="button"
         onClick={() => setIsExpanded((current) => !current)}

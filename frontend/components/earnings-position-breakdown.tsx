@@ -44,7 +44,7 @@ export default function EarningsPositionBreakdown({ lines }: { lines: PositionBr
         return null;
     const totalHours = lines.reduce((sum, l) => sum + l.hours, 0);
     const totalPay = lines.reduce((sum, l) => sum + l.pay, 0);
-    return (<section className="rounded-[22px] bg-card p-5">
+    return (<section className="rounded-[22px] bg-card border border-card-border p-5">
       <h2 className="text-lg font-semibold text-foreground">Hours by position</h2>
       <div className="mt-3 overflow-hidden">
         <table className="w-full text-sm">

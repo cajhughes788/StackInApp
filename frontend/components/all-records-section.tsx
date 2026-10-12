@@ -21,7 +21,7 @@ export default function AllRecordsSection({ kind, count, defaultOpen = false, cl
     const [open, setOpen] = useState(defaultOpen);
     const title = kind === "entries" ? "All entries" : "All expenses";
     return (<section className={`${className} space-y-3`}>
-      <button type="button" onClick={() => setOpen((current) => !current)} aria-expanded={open} className="flex w-full items-center justify-between gap-3 rounded-[22px] bg-card px-5 py-4 text-left">
+      <button type="button" onClick={() => setOpen((current) => !current)} aria-expanded={open} className="flex w-full items-center justify-between gap-3 rounded-[22px] bg-card border border-card-border px-5 py-4 text-left">
         <span>
           <span className="block text-lg font-semibold text-foreground">{title}</span>
           <span className="block text-sm text-muted-foreground">

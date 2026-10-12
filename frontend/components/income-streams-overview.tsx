@@ -391,7 +391,7 @@ export default function IncomeStreamsOverview() {
   // review (order-1 / order-3 in its flex column).
   return (
     <>
-      <section className="relative order-1 rounded-[22px] bg-card p-5">
+      <section className="relative order-1 rounded-[22px] bg-card border border-card-border p-5">
         <SyncStatusIndicator visible={entriesRevalidating || settingsRevalidating} label="Syncing income" />
         <PeriodSelector />
 
@@ -456,11 +456,11 @@ export default function IncomeStreamsOverview() {
           Payment streams
         </h2>
         {streams.length === 0 ? (
-          <p className="rounded-[22px] bg-card px-4 py-6 text-center text-sm text-muted-foreground">
+          <p className="rounded-[22px] bg-card border border-card-border px-4 py-6 text-center text-sm text-muted-foreground">
             No income logged for this period yet.
           </p>
         ) : (
-          <ul className="divide-y divide-border/70 rounded-[22px] bg-card px-4">
+          <ul className="divide-y divide-border/70 rounded-[22px] bg-card border border-card-border px-4">
             {streams.map((stream) => (
               <StreamRow key={stream.key} stream={stream} ctx={editContext} />
             ))}

@@ -140,7 +140,7 @@ function IncomeReviewCard({
   const displayName = resolvePlaidDisplayName(transaction.merchantName, transaction.rawName)
 
   return (
-    <div className="space-y-3 rounded-[18px] bg-card p-4">
+    <div className="space-y-3 rounded-[18px] bg-card border border-card-border p-4">
       <div className="flex items-start justify-between gap-3">
         {/* min-w-0 + break-words: a long unbroken bank descriptor must wrap
             instead of pushing the amount off-screen and making the page
@@ -446,7 +446,7 @@ export default function PlaidIncomeReviewPanel() {
         // (expectsPending) — see the early return above.
         <div className="space-y-3" aria-hidden="true">
           {[0, 1].map((i) => (
-            <div key={i} className="space-y-3 rounded-[18px] bg-card p-4">
+            <div key={i} className="space-y-3 rounded-[18px] bg-card border border-card-border p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="space-y-2">
                   <Skeleton className="h-4 w-32" />
@@ -478,7 +478,7 @@ export default function PlaidIncomeReviewPanel() {
       ) : null}
 
       {selectedIds.size > 0 ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-[18px] bg-card p-3">
+        <div className="flex flex-wrap items-center gap-2 rounded-[18px] bg-card border border-card-border p-3">
           <span className="text-sm font-medium">{selectedIds.size} selected</span>
           <Button type="button" size="sm" disabled={isBulkWorking} onClick={() => void handleBulkDecision(true)}>
             <Check className="h-4 w-4 mr-1" /> Add as income

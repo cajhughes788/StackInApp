@@ -132,7 +132,7 @@ export default function HoursGoalCard({
   const showForm = isEditing || !goal
 
   return (
-    <div className="overflow-hidden rounded-[22px] bg-card">
+    <div className="overflow-hidden rounded-[22px] bg-card border border-card-border">
       <button
         type="button"
         onClick={() => setIsExpanded((current) => !current)}

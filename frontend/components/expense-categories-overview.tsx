@@ -336,7 +336,7 @@ export default function ExpenseCategoriesOverview() {
   // review (order-1 / order-3 in its flex column).
   return (
     <>
-      <section className="relative order-1 rounded-[22px] bg-card p-5">
+      <section className="relative order-1 rounded-[22px] bg-card border border-card-border p-5">
         <SyncStatusIndicator visible={expensesRevalidating || settingsRevalidating} label="Syncing expenses" />
         <PeriodSelector />
 
@@ -408,11 +408,11 @@ export default function ExpenseCategoriesOverview() {
           Expense categories
         </h2>
         {categories.length === 0 ? (
-          <p className="rounded-[22px] bg-card px-4 py-6 text-center text-sm text-muted-foreground">
+          <p className="rounded-[22px] bg-card border border-card-border px-4 py-6 text-center text-sm text-muted-foreground">
             No expenses logged for this period yet.
           </p>
         ) : (
-          <ul className="divide-y divide-border/70 rounded-[22px] bg-card px-4">
+          <ul className="divide-y divide-border/70 rounded-[22px] bg-card border border-card-border px-4">
             {categories.map((category) => (
               <CategoryRow key={category.name} category={category} ctx={editContext} />
             ))}

@@ -852,7 +852,7 @@ export default function ExpenseForm() {
 
   if (workspaceState.status !== "ready") {
     return (
-      <Card className="gap-0 rounded-[22px] border-0 py-4 shadow-none">
+      <Card className="gap-0 rounded-[22px] py-4 shadow-none">
         <CardHeader className="flex flex-row items-center justify-between space-y-0 px-5">
           <div className="flex items-center gap-2">
             <CardTitle className="text-lg">Add expense</CardTitle>
@@ -890,7 +890,7 @@ export default function ExpenseForm() {
 
   return (
     <Card
-      className={`rounded-[22px] border-0 shadow-none ${
+      className={`rounded-[22px] shadow-none ${
         expanded ? "gap-5 py-5" : "gap-0 py-4"
       }`}
     >

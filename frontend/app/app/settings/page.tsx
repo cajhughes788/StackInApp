@@ -26,7 +26,7 @@ import { cn } from "@/lib/utils";
 import CommonSettingsSection from "./CommonSettings";
 import W2SettingsSection from "./W2Settings";
 import IndependentSettingsSection from "./IndependentSettings";
-import { AppearanceCard, WorkspaceDangerZone, WorkspaceNameCard } from "@/components/workspace-settings-cards";
+import { AppearanceCard, WorkspaceDeleteCard, WorkspaceNameCard } from "@/components/workspace-settings-cards";
 // ------------------------------------------------------------------------------------
 // Types
 // ------------------------------------------------------------------------------------
@@ -1026,7 +1026,7 @@ export default function SettingsPage() {
 
         {!isInitialSettingsSetup ? (<>
             <AppearanceCard />
-            <WorkspaceDangerZone />
+            <WorkspaceDeleteCard />
           </>) : null}
 
         <div className="pt-4">

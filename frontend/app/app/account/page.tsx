@@ -12,6 +12,7 @@ import {
 import { useAuth } from "@/contexts/auth-context"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
+import { ChevronRight, CreditCard, KeyRound, LogOut } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -20,6 +21,13 @@ import { API_ENDPOINTS, apiFetch } from "@/lib/api"
 import StackInHeader from "@/components/stackin-header"
 import { debugError } from "@/lib/debugLoop"
 import { useAppBootstrapState } from "@/contexts/app-bootstrap-context"
+
+// Customer-facing plan names for the subscription tiers.
+const PLAN_NAMES: Record<string, string> = {
+  w2_basic: "Essential",
+  independent_basic: "Pro",
+  hybrid_plus: "Complete",
+}
 
 export default function AccountPage() {
   const router = useRouter()
@@ -229,105 +237,120 @@ const handleLogout = async () => {
     <div className="min-h-screen bg-background">
       <StackInHeader />
       <div className="mx-auto w-full max-w-3xl space-y-5 px-4 pb-10 pt-4">
-        <div className="space-y-1 px-1">
-          <h1 className="text-2xl font-semibold text-foreground">Account</h1>
-          <p className="text-sm text-muted-foreground">{user.email}</p>
-        </div>
-        <p className="px-1 text-xs text-muted-foreground">
-          Your workspace name, appearance and deleting a workspace are in Settings.
-        </p>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>{isNativeApp ? "Your account" : "Subscription"}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {isLoadingSubscription ? (
-              <p className="text-sm text-muted-foreground">
-                {isNativeApp ? "Loading account details..." : "Loading subscription status..."}
-              </p>
-            ) : subscription ? (
-              <>
-                {isNativeApp ? (
-                  <p className="text-sm text-muted-foreground">
-                    Your 521 account is ready to use on mobile.
-                  </p>
-                ) : (
-                  <div className="flex items-center justify-between gap-3 rounded-2xl bg-muted px-4 py-3">
-                    <span className="text-sm text-muted-foreground">Current plan</span>
-                    <span className="font-medium text-foreground">{subscription.tier}</span>
-                  </div>
-                )}
-                {subscription.pendingAccountDeletion && scheduledDeletionLabel ? (
-                  <div className="space-y-3 rounded-2xl border border-destructive/40 bg-destructive/10 px-4 py-3">
-                    <div className="space-y-1">
-                      <div className="font-medium text-destructive">Account deletion scheduled</div>
-                      <p className="text-sm text-muted-foreground">
-                        Your account will stay active until{" "}
-                        {isNativeApp ? nativeAccessPeriodEndPhrase : accessPeriodEndPhrase}. It will be deleted on{" "}
-                        <span className="font-medium text-foreground">{scheduledDeletionLabel}</span>, and all of your data will be permanently lost.
-                      </p>
-                    </div>
-                    <Button
-                      variant="outline"
-                      className="w-full rounded-xl"
-                      onClick={handleUndoDeletionRequest}
-                      disabled={isCancellingDeletion}
-                    >
-                      {isCancellingDeletion ? "Restoring..." : "Undo deletion request"}
-                    </Button>
-                  </div>
-                ) : subscriptionEndLabel ? (
-                  <p className="text-sm text-muted-foreground">
-                    Your {isNativeApp ? nativeAccessPeriodLabel : accessPeriodLabel} ends on{" "}
-                    {subscriptionEndLabel}.
-                  </p>
-                ) : null}
-              </>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                {isNativeApp
-                  ? "Mobile access is not available for this 521 account right now."
-                  : "No active subscription is linked to this account right now."}
-              </p>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Password</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              We&apos;ll email you a link to set a new password.
+        <section className="flex items-center gap-4 rounded-[22px] border border-card-border bg-card p-5">
+          <div className="flex size-14 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xl font-semibold uppercase text-primary" aria-hidden="true">
+            {(user.email ?? "?").charAt(0)}
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-xs font-medium text-muted-foreground">Account</h1>
+            <p className="truncate text-lg font-semibold text-foreground">{user.email}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Your workspace name, appearance and deleting a workspace are in Settings.
             </p>
-            <Button
-              variant="outline"
-              onClick={handlePasswordReset}
-              disabled={isResetting}
-              className="w-full rounded-xl"
+          </div>
+        </section>
+
+        <Card className="gap-0 py-2">
+          <CardContent className="divide-y divide-border/70">
+            <div className="flex items-start gap-3 py-3.5">
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted text-foreground" aria-hidden="true">
+                <CreditCard className="size-5" />
+              </span>
+              <div className="min-w-0 flex-1 space-y-2">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="font-medium text-foreground">{isNativeApp ? "Your account" : "Subscription"}</span>
+                  {!isLoadingSubscription && subscription && !isNativeApp ? (
+                    <span className="rounded-full bg-primary/15 px-2.5 py-0.5 text-xs font-semibold text-primary">{PLAN_NAMES[subscription.tier] ?? subscription.tier}</span>
+                  ) : null}
+                </div>
+                {isLoadingSubscription ? (
+                  <p className="text-sm text-muted-foreground">
+                    {isNativeApp ? "Loading account details..." : "Loading subscription status..."}
+                  </p>
+                ) : subscription ? (
+                  <>
+                    {isNativeApp ? (
+                      <p className="text-sm text-muted-foreground">
+                        Your 521 account is ready to use on mobile.
+                      </p>
+                    ) : null}
+                    {subscription.pendingAccountDeletion && scheduledDeletionLabel ? (
+                      <div className="space-y-3 rounded-2xl border border-destructive/40 bg-destructive/10 px-4 py-3">
+                        <div className="space-y-1">
+                          <div className="font-medium text-destructive">Account deletion scheduled</div>
+                          <p className="text-sm text-muted-foreground">
+                            Your account will stay active until{" "}
+                            {isNativeApp ? nativeAccessPeriodEndPhrase : accessPeriodEndPhrase}. It will be deleted on{" "}
+                            <span className="font-medium text-foreground">{scheduledDeletionLabel}</span>, and all of your data will be permanently lost.
+                          </p>
+                        </div>
+                        <Button
+                          variant="outline"
+                          className="w-full rounded-xl"
+                          onClick={handleUndoDeletionRequest}
+                          disabled={isCancellingDeletion}
+                        >
+                          {isCancellingDeletion ? "Restoring..." : "Undo deletion request"}
+                        </Button>
+                      </div>
+                    ) : subscriptionEndLabel ? (
+                      <p className="text-sm text-muted-foreground">
+                        Your {isNativeApp ? nativeAccessPeriodLabel : accessPeriodLabel} ends on{" "}
+                        {subscriptionEndLabel}.
+                      </p>
+                    ) : null}
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    {isNativeApp
+                      ? "Mobile access is not available for this 521 account right now."
+                      : "No active subscription is linked to this account right now."}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 py-3.5">
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted text-foreground" aria-hidden="true">
+                <KeyRound className="size-5" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="font-medium text-foreground">Password</div>
+                <p className="text-sm text-muted-foreground">
+                  We&apos;ll email you a link to set a new password.
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handlePasswordReset}
+                disabled={isResetting}
+                className="shrink-0 rounded-full"
+              >
+                {isResetting ? "Sending..." : "Send link"}
+              </Button>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="flex w-full items-center gap-3 py-3.5 text-left"
             >
-              {isResetting ? "Sending..." : "Send password reset email"}
-            </Button>
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted text-foreground" aria-hidden="true">
+                <LogOut className="size-5" />
+              </span>
+              <span className="flex-1 font-medium text-foreground">Log out</span>
+              <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            </button>
           </CardContent>
         </Card>
 
-        <Button
-          variant="outline"
-          className="h-12 w-full rounded-2xl border-0 bg-card text-base text-foreground hover:bg-muted"
-          onClick={handleLogout}
-        >
-          Log out
-        </Button>
-
         <Card>
           <CardHeader>
-            <CardTitle className="text-destructive">Danger zone</CardTitle>
+            <CardTitle>Delete account</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
-            <div className="space-y-2">
-              <h3 className="text-sm font-medium text-foreground">Delete account</h3>
+            <div className="space-y-3">
               <p className="text-sm text-muted-foreground">
                 {isNativeApp
                   ? "Schedule this account for deletion. Your access will remain active until your current access period ends."

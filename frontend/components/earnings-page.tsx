@@ -616,7 +616,7 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
         return (<>
         <StackInHeader />
         <div className="mx-auto max-w-3xl space-y-4 p-4">
-          <div className="rounded-[22px] bg-card p-6">
+          <div className="rounded-[22px] bg-card border border-card-border p-6">
             <div className="space-y-2">
               <h1 className="text-xl font-semibold text-foreground">Pay period not found</h1>
               <p className="text-sm text-muted-foreground">
@@ -701,7 +701,7 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
               <SimpleMenu onPrint={handlePrint} onDownload={handleDownloadPDF} onShare={handleShare}/>
             </div>
 
-            <section className="rounded-[22px] bg-card p-5">
+            <section className="rounded-[22px] bg-card border border-card-border p-5">
               <h1 className="text-sm text-muted-foreground">
                 Pay period · {formatHeaderDateRange(selected.periodStart, selected.periodEnd)}
               </h1>
@@ -730,7 +730,7 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
 
             <EarningsPositionBreakdown lines={positionLines}/>
 
-            <section className="rounded-[22px] bg-card px-4 pb-2 pt-4">
+            <section className="rounded-[22px] bg-card border border-card-border px-4 pb-2 pt-4">
               <div className="flex items-baseline justify-between gap-3 px-1">
                 <h2 className="text-lg font-semibold text-foreground">
                   Pay period activity
@@ -836,7 +836,7 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
 
             {taxEnabled ? (
               <section className="space-y-5">
-                <div className="rounded-[22px] bg-card px-4 py-4 deduction-box">
+                <div className="rounded-[22px] bg-card border border-card-border px-4 py-4 deduction-box">
                   <h2 className="px-1 text-lg font-semibold text-foreground">
                     Estimated taxes and deductions
                   </h2>
@@ -862,7 +862,7 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
                   </div>
                 </div>
 
-                <div className="rounded-[22px] bg-card p-4">
+                <div className="rounded-[22px] bg-card border border-card-border p-4">
                   <div className="flex items-center justify-between gap-3 px-1">
                     <h2 className="text-lg font-semibold text-foreground">
                       Year to date
@@ -913,9 +913,9 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
 
       <section aria-labelledby="pay-periods-heading">
         <h1 id="pay-periods-heading" className="mb-2 px-1 text-lg font-semibold text-foreground">Pay periods</h1>
-        {stubs.length === 0 ? (<p className="rounded-[22px] bg-card px-4 py-6 text-center text-sm text-muted-foreground">
+        {stubs.length === 0 ? (<p className="rounded-[22px] bg-card border border-card-border px-4 py-6 text-center text-sm text-muted-foreground">
             No earnings estimates available yet.
-          </p>) : (<ul className="divide-y divide-border/70 rounded-[22px] bg-card px-4">
+          </p>) : (<ul className="divide-y divide-border/70 rounded-[22px] bg-card border border-card-border px-4">
             {stubs.map((stub) => {
                 const hasPersonalCash = stub.totalUnreported !== undefined && stub.totalUnreported > 0;
                 const details = [

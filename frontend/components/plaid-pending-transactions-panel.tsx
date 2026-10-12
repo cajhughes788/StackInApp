@@ -129,7 +129,7 @@ function TransactionReviewCard({
   const isRefund = transaction.isRefund === true
 
   return (
-    <div className="space-y-3 rounded-[18px] bg-card p-4">
+    <div className="space-y-3 rounded-[18px] bg-card border border-card-border p-4">
       <div className="flex items-start justify-between gap-3">
         {/* min-w-0 + break-words: a long unbroken bank descriptor must wrap
             instead of pushing the amount off-screen and making the page
@@ -589,7 +589,7 @@ export default function PlaidPendingTransactionsPanel() {
       {!collapsed && isLoading && transactions.length === 0 ? (
         <div className="space-y-3" aria-hidden="true">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="space-y-3 rounded-[18px] bg-card p-4">
+            <div key={i} className="space-y-3 rounded-[18px] bg-card border border-card-border p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="space-y-2">
                   <Skeleton className="h-4 w-32" />
@@ -639,7 +639,7 @@ export default function PlaidPendingTransactionsPanel() {
       ) : null}
 
       {selectedIds.size > 0 ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-[18px] bg-card p-3">
+        <div className="flex flex-wrap items-center gap-2 rounded-[18px] bg-card border border-card-border p-3">
           <span className="text-sm font-medium">{selectedIds.size} selected</span>
           <Select value={bulkCategory} onValueChange={setBulkCategory}>
             <SelectTrigger className="w-[200px] rounded-xl border-0 bg-muted shadow-none">

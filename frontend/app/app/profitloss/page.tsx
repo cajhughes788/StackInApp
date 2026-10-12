@@ -295,7 +295,7 @@ function StatementSection({
   total: number
 }) {
   return (
-    <section className="rounded-[22px] bg-card px-4 pb-4 pt-4">
+    <section className="rounded-[22px] bg-card border border-card-border px-4 pb-4 pt-4">
       <h2 className="text-lg font-semibold text-foreground">{title}</h2>
       {rows.length === 0 ? (
         <div className="py-3 text-sm text-muted-foreground">
@@ -873,7 +873,7 @@ export default function ProfitLossPage() {
               />
             </div>
 
-            <section className="rounded-[22px] bg-card p-5">
+            <section className="rounded-[22px] bg-card border border-card-border p-5">
               <h1 className="text-sm text-muted-foreground">
                 Profit &amp; Loss · {activeWorkspace?.name}
               </h1>
@@ -920,7 +920,7 @@ export default function ProfitLossPage() {
               total={selected.expenses.total}
             />
 
-            <section className="flex items-center justify-between gap-3 rounded-[22px] bg-card px-5 py-4">
+            <section className="flex items-center justify-between gap-3 rounded-[22px] bg-card border border-card-border px-5 py-4">
               <span className="text-lg font-semibold text-foreground">Net income</span>
               <span className="text-lg font-semibold tabular-nums text-foreground">
                 <StatementValue value={selected.netProfit} />
@@ -976,20 +976,20 @@ export default function ProfitLossPage() {
               </h2>
 
               {loading && statements.length === 0 ? (
-                <div className="flex items-center rounded-[22px] bg-card px-4 py-6 text-sm text-muted-foreground">
+                <div className="flex items-center rounded-[22px] bg-card border border-card-border px-4 py-6 text-sm text-muted-foreground">
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Loading saved statements...
                 </div>
               ) : null}
 
               {!loading && statements.length === 0 ? (
-                <p className="rounded-[22px] bg-card px-4 py-6 text-center text-sm text-muted-foreground">
+                <p className="rounded-[22px] bg-card border border-card-border px-4 py-6 text-center text-sm text-muted-foreground">
                   No {periodNoun} statements available yet.
                 </p>
               ) : null}
 
               {statements.length > 0 ? (
-                <ul className="divide-y divide-border/70 rounded-[22px] bg-card px-4">
+                <ul className="divide-y divide-border/70 rounded-[22px] bg-card border border-card-border px-4">
                   {statements.map((statement) => (
                     <li key={statement.id}>
                       <button

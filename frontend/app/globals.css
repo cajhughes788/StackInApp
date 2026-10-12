@@ -42,8 +42,10 @@
   --background: #F4F3EF;
   --foreground: #161B1E;
 
-  --card: #FBFAF7;
+  --card: #FFFFFF;
   --card-foreground: #161B1E;
+  /* Thin outline that sets cards apart from the page */
+  --card-border: #DCD9D0;
 
   --popover: #FFFFFF;
   --popover-foreground: #161B1E;
@@ -55,7 +57,7 @@
   --secondary: #E9E8E3;
   --secondary-foreground: #161B1E;
 
-  --muted: #EFEEE9;
+  --muted: #F1F0EB;
   --muted-foreground: #5F6864;
 
   --accent: #E1F1E7;
@@ -94,20 +96,21 @@
   --background: #161B1E;
   --foreground: #ECEBE6;
 
-  --card: #1F262A;
+  --card: #283035;
   --card-foreground: #ECEBE6;
+  --card-border: #3D474D;
 
-  --popover: #242C30;
+  --popover: #2E363B;
   --popover-foreground: #ECEBE6;
 
   --primary: #2FA866;
   --primary-foreground: #0B1F14;
 
-  --secondary: #2A3236;
+  --secondary: #323B40;
   --secondary-foreground: #ECEBE6;
 
-  --muted: #262E33;
-  --muted-foreground: #8C948F;
+  --muted: #353E44;
+  --muted-foreground: #A0A8A3;
 
   --accent: #1D3528;
   --accent-foreground: #ECEBE6;
@@ -115,12 +118,12 @@
   --destructive: oklch(0.62 0.19 25);
   --destructive-foreground: #FFFFFF;
 
-  --border: #2C3438;
-  --input: #343D42;
+  --border: #3A4449;
+  --input: #3E484E;
   --ring: #2FA866;
-  --soft-surface: #262E33;
+  --soft-surface: #353E44;
   --soft-surface-foreground: #ECEBE6;
-  --soft-surface-muted: #8C948F;
+  --soft-surface-muted: #A0A8A3;
 
   --chart-1: #2FA866;
   --chart-2: #5B9BD5;
@@ -158,6 +161,7 @@
   --color-foreground: var(--foreground);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
+  --color-card-border: var(--card-border);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);

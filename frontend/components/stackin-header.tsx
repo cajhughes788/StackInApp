@@ -8,9 +8,22 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Menu } from "lucide-react"
+import {
+  BookOpen,
+  ChartNoAxesColumnIncreasing,
+  House,
+  Landmark,
+  LifeBuoy,
+  Menu,
+  Receipt,
+  Settings,
+  UserRound,
+  type LucideIcon,
+} from "lucide-react"
 import SupportDialog from "@/components/support/support-dialog"
 import WorkspaceSwitcher from "@/components/workspace-switcher"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
@@ -47,28 +60,28 @@ export default function StackInHeader() {
     return () => window.removeEventListener("scroll", handleScroll)
   }, [handleScroll])
 
-  const menuItems = [
-    { label: "Home", href: "/app/home" },
+  type MenuItem = { label: string; href: string; icon: LucideIcon }
+  const moneyItems: MenuItem[] = [
+    { label: "Home", href: "/app/home", icon: House },
     activeWorkspace?.type === "independent"
-      ? { label: "Profit & Loss", href: "/app/profitloss" }
-      : { label: "Earnings", href: "/app/earnings" },
+      ? { label: "Profit & Loss", href: "/app/profitloss", icon: ChartNoAxesColumnIncreasing }
+      : { label: "Earnings", href: "/app/earnings", icon: ChartNoAxesColumnIncreasing },
     ...(activeWorkspace?.type === "independent"
-      ? [
-          { label: "Receipts", href: "/app/receipts" },
-          { label: "Bank connections", href: "/app/banks" },
-        ]
-      : []),
-    { label: "Settings", href: "/app/settings" },
-    { label: "Account", href: "/app/account" },
-    ...(activeWorkspace?.type === "independent"
-      ? [
-          {
-            label: "Expense Category Guide",
-            href: "/app/expense-category-guide",
-          },
-        ]
+      ? [{ label: "Receipts", href: "/app/receipts", icon: Receipt }]
       : []),
   ]
+  const setupItems: MenuItem[] = [
+    ...(activeWorkspace?.type === "independent"
+      ? [{ label: "Bank connections", href: "/app/banks", icon: Landmark }]
+      : []),
+    { label: "Settings", href: "/app/settings", icon: Settings },
+    { label: "Account", href: "/app/account", icon: UserRound },
+  ]
+  const helpItems: MenuItem[] =
+    activeWorkspace?.type === "independent"
+      ? [{ label: "Expense category guide", href: "/app/expense-category-guide", icon: BookOpen }]
+      : []
+  const menuItems = [...moneyItems, ...setupItems, ...helpItems]
 
   const visibleItems = menuItems.filter((item) => item.href !== pathname)
 
@@ -134,10 +147,10 @@ export default function StackInHeader() {
           {/* LEFT SIDE — Workspace Switcher */}
           <div className="flex min-w-0 items-center gap-2">
             {isWorkspaceSetupMode ? (
-              <div className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1 text-sm font-medium text-primary shadow-sm">
+              <div className="flex items-center gap-2 rounded-full border border-card-border bg-card px-3 py-1.5 text-sm font-medium text-foreground">
                 <span>{activeWorkspace?.name ?? "Workspace setup"}</span>
-                <span className="text-xs text-primary/80">
-                  ({activeWorkspace?.type === "w2" ? "W-2" : "Independent"})
+                <span className="text-xs text-muted-foreground">
+                  {activeWorkspace?.type === "w2" ? "W-2" : "Self-employed"}
                 </span>
               </div>
             ) : (
@@ -148,31 +161,72 @@ export default function StackInHeader() {
           {/* RIGHT SIDE — Menu */}
           <DropdownMenu onOpenChange={setMenuOpen}>
               <DropdownMenuTrigger asChild>
-                <div className="cursor-pointer rounded-md p-2 text-foreground transition hover:bg-accent focus:ring-2 focus:ring-primary/40">
-                  <Menu className="h-5 w-5" />
-                </div>
+                <button
+                  type="button"
+                  aria-label="Open menu"
+                  className="flex size-9 items-center justify-center rounded-full border border-card-border bg-card text-foreground transition hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                >
+                  <Menu className="h-4 w-4" />
+                </button>
               </DropdownMenuTrigger>
 
               <DropdownMenuContent
                 align="end"
-                className="z-[2000] mt-2 w-44 border border-border bg-card text-card-foreground shadow-lg"
+                className="z-[2000] mt-2 w-60 rounded-2xl border border-card-border bg-popover p-1.5 text-popover-foreground shadow-lg"
               >
-                {visibleItems.map((item) => (
-                  <DropdownMenuItem
-                    key={item.href}
-                    className="cursor-pointer hover:bg-accent"
-                    onFocus={() => prefetchMenuItem(item.href)}
-                    onPointerEnter={() => prefetchMenuItem(item.href)}
-                    onClick={() => void navigateWithPendingSaveGuard(item.href)}
-                  >
-                    {item.label}
-                  </DropdownMenuItem>
+                {([["Money", moneyItems], ["Setup", setupItems]] as const).map(([group, items], groupIndex) => (
+                  <div key={group}>
+                    {groupIndex > 0 ? <DropdownMenuSeparator className="my-1.5" /> : null}
+                    <DropdownMenuLabel className="px-2.5 pb-1 pt-1.5 text-xs font-medium text-muted-foreground">{group}</DropdownMenuLabel>
+                    {items.map((item) => {
+                      const isCurrent = item.href === pathname
+                      return (
+                        <DropdownMenuItem
+                          key={item.href}
+                          aria-current={isCurrent ? "page" : undefined}
+                          className={`cursor-pointer gap-3 rounded-xl px-2.5 py-2 text-sm ${
+                            isCurrent ? "bg-primary/15 font-medium text-primary focus:bg-primary/15 focus:text-primary" : ""
+                          }`}
+                          onFocus={() => prefetchMenuItem(item.href)}
+                          onPointerEnter={() => prefetchMenuItem(item.href)}
+                          onClick={() => {
+                            if (!isCurrent) void navigateWithPendingSaveGuard(item.href)
+                          }}
+                        >
+                          <item.icon className={`size-4 ${isCurrent ? "text-primary" : "text-muted-foreground"}`} aria-hidden="true" />
+                          {item.label}
+                        </DropdownMenuItem>
+                      )
+                    })}
+                  </div>
                 ))}
+                <DropdownMenuSeparator className="my-1.5" />
+                {helpItems.map((item) => {
+                  const isCurrent = item.href === pathname
+                  return (
+                    <DropdownMenuItem
+                      key={item.href}
+                      aria-current={isCurrent ? "page" : undefined}
+                      className={`cursor-pointer gap-3 rounded-xl px-2.5 py-2 text-sm ${
+                        isCurrent ? "bg-primary/15 font-medium text-primary focus:bg-primary/15 focus:text-primary" : ""
+                      }`}
+                      onFocus={() => prefetchMenuItem(item.href)}
+                      onPointerEnter={() => prefetchMenuItem(item.href)}
+                      onClick={() => {
+                        if (!isCurrent) void navigateWithPendingSaveGuard(item.href)
+                      }}
+                    >
+                      <item.icon className={`size-4 ${isCurrent ? "text-primary" : "text-muted-foreground"}`} aria-hidden="true" />
+                      {item.label}
+                    </DropdownMenuItem>
+                  )
+                })}
                 <DropdownMenuItem
-                  className="cursor-pointer hover:bg-accent"
+                  className="cursor-pointer gap-3 rounded-xl px-2.5 py-2 text-sm"
                   onClick={() => setSupportOpen(true)}
                 >
-                  Need Help?
+                  <LifeBuoy className="size-4 text-muted-foreground" aria-hidden="true" />
+                  Need help?
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

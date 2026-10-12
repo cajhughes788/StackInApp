@@ -71,7 +71,7 @@ export default function NeedsYouPanel() {
       <PlaidPendingTransactionsPanel />
 
       {bothLoaded && total === 0 && hasBank ? (
-        <div className="flex items-center gap-3 rounded-[18px] bg-card p-4">
+        <div className="flex items-center gap-3 rounded-[18px] bg-card border border-card-border p-4">
           <CheckCircle2 className="size-8 shrink-0 text-primary" aria-hidden="true" />
           <div>
             <div className="font-medium text-foreground">You&apos;re all caught up</div>

@@ -886,7 +886,7 @@ export default function EntryForm() {
             + (form.customIncome ?? []).reduce((sum, item) => sum + parseMoney(item.amount ?? ""), 0)
         : 0;
     const independentPersonalCash = visibility.mode === "independent" ? parseMoney(form.unreportedCash) : 0;
-    return (<Card className={`relative overflow-hidden rounded-[22px] border-0 shadow-none ${expanded ? "gap-5 py-5" : "gap-0 py-4"}`}>
+    return (<Card className={`relative overflow-hidden rounded-[22px] shadow-none ${expanded ? "gap-5 py-5" : "gap-0 py-4"}`}>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 px-5">
         <button type="button" onClick={() => setExpanded((current) => !current)} disabled={submitting} className="flex min-w-0 flex-col items-start gap-0.5 text-left" aria-hidden="true" tabIndex={-1}>
           <CardTitle className="text-lg">Add entry</CardTitle>

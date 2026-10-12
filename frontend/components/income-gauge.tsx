@@ -165,7 +165,7 @@ export default function IncomeGauge() {
     // day stats behind "Details".
     // ------------------------------------------------------------
     const goalShare = targetIncome ? totals.incomeGauge / targetIncome : 0;
-    return (<div ref={previewRef} className="relative rounded-[22px] bg-card p-5">
+    return (<div ref={previewRef} className="relative rounded-[22px] bg-card border border-card-border p-5">
       <SyncStatusIndicator visible={showSyncIndicator} label="Syncing pay summary"/>
 
       <PeriodSelector />

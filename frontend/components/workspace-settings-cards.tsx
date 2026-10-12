@@ -1,7 +1,7 @@
 "use client"
 
 // Workspace and appearance cards for the Settings page: renaming the active
-// workspace, its Danger zone (deleting a workspace), and the dark-mode switch.
+// workspace, deleting a workspace, and the dark-mode switch.
 // These used to live on the Account page; Settings is per workspace, so the
 // workspace's own name and deletion sit with the rest of its settings.
 
@@ -155,7 +155,7 @@ export function AppearanceCard() {
 }
 
 /** Delete a workspace — any of yours, defaulting to the active one. */
-export function WorkspaceDangerZone() {
+export function WorkspaceDeleteCard() {
   const { toast } = useToast()
   const workspaceState = useWorkspaceStore((s) => s.state)
   const removeWorkspace = useWorkspaceStore((s) => s.removeWorkspace)
@@ -340,7 +340,7 @@ export function WorkspaceDangerZone() {
     <>
       <Card>
         <CardHeader>
-          <CardTitle className="text-destructive">Danger zone</CardTitle>
+          <CardTitle>Delete workspace</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           {workspaceDeleteNotice ? (
@@ -348,8 +348,7 @@ export function WorkspaceDangerZone() {
               {workspaceDeleteNotice}
             </div>
           ) : null}
-          <div className="space-y-2">
-            <h3 className="text-sm font-medium text-foreground">Delete workspace</h3>
+          <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
               Permanently remove one workspace, all of its records, and its nested files without deleting your whole account.
             </p>

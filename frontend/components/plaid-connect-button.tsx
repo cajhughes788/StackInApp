@@ -1,5 +1,7 @@
 "use client"
 
+import { Plus } from "lucide-react"
+
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Capacitor } from "@capacitor/core"
 import { Browser } from "@capacitor/browser"
@@ -347,21 +349,31 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
       ) : null}
 
       {(items ?? []).map((item) => (
-        <div key={item.id} className="space-y-2 rounded-2xl bg-muted px-4 py-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm font-medium">{item.institutionName ?? "Connected bank"}</div>
+        <div key={item.id} className="space-y-3 rounded-2xl bg-muted p-4">
+          <div className="flex items-center gap-3">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-card text-base font-semibold text-foreground" aria-hidden="true">
+              {(item.institutionName ?? "B").charAt(0).toUpperCase()}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-medium text-foreground">{item.institutionName ?? "Connected bank"}</div>
               {item.status === "error" ? (
-                <div className="text-xs text-destructive">Connection needs attention</div>
+                <div className="flex items-center gap-1.5 text-xs text-destructive">
+                  <span className="size-1.5 rounded-full bg-destructive" aria-hidden="true" />
+                  Connection needs attention
+                </div>
               ) : (
-                <div className="text-xs text-muted-foreground">{item.linkedAccounts.length} account(s)</div>
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <span className="size-1.5 rounded-full bg-primary" aria-hidden="true" />
+                  Connected · {item.linkedAccounts.length} account(s)
+                </div>
               )}
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex shrink-0 items-center gap-1">
               {item.status === "error" ? (
                 <Button
                   variant="default"
                   size="sm"
+                  className="rounded-full"
                   onClick={() => handleReconnect(item.id)}
                   disabled={isConnecting}
                   title="Fixes this connection in place (e.g. after a bank password change) without creating a duplicate, separately-tracked connection."
@@ -372,7 +384,7 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-muted-foreground hover:text-destructive"
+                className="rounded-full text-muted-foreground hover:text-destructive"
                 onClick={() => setUnlinkPromptItem(item)}
               >
                 Unlink
@@ -381,10 +393,10 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
           </div>
 
           {item.status !== "error" && item.linkedAccounts.length > 0 ? (
-            <div className="space-y-1.5 border-t border-border/70 pt-2">
+            <div className="divide-y divide-border/70 rounded-xl bg-card px-3">
               {item.linkedAccounts.map((account) => (
-                <div key={account.accountId} className="flex items-center justify-between gap-2">
-                  <span className="text-xs text-muted-foreground">
+                <div key={account.accountId} className="flex items-center justify-between gap-2 py-2">
+                  <span className="min-w-0 truncate text-xs text-muted-foreground">
                     {account.name}
                     {account.mask ? ` ••${account.mask}` : ""}
                   </span>
@@ -398,7 +410,7 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
                     }
                     onValueChange={(value) => void handleAccountDefaultChange(item.id, account.accountId, value)}
                   >
-                    <SelectTrigger className="h-7 w-[150px] text-xs" title="New transactions from this account default to this classification unless a specific merchant has been confirmed or dismissed before.">
+                    <SelectTrigger className="h-7 w-[150px] shrink-0 rounded-full border-0 bg-muted text-xs shadow-none" title="New transactions from this account default to this classification unless a specific merchant has been confirmed or dismissed before.">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -414,7 +426,8 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
         </div>
       ))}
 
-      <Button variant="outline" className="w-full rounded-xl" onClick={handleConnect} disabled={isConnecting}>
+      <Button className="h-11 w-full rounded-2xl text-base font-semibold" onClick={handleConnect} disabled={isConnecting}>
+        <Plus className="size-4" aria-hidden="true" />
         {isConnecting ? "Connecting..." : items && items.length > 0 ? "Connect another bank" : "Connect a bank"}
       </Button>
 
