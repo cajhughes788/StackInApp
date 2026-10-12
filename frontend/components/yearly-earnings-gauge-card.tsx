@@ -183,7 +183,7 @@ export default function YearlyEarningsGaugeCard({
       : null
 
   return (
-    <div className="overflow-hidden rounded-[28px] border border-border/80 bg-card shadow-[0_18px_60px_-32px_rgba(15,23,42,0.45)] dark:bg-none dark:shadow-none">
+    <div className="overflow-hidden rounded-[22px] bg-card">
       <button
         type="button"
         onClick={() => setIsExpanded((current) => !current)}
@@ -191,30 +191,28 @@ export default function YearlyEarningsGaugeCard({
         aria-expanded={isExpanded}
       >
         <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-            {year}
-          </p>
-          <h2 className="mt-1 whitespace-nowrap text-[clamp(1.35rem,4.2vw,2.35rem)] font-semibold tracking-tight text-foreground">
-            Yearly Earnings Overview
-          </h2>
-          <div className="mt-2 text-[clamp(2.05rem,5vw,3.3rem)] font-semibold tracking-tight text-[#2FA866] [text-shadow:0_0_12px_rgba(47,168,102,0.18)]">
+          <p className="text-sm text-muted-foreground">{year} earnings</p>
+          <div className="mt-1 text-4xl font-semibold tracking-tight tabular-nums text-foreground sm:text-5xl">
             {formatCurrency(totalGross)}
           </div>
+          <p className="mt-1 text-sm text-muted-foreground sm:hidden">
+            {payPeriods} {payPeriods === 1 ? "pay period" : "pay periods"}
+          </p>
         </div>
 
         <div className="flex shrink-0 items-center gap-3">
           <div className="hidden text-right sm:block">
-            <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+            <div className="text-xs text-muted-foreground">
               Pay periods
             </div>
-            <div className="mt-1 text-sm font-semibold text-foreground">
+            <div className="mt-1 text-sm font-semibold tabular-nums text-foreground">
               {payPeriods}
             </div>
           </div>
           <motion.span
             animate={{ rotate: isExpanded ? 180 : 0 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
-            className="flex h-11 w-11 items-center justify-center rounded-full border border-border bg-card text-foreground/80 shadow-sm"
+            className="flex h-11 w-11 items-center justify-center rounded-full text-muted-foreground"
           >
             <ChevronDown className="h-5 w-5" />
           </motion.span>
@@ -236,7 +234,7 @@ export default function YearlyEarningsGaugeCard({
                 <div className="relative w-full max-w-[15.5rem] p-1 min-[390px]:max-w-[17.5rem] min-[420px]:max-w-[18.5rem] sm:max-w-[20rem] md:max-w-[22rem]">
                   <svg
                     viewBox={`0 0 ${GAUGE_SIZE} ${GAUGE_SIZE}`}
-                    className="h-auto w-full drop-shadow-[0_20px_32px_rgba(15,23,42,0.10)]"
+                    className="h-auto w-full"
                     aria-label={`${year} yearly gross earnings`}
                   >
                     <circle
@@ -244,7 +242,7 @@ export default function YearlyEarningsGaugeCard({
                       cy={CENTER}
                       r={RADIUS}
                       fill="none"
-                      className="stroke-[#E5E7EB] dark:stroke-slate-700"
+                      className="stroke-muted"
                       strokeWidth="26"
                     />
 
@@ -307,7 +305,7 @@ export default function YearlyEarningsGaugeCard({
                         animate={{ opacity: 1, scale: 1 }}
                         exit={{ opacity: 0, scale: 0.92 }}
                         transition={{ duration: 0.18, ease: "easeOut" }}
-                        className="flex h-[4.6rem] w-[4.6rem] flex-col items-center justify-center rounded-[1.55rem] border border-border/60 bg-card/95 px-1 shadow-[0_18px_36px_-28px_rgba(15,23,42,0.55)] backdrop-blur sm:h-[5.35rem] sm:w-[5.35rem]"
+                        className="flex h-[4.6rem] w-[4.6rem] flex-col items-center justify-center rounded-[1.55rem] bg-card px-1 sm:h-[5.35rem] sm:w-[5.35rem]"
                       >
                         <div
                           className="flex h-10 w-10 items-center justify-center rounded-[1rem] text-white shadow-sm sm:h-12 sm:w-12"
@@ -318,7 +316,7 @@ export default function YearlyEarningsGaugeCard({
                           <CenterIcon className="h-5 w-5 sm:h-6 sm:w-6" />
                         </div>
                         {selectedPercentage ? (
-                          <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground sm:text-[11px]">
+                          <div className="mt-1 text-xs font-medium text-muted-foreground">
                             {selectedPercentage}
                           </div>
                         ) : null}
@@ -333,10 +331,10 @@ export default function YearlyEarningsGaugeCard({
                   }`}
                 >
                   {selectedSegment ? (
-                    <div className="rounded-2xl border border-border/80 bg-card/90 p-3.5 shadow-sm min-[420px]:p-4">
+                    <div className="rounded-2xl bg-muted p-3.5 min-[420px]:p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                          <div className="text-xs text-muted-foreground">
                             Selected
                           </div>
                           <div className="mt-1.5 text-base font-semibold text-foreground">
@@ -352,13 +350,13 @@ export default function YearlyEarningsGaugeCard({
                           {SelectedIcon ? <SelectedIcon className="h-4 w-4" /> : null}
                         </div>
                       </div>
-                      <div className="mt-2 text-2xl font-semibold tabular-nums text-[#2FA866] [text-shadow:0_0_10px_rgba(47,168,102,0.16)]">
+                      <div className="mt-2 text-2xl font-semibold tabular-nums text-foreground">
                         {formatCurrency(selectedSegment.value)}
                       </div>
                       {selectedSegment.id === "cash" ? (
                         <div className="mt-2.5 grid gap-1.5 text-sm text-muted-foreground">
                           <div className="flex items-center justify-between gap-3">
-                            <span className="uppercase tracking-[0.18em] text-[11px] text-muted-foreground">
+                            <span className="text-xs text-muted-foreground">
                               Reported
                             </span>
                             <span className="font-semibold tabular-nums text-foreground">
@@ -366,7 +364,7 @@ export default function YearlyEarningsGaugeCard({
                             </span>
                           </div>
                           <div className="flex items-center justify-between gap-3">
-                            <span className="uppercase tracking-[0.18em] text-[11px] text-muted-foreground">
+                            <span className="text-xs text-muted-foreground">
                               Personal
                             </span>
                             <span className="font-semibold tabular-nums text-foreground">
@@ -382,9 +380,9 @@ export default function YearlyEarningsGaugeCard({
                     </div>
                   ) : null}
 
-                  <div className="rounded-2xl border border-border/80 bg-card/90 p-3.5 shadow-sm min-[420px]:p-4">
-                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                      Total Gross
+                  <div className="rounded-2xl bg-muted p-3.5 min-[420px]:p-4">
+                    <div className="text-xs text-muted-foreground">
+                      Total gross
                     </div>
                     <div className="mt-1.5 text-[clamp(1.85rem,4vw,2.45rem)] font-semibold tabular-nums leading-none text-foreground">
                       {formatCurrency(totalGross)}
@@ -396,8 +394,8 @@ export default function YearlyEarningsGaugeCard({
                     </div>
                   </div>
 
-                  <div className="rounded-2xl border border-border/80 bg-card/90 p-3.5 shadow-sm min-[420px]:p-4">
-                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                  <div className="rounded-2xl bg-muted p-3.5 min-[420px]:p-4">
+                    <div className="text-xs text-muted-foreground">
                       Avg / Hour
                     </div>
                     <div className="mt-1.5 text-[clamp(1.85rem,4vw,2.45rem)] font-semibold tabular-nums leading-none text-foreground">

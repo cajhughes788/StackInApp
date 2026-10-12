@@ -24,8 +24,8 @@ function formatHours(value: number): string {
 
 function StatTile({ label, value, accent = false }: { label: string; value: string; accent?: boolean }) {
   return (
-    <div className="rounded-2xl border border-border bg-muted/90 px-3 py-3">
-      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{label}</div>
+    <div className="rounded-2xl bg-muted px-3 py-3">
+      <div className="text-xs text-muted-foreground">{label}</div>
       <div
         className={`mt-1 text-xl font-semibold tabular-nums ${
           accent ? "text-emerald-700 dark:text-emerald-400" : "text-foreground"
@@ -132,7 +132,7 @@ export default function HoursGoalCard({
   const showForm = isEditing || !goal
 
   return (
-    <div className="overflow-hidden rounded-[28px] border border-border/80 bg-card shadow-sm">
+    <div className="overflow-hidden rounded-[22px] bg-card">
       <button
         type="button"
         onClick={() => setIsExpanded((current) => !current)}
@@ -144,14 +144,14 @@ export default function HoursGoalCard({
             <Target className="h-5 w-5" />
           </div>
           <div>
-            <div className="text-base font-semibold text-foreground">Hours Goal</div>
+            <div className="text-base font-semibold text-foreground">Hours goal</div>
             <div className="mt-0.5 text-sm text-muted-foreground">{subtitle}</div>
           </div>
         </div>
         <motion.span
           animate={{ rotate: isExpanded ? 180 : 0 }}
           transition={{ duration: 0.2, ease: "easeOut" }}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-muted-foreground"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground"
         >
           <ChevronDown className="h-4 w-4" />
         </motion.span>
@@ -237,8 +237,8 @@ export default function HoursGoalCard({
                     <StatTile label="Current Avg / Week" value={formatHours(projection?.currentAvgPerWeek ?? 0)} />
                   </div>
 
-                  <div className="rounded-2xl border border-border bg-muted/90 px-3 py-3">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                  <div className="rounded-2xl bg-muted px-3 py-3">
+                    <div className="text-xs text-muted-foreground">
                       {projection?.isPastEndDate
                         ? `Target was ${formatHours(goal!.targetAvgHoursPerWeek)} hrs/wk from ${goal!.startDate} to ${goal!.endDate}`
                         : `To average ${formatHours(goal!.targetAvgHoursPerWeek)} hrs/wk from ${goal!.startDate} to ${goal!.endDate}`}

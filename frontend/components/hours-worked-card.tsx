@@ -99,10 +99,10 @@ function TrendVariant({ monthlyBuckets }: { monthlyBuckets: MonthlyHoursBucket[]
           <StatTile label="Avg / Week (This Year)" value={formatHours(yearAvgPerWeek)} accent />
 
           {yearBuckets.length > 0 ? (
-            <div className="rounded-2xl border border-border bg-card px-4 py-4">
+            <div className="rounded-2xl bg-muted px-4 py-4">
               <div className="flex items-baseline justify-between gap-3">
                 <div>
-                  <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                  <div className="text-xs text-muted-foreground">
                     {selectedBucket?.label ?? "Select a month"}
                   </div>
                   <div className="mt-1 text-lg font-semibold tabular-nums text-foreground">
@@ -110,7 +110,7 @@ function TrendVariant({ monthlyBuckets }: { monthlyBuckets: MonthlyHoursBucket[]
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Avg / Week</div>
+                  <div className="text-xs text-muted-foreground">Avg / Week</div>
                   <div className="mt-1 text-base font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">
                     {formatHours(selectedAvgPerWeek)}
                   </div>
@@ -156,7 +156,7 @@ function TrendVariant({ monthlyBuckets }: { monthlyBuckets: MonthlyHoursBucket[]
           ) : null}
         </>
       ) : (
-        <div className="rounded-2xl border border-dashed border-border p-4 text-sm text-muted-foreground">
+        <div className="rounded-2xl bg-muted p-4 text-sm text-muted-foreground">
           No hours logged yet.
         </div>
       )}
@@ -186,8 +186,8 @@ function SimpleVariant({
 
 function StatTile({ label, value, accent = false }: { label: string; value: string; accent?: boolean }) {
   return (
-    <div className="rounded-2xl border border-border bg-muted/90 px-3 py-3">
-      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{label}</div>
+    <div className="rounded-2xl bg-muted px-3 py-3">
+      <div className="text-xs text-muted-foreground">{label}</div>
       <div
         className={`mt-1 text-xl font-semibold tabular-nums ${
           accent ? "text-emerald-700 dark:text-emerald-400" : "text-foreground"
@@ -203,7 +203,7 @@ function HoursWorkedShell({ subtitle, children }: { subtitle: string; children: 
   const [isExpanded, setIsExpanded] = useState(false)
 
   return (
-    <div className="overflow-hidden rounded-[28px] border border-border/80 bg-card shadow-sm">
+    <div className="overflow-hidden rounded-[22px] bg-card">
       <button
         type="button"
         onClick={() => setIsExpanded((current) => !current)}
@@ -215,14 +215,14 @@ function HoursWorkedShell({ subtitle, children }: { subtitle: string; children: 
             <Clock3 className="h-5 w-5" />
           </div>
           <div>
-            <div className="text-base font-semibold text-foreground">Hours Worked</div>
+            <div className="text-base font-semibold text-foreground">Hours worked</div>
             <div className="mt-0.5 text-sm text-muted-foreground">{subtitle}</div>
           </div>
         </div>
         <motion.span
           animate={{ rotate: isExpanded ? 180 : 0 }}
           transition={{ duration: 0.2, ease: "easeOut" }}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-muted-foreground"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground"
         >
           <ChevronDown className="h-4 w-4" />
         </motion.span>
