@@ -85,7 +85,7 @@ const PRIVACY_SECTIONS: Array<{ title: string; paragraphs: string[] }> = [
   {
     title: "Contact",
     paragraphs: [
-      "If you have questions about this policy or your information, visit https://stackin-app.com/support.",
+      "If you have questions about this policy or your information, visit https://the521app.com/support.",
     ],
   },
 ]

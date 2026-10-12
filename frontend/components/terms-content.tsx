@@ -438,7 +438,7 @@ export default function TermsContent({
           <p>
             For support, legal notices, or terms-related questions, please use the contact
             information provided through 521 or our official business contact channels,
-            including the contact information we make available at stackin-app.com.
+            including the contact information we make available at the521app.com.
           </p>
         </section>
 
