@@ -404,7 +404,7 @@ function summarizeMetrics(traceMetrics) {
 
 function formatText(summary, rows) {
   const lines = []
-  lines.push("StackIn Latency Report")
+  lines.push("521 Latency Report")
   lines.push("")
 
   for (const [flow, details] of Object.entries(summary)) {

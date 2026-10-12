@@ -16,10 +16,10 @@ type CameraPermissionStatus = {
 
 function getPermissionDeniedMessage(source: NativeReceiptImageSource): string {
   if (source === "camera") {
-    return "Camera access is turned off. Enable camera access for StackIn in your device Settings, then try again."
+    return "Camera access is turned off. Enable camera access for 521 in your device Settings, then try again."
   }
 
-  return "Photo library access is turned off. Enable Photos access for StackIn in your device Settings, then try again."
+  return "Photo library access is turned off. Enable Photos access for 521 in your device Settings, then try again."
 }
 
 function isPermissionGranted(

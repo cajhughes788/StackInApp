@@ -113,7 +113,7 @@ export async function createLinkToken(uid: string): Promise<{ link_token: string
   const plaid = getPlaidClient()
   const response = await plaid.linkTokenCreate({
     user: { client_user_id: uid },
-    client_name: "Stackin",
+    client_name: "521",
     products: [Products.Transactions],
     country_codes: [CountryCode.Us],
     language: "en",
@@ -144,7 +144,7 @@ export async function createUpdateLinkToken(
   const plaid = getPlaidClient()
   const response = await plaid.linkTokenCreate({
     user: { client_user_id: uid },
-    client_name: "Stackin",
+    client_name: "521",
     country_codes: [CountryCode.Us],
     language: "en",
     webhook: PLAID_WEBHOOK_URL,
@@ -260,7 +260,7 @@ export async function getItems(workspaceId: string, uid: string) {
 
 // Called from account/workspace deletion (userDeletionService.ts) before the
 // workspace's Firestore document tree is wiped. Without this, deleting a
-// StackIn workspace only ever removed our own copy of the (now-encrypted)
+// 521 workspace only ever removed our own copy of the (now-encrypted)
 // access token — the underlying Plaid Item was never told to revoke, so the
 // bank connection would stay live and authorized on Plaid's side forever,
 // with no way to reach it again once our local record was gone. Best-effort
@@ -502,7 +502,7 @@ export async function syncTransactionsForItem(
 // Bulk historical backfill, bounded to the last N months (default 3).
 // Plaid's real-time webhook detection can lag by hours to days, and some
 // institutions (Capital One included) never report pending transactions at
-// all — so this is how a user gets their recent spending into StackIn
+// all — so this is how a user gets their recent spending into 521
 // immediately instead of waiting on live detection. Runs silently (no push
 // notification per transaction, see syncTransactionsForItem) since a
 // multi-month import can be dozens of transactions at once; they land in

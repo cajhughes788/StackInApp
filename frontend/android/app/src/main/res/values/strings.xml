@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">StackIn</string>
-    <string name="title_activity_main">StackIn</string>
+    <string name="app_name">521</string>
+    <string name="title_activity_main">521</string>
     <string name="package_name">app.stackin</string>
     <string name="custom_url_scheme">app.stackin</string>
 

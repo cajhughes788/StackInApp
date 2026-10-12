@@ -267,8 +267,8 @@ export default function LoginPage() {
           <CardDescription className="text-center">
             {isNativeApp
                 ? showCreateAccount
-                    ? "Sign in with your StackIn email and password."
-                    : "International users need to create their account on the StackIn website first, then return to the app to sign in."
+                    ? "Sign in with your 521 email and password."
+                    : "International users need to create their account on the 521 website first, then return to the app to sign in."
                 : "Log in to access your account."}
           </CardDescription>
         </CardHeader>
@@ -302,13 +302,13 @@ export default function LoginPage() {
 
             {isNativeApp && !showCreateAccount ? (
               <div className="rounded-xl border border-border bg-card/60 px-4 py-3 text-center text-sm text-muted-foreground">
-                Sign in with your existing StackIn email and password. If you are outside the U.S., create your account on the StackIn website first, then return to the app to log in.
+                Sign in with your existing 521 email and password. If you are outside the U.S., create your account on the 521 website first, then return to the app to log in.
               </div>
             ) : null}
 
             {showCreateAccount ? (
               <div className="text-sm text-center mt-2">
-                Need a StackIn account?{" "}
+                Need a 521 account?{" "}
                 <button type="button" onClick={handleCreateAccount} disabled={openingSignup} className="text-primary underline underline-offset-2 hover:opacity-80 transition disabled:opacity-60">
                   {openingSignup ? "Opening..." : "Create Account"}
                 </button>
@@ -348,7 +348,7 @@ export default function LoginPage() {
             <DialogTitle>Need help signing in?</DialogTitle>
             {!showCreateAccount ? (
               <DialogDescription>
-                International users need to create their account on the StackIn website first, then return here to sign in.
+                International users need to create their account on the 521 website first, then return here to sign in.
               </DialogDescription>
             ) : null}
           </DialogHeader>

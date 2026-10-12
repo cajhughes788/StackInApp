@@ -54,7 +54,7 @@ export default function ForgotPasswordPage() {
       // which Firebase can still throw here depending on the project's
       // email-enumeration-protection setting) must never distinguish "no
       // account" from a real failure, or this becomes an oracle for
-      // checking who has a StackIn account by email address.
+      // checking who has a 521 account by email address.
       if (err instanceof FirebaseError && err.code === "auth/invalid-email") {
         toast({
           title: "Email looks off",

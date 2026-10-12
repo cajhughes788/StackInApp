@@ -67,7 +67,7 @@ export default function PlaidMerchantMemoryPanel({ workspaceId }: { workspaceId:
     void load()
   }, [load])
 
-  // Only merchants StackIn has actually gone quiet about — an "ask every
+  // Only merchants 521 has actually gone quiet about — an "ask every
   // time" merchant has no decision to review or undo, so listing every
   // learned merchant here (as this screen used to) was mostly noise.
   const mutedMerchants = useMemo(
@@ -144,7 +144,7 @@ export default function PlaidMerchantMemoryPanel({ workspaceId }: { workspaceId:
       <div>
         <h3 className="font-semibold text-base">Learned Merchants</h3>
         <p className="text-sm text-muted-foreground">
-          Merchants StackIn has stopped asking about — either you told it to always treat one as personal, or a
+          Merchants 521 has stopped asking about — either you told it to always treat one as personal, or a
           recurring rule now covers it. Change your mind or forget a merchant here; it only affects future
           transactions from that merchant.
         </p>
@@ -152,7 +152,7 @@ export default function PlaidMerchantMemoryPanel({ workspaceId }: { workspaceId:
 
       {!isLoading && mutedMerchants.length === 0 && mutedPayers.length === 0 ? (
         <p className="text-sm text-muted-foreground rounded-lg border border-dashed border-muted px-3 py-6 text-center">
-          Nothing here yet — merchants show up once you tell StackIn to stop asking about them.
+          Nothing here yet — merchants show up once you tell 521 to stop asking about them.
         </p>
       ) : null}
 
@@ -259,7 +259,7 @@ export default function PlaidMerchantMemoryPanel({ workspaceId }: { workspaceId:
           <AlertDialogHeader>
             <AlertDialogTitle>Forget {forgetTarget?.displayName}?</AlertDialogTitle>
             <AlertDialogDescription>
-              StackIn will stop applying this remembered decision. The next transaction from this merchant gets
+              521 will stop applying this remembered decision. The next transaction from this merchant gets
               classified fresh, the same as the very first time.
             </AlertDialogDescription>
           </AlertDialogHeader>

@@ -45,7 +45,7 @@ export function NativePermissionGuideDialog() {
           <AlertDialogDescription>
             {isAndroid ? (
               <>
-                StackIn is about to show the Android permission prompts needed
+                521 is about to show the Android permission prompts needed
                 for location-based reminders.
                 <br />
                 <br />
@@ -56,7 +56,7 @@ export function NativePermissionGuideDialog() {
               </>
             ) : (
               <>
-                StackIn is about to show the iPhone permission prompts needed
+                521 is about to show the iPhone permission prompts needed
                 for location-based reminders.
                 <br />
                 <br />

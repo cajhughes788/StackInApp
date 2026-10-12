@@ -4,9 +4,9 @@ const PRIVACY_SECTIONS: Array<{ title: string; paragraphs: string[] }> = [
   {
     title: "Information we collect",
     paragraphs: [
-      "We collect information you provide directly when you use StackIn, including your email address, phone number, account and workspace identifiers, subscription details, support messages, and other content you choose to enter into the app.",
-      "Because StackIn is designed for income and tax-related recordkeeping, we collect financial information you enter, such as income, expenses, deductions, tax profile information, pay period details, and related bookkeeping records.",
-      "If you connect a bank account using Plaid, Plaid transmits certain account and transaction information to us on your behalf — such as account balances, transaction history, and merchant and category details — so that StackIn can help you review and categorize that activity. We do not receive or store your online banking username or password; those credentials are entered directly with Plaid or your financial institution and are never shared with us. Plaid's own use of your information is governed by Plaid's End User Privacy Policy, available at plaid.com/legal.",
+      "We collect information you provide directly when you use 521, including your email address, phone number, account and workspace identifiers, subscription details, support messages, and other content you choose to enter into the app.",
+      "Because 521 is designed for income and tax-related recordkeeping, we collect financial information you enter, such as income, expenses, deductions, tax profile information, pay period details, and related bookkeeping records.",
+      "If you connect a bank account using Plaid, Plaid transmits certain account and transaction information to us on your behalf — such as account balances, transaction history, and merchant and category details — so that 521 can help you review and categorize that activity. We do not receive or store your online banking username or password; those credentials are entered directly with Plaid or your financial institution and are never shared with us. Plaid's own use of your information is governed by Plaid's End User Privacy Policy, available at plaid.com/legal.",
       "If you use receipt capture or upload features, we collect the photos you provide and information extracted from them (such as merchant name, date, and amount) to help create or organize expense records. Receipt images are processed using a third-party optical character recognition service to extract this information.",
       "If you subscribe to a paid plan, our payment processor collects and processes your payment card details directly; we do not receive or store your full card number.",
       "If you enable location-based features, reminders, or workplace tools, we collect precise location information and related saved location details, such as workplace coordinates or addresses, and link that information to your account or workspace.",
@@ -17,14 +17,14 @@ const PRIVACY_SECTIONS: Array<{ title: string; paragraphs: string[] }> = [
   {
     title: "How we use information",
     paragraphs: [
-      "We use collected information to provide the core functionality of StackIn, including account authentication, workspace management, income and expense tracking, bank transaction review, pay and tax estimate features, receipt storage and processing, reminders, and customer support.",
+      "We use collected information to provide the core functionality of 521, including account authentication, workspace management, income and expense tracking, bank transaction review, pay and tax estimate features, receipt storage and processing, reminders, and customer support.",
       "We also use information to maintain security, detect and prevent misuse, troubleshoot issues, process user requests, send service-related notifications, and operate, improve, and support the reliability of the service.",
     ],
   },
   {
     title: "How data is linked to you",
     paragraphs: [
-      "The information described in this policy may be linked to your identity through your account, workspace, or user identifier so that StackIn can provide app functionality such as sign-in, saved records, bank transaction review, reminders, receipt management, support, and account recovery.",
+      "The information described in this policy may be linked to your identity through your account, workspace, or user identifier so that 521 can provide app functionality such as sign-in, saved records, bank transaction review, reminders, receipt management, support, and account recovery.",
       "We do not use the data described in this policy for third-party advertising tracking. We do not share your precise location, email address, financial information, bank transaction data, receipt uploads, or support content with data brokers for targeted advertising.",
     ],
   },
@@ -43,20 +43,20 @@ const PRIVACY_SECTIONS: Array<{ title: string; paragraphs: string[] }> = [
       "Cloud infrastructure providers (including Google Cloud Platform and Firebase) — for hosting, databases, authentication, file storage, and push notification delivery.",
       "Optical character recognition and document-processing providers (including Amazon Web Services) — to extract information from receipt images you upload.",
       "Email delivery providers (including SendGrid) — to send account, billing, and support-related emails.",
-      "We may also disclose information when required by law, to respond to valid legal requests, to enforce our terms, or to protect the rights, safety, and security of StackIn, our users, or others.",
+      "We may also disclose information when required by law, to respond to valid legal requests, to enforce our terms, or to protect the rights, safety, and security of 521, our users, or others.",
     ],
   },
   {
     title: "Your privacy choices and rights",
     paragraphs: [
       "Regardless of where you live, we offer all users the following choices with respect to their information: the right to request access to the personal information we hold about you, the right to request correction of inaccurate information, and the right to request deletion of your account and associated information, subject to the retention exceptions described below.",
-      "You will not be discriminated against, and your access to StackIn will not be degraded, for exercising any of these choices. To exercise any of these rights, contact us using the information in the Contact section below.",
+      "You will not be discriminated against, and your access to 521 will not be degraded, for exercising any of these choices. To exercise any of these rights, contact us using the information in the Contact section below.",
     ],
   },
   {
     title: "Data retention",
     paragraphs: [
-      "We retain information for as long as your account remains active, in order to provide StackIn's core functionality.",
+      "We retain information for as long as your account remains active, in order to provide 521's core functionality.",
       "If you request deletion of your account and do not have an active paid subscription, your data is deleted promptly upon request.",
       "If you have an active paid subscription at the time you request deletion, deletion is scheduled to occur once your current paid period ends, and is then completed automatically, typically within about 24 hours of that date.",
       "If you disconnect a linked bank account without deleting your entire account, that connection is revoked immediately, independent of your account's overall status.",
@@ -66,14 +66,14 @@ const PRIVACY_SECTIONS: Array<{ title: string; paragraphs: string[] }> = [
   {
     title: "Data security",
     paragraphs: [
-      "We use industry-standard measures to protect your information, including encryption of data in transit using TLS, encryption of data at rest, and additional application-level encryption of the credentials used to maintain your bank connection. Access to your data within StackIn is restricted to the specific account or workspace it belongs to.",
+      "We use industry-standard measures to protect your information, including encryption of data in transit using TLS, encryption of data at rest, and additional application-level encryption of the credentials used to maintain your bank connection. Access to your data within 521 is restricted to the specific account or workspace it belongs to.",
       "No method of transmission or storage is completely secure, and we cannot guarantee absolute security.",
     ],
   },
   {
     title: "Children's privacy",
     paragraphs: [
-      "StackIn is not directed to, and is not intended for use by, children under the age of 13. We do not knowingly collect personal information from children under 13. If we learn that we have collected personal information from a child under 13, we will take steps to delete that information.",
+      "521 is not directed to, and is not intended for use by, children under the age of 13. We do not knowingly collect personal information from children under 13. If we learn that we have collected personal information from a child under 13, we will take steps to delete that information.",
     ],
   },
   {
@@ -100,7 +100,7 @@ export default function PrivacyPolicyContent() {
             Privacy Policy
           </h1>
           <p className="mt-3 text-sm leading-7 text-muted-foreground sm:text-base">
-            This page explains how StackIn collects, uses, and protects information when you use
+            This page explains how 521 collects, uses, and protects information when you use
             the app and related services.
           </p>
         </div>

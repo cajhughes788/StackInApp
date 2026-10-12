@@ -22,5 +22,5 @@ export default function RootPage() {
     router.replace("/app")
   }, [authLoading, user, router])
 
-  return <AppLoader label="Loading StackIn..." />
+  return <AppLoader label="Loading 521..." />
 }

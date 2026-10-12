@@ -10,7 +10,7 @@ This project ships to Android through the Capacitor app in `frontend/android`.
 
 ## Current Android identity
 
-- App name: `StackIn`
+- App name: `521`
 - Package name: `app.stackin`
 - Android source root: `frontend/android`
 
@@ -125,7 +125,7 @@ If geofence reminders are not required for launch, removing background location 
 
 ## 7. Suggested first release path
 
-1. Confirm `StackIn` and `app.stackin` are the final Play identity.
+1. Confirm `521` and `app.stackin` are the final Play identity.
 2. Create the upload keystore.
 3. Add the signing properties locally.
 4. Build `app-release.aab`.
