@@ -3,8 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
-  ChevronDown,
-  ChevronUp,
+  ChevronRight,
   FileSpreadsheet,
   Loader2,
   MoreVertical,
@@ -21,14 +20,6 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { useAuth } from "@/contexts/auth-context"
 import { exportCsvFile, escapeCsvField } from "@/lib/documentExport"
 import { formatDate, formatCurrency } from "@/lib/helpers"
@@ -144,7 +135,7 @@ const periodOptions: Array<{
   { value: "year", label: "Yearly" },
 ]
 
-function StatementValue({ value, negativeClassName = "text-red-600" }: {
+function StatementValue({ value, negativeClassName = "text-destructive" }: {
   value: number
   negativeClassName?: string
 }) {
@@ -161,36 +152,34 @@ function StatementDetailList({ items, emptyLabel }: {
 }) {
   if (items.length === 0) {
     return (
-      <div className="border-t border-[rgba(16,24,40,0.08)] px-4 py-3 text-sm text-muted-foreground">
+      <div className="py-3 text-sm text-muted-foreground">
         {emptyLabel}
       </div>
     )
   }
 
   return (
-    <div className="border-t border-[rgba(16,24,40,0.08)] bg-[rgba(248,250,252,0.9)]">
+    <ul className="mb-3 divide-y divide-border/70 rounded-xl bg-muted px-3">
       {items.map((item) => (
-        <div
+        <li
           key={item.id}
-          className="grid gap-2 border-b border-[rgba(16,24,40,0.08)] px-4 py-3 text-sm last:border-b-0 sm:grid-cols-[110px_minmax(0,1fr)_120px] sm:gap-3"
+          className="flex items-start justify-between gap-3 py-2.5 text-sm"
         >
-          <div className="text-muted-foreground sm:self-start">{formatDate(item.date)}</div>
           <div className="min-w-0">
             <div className="whitespace-normal break-words font-medium text-foreground">
               {item.label}
             </div>
-            {item.description ? (
-              <div className="mt-0.5 whitespace-normal break-words text-xs text-muted-foreground">
-                {item.description}
-              </div>
-            ) : null}
+            <div className="mt-0.5 whitespace-normal break-words text-xs text-muted-foreground">
+              {formatDate(item.date)}
+              {item.description ? ` · ${item.description}` : ""}
+            </div>
           </div>
-          <div className="font-medium text-foreground sm:text-right">
+          <div className="shrink-0 font-medium tabular-nums text-foreground">
             {formatCurrency(item.amount)}
           </div>
-        </div>
+        </li>
       ))}
-    </div>
+    </ul>
   )
 }
 
@@ -203,26 +192,24 @@ function StatementSubcategoryList({
 }) {
   if (subcategories.length === 0) {
     return (
-      <div className="border-t border-[rgba(16,24,40,0.08)] px-4 py-3 text-sm text-muted-foreground">
+      <div className="py-3 text-sm text-muted-foreground">
         {emptyLabel}
       </div>
     )
   }
 
   return (
-    <div className="border-t border-[rgba(16,24,40,0.08)] bg-[rgba(248,250,252,0.9)]">
+    <div className="space-y-2">
       {subcategories.map((subcategory) => (
-        <div key={subcategory.label} className="border-b border-[rgba(16,24,40,0.08)] last:border-b-0">
-          <div className="grid grid-cols-1 gap-1 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_120px] sm:gap-3">
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                {subcategory.label}
-              </div>
-              <div className="mt-1 text-xs text-muted-foreground">
+        <div key={subcategory.label}>
+          <div className="flex items-baseline justify-between gap-3 px-1 py-1.5">
+            <div className="text-sm font-medium text-foreground">
+              {subcategory.label}
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
                 {subcategory.count} {subcategory.count === 1 ? "expense" : "expenses"}
-              </div>
+              </span>
             </div>
-            <div className="font-medium tabular-nums text-foreground sm:text-right">
+            <div className="text-sm font-medium tabular-nums text-foreground">
               {formatCurrency(subcategory.amount)}
             </div>
           </div>
@@ -255,24 +242,23 @@ function StatementCategoryRow({
 
   if (!expandable) {
     return (
-      <div className="grid grid-cols-1 items-start gap-1 border-b border-[rgba(16,24,40,0.08)] px-4 py-3 text-sm sm:grid-cols-[minmax(0,1fr)_140px] sm:items-center sm:gap-4">
+      <div className="flex items-center justify-between gap-3 border-b border-border/70 py-3 text-sm">
         <div className="font-medium text-foreground">{label}</div>
-        <div className="font-medium tabular-nums text-foreground sm:text-right">{formatCurrency(amount)}</div>
+        <div className="font-medium tabular-nums text-foreground">{formatCurrency(amount)}</div>
       </div>
     )
   }
 
   return (
-    <AccordionItem value={rowKey} className="border-b-0">
-      <AccordionTrigger className="grid grid-cols-[minmax(0,1fr)_16px] items-start gap-3 px-4 py-3 hover:no-underline sm:grid-cols-[minmax(0,1fr)_140px_16px] sm:items-center sm:gap-4">
-        <div className="min-w-0">
+    <AccordionItem value={rowKey} className="border-b border-border/70">
+      <AccordionTrigger className="items-center gap-3 py-3 hover:no-underline">
+        <div className="min-w-0 flex-1 text-left">
           <div className="font-medium text-foreground">{label}</div>
-          <div className="mt-1 text-xs text-muted-foreground">{countLabel}</div>
+          <div className="mt-0.5 text-xs font-normal text-muted-foreground">{countLabel}</div>
         </div>
-        <div className="hidden font-medium tabular-nums text-foreground sm:block sm:text-right">{formatCurrency(amount)}</div>
-        <div className="col-span-2 -mt-1 font-medium tabular-nums text-foreground sm:hidden">{formatCurrency(amount)}</div>
+        <div className="shrink-0 font-medium tabular-nums text-foreground">{formatCurrency(amount)}</div>
       </AccordionTrigger>
-      <AccordionContent className="pb-0">
+      <AccordionContent className="pb-1">
         {subcategories && subcategories.length > 0 ? (
           <StatementSubcategoryList
             subcategories={subcategories}
@@ -286,10 +272,14 @@ function StatementCategoryRow({
   )
 }
 
+// One part of the statement (Revenue, Operating expenses) as its own card,
+// with its total on the last line.
 function StatementSection({
   title,
   rows,
   emptyLabel,
+  totalLabel,
+  total,
 }: {
   title: string
   rows: Array<{
@@ -298,16 +288,17 @@ function StatementSection({
     amount: number
     items: ProfitLossDetailItem[]
     countLabel: string
+    subcategories?: ExpenseDisplaySubcategory[]
   }>
   emptyLabel: string
+  totalLabel: string
+  total: number
 }) {
   return (
-    <section className="border-t border-[rgba(16,24,40,0.14)]">
-      <div className="border-b border-[rgba(16,24,40,0.08)] bg-[rgba(248,250,252,0.85)] px-4 py-3 text-xs font-semibold uppercase tracking-[0.16em] text-[rgba(17,24,39,0.7)]">
-        {title}
-      </div>
+    <section className="rounded-[22px] bg-card px-4 pb-4 pt-4">
+      <h2 className="text-lg font-semibold text-foreground">{title}</h2>
       {rows.length === 0 ? (
-        <div className="px-4 py-4 text-sm text-muted-foreground">
+        <div className="py-3 text-sm text-muted-foreground">
           {emptyLabel}
         </div>
       ) : (
@@ -317,6 +308,12 @@ function StatementSection({
           ))}
         </Accordion>
       )}
+      <div className="flex items-center justify-between gap-3 pt-3 font-semibold text-foreground">
+        <span>{totalLabel}</span>
+        <span className="tabular-nums">
+          <StatementValue value={total} />
+        </span>
+      </div>
     </section>
   )
 }
@@ -362,7 +359,7 @@ function StatementActionMenu({
       </Button>
 
       {open ? (
-        <div className="absolute right-0 top-full z-[9999] mt-2 w-40 rounded-md border border-border bg-card text-foreground shadow-lg">
+        <div className="absolute right-0 top-full z-[9999] mt-2 w-40 overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-lg">
           <button
             type="button"
             onClick={(event) => {
@@ -410,7 +407,6 @@ export default function ProfitLossPage() {
   const { user, authLoading } = useAuth()
   const [periodType, setPeriodType] = useState<ProfitLossPeriodType>("month")
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [detailsCollapsed, setDetailsCollapsed] = useState(false)
 
   const workspaceState = useWorkspaceStore((s) => s.state)
   const activeWorkspace =
@@ -517,12 +513,6 @@ export default function ProfitLossPage() {
       avgPerWeek: thisYearStatement?.hours.avgPerWeek ?? 0,
     }
   }, [monthEntry?.statements, yearEntry?.statements])
-
-  const detailLabel = useMemo(() => {
-    if (periodType === "month") return "Month P&L"
-    if (periodType === "quarter") return "Quarter P&L"
-    return "Year P&L"
-  }, [periodType])
 
   const incomeCategoryDetails = useMemo<ProfitLossIncomeCategoryDetail[]>(
     () => (selected?.income.categories ?? []).filter((item) => item.amount > 0),
@@ -859,226 +849,175 @@ export default function ProfitLossPage() {
     return null
   }
 
+  const periodNoun = periodType === "month" ? "month" : periodType === "quarter" ? "quarter" : "year"
+
   return (
     <>
       <StackInHeader />
-      <div className="w-full max-w-6xl mx-auto space-y-6 px-4 py-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="flex flex-col gap-3">
-            <h1 className="text-2xl font-semibold">Profit &amp; Loss</h1>
-            <p className="text-sm text-muted-foreground">
-              Statements refresh automatically when income entries or expenses change, including
-              in-progress quarter and year rollups.
+      <div className="mx-auto w-full max-w-3xl space-y-5 px-4 pb-10 pt-4">
+        {selected ? (
+          <div id="profit-loss-content" className="space-y-5">
+            <div className="flex items-center justify-between gap-3">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSelectedId(null)}
+                className="-ml-2 rounded-full text-muted-foreground hover:text-foreground"
+              >
+                ← All statements
+              </Button>
+              <StatementActionMenu
+                onPrint={() => handlePrint(selected)}
+                onShare={() => void handleShare(selected)}
+                onExportCsv={() => handleExportCsv(selected)}
+              />
+            </div>
+
+            <section className="rounded-[22px] bg-card p-5">
+              <h1 className="text-sm text-muted-foreground">
+                Profit &amp; Loss · {activeWorkspace?.name}
+              </h1>
+              <p className="mt-1 text-lg font-semibold text-foreground">{selected.label}</p>
+              <p className="mt-3 text-sm text-muted-foreground">Net income</p>
+              <div className="text-4xl font-semibold tracking-tight tabular-nums text-foreground sm:text-5xl">
+                <StatementValue value={selected.netProfit} />
+              </div>
+              <dl className="mt-4 grid grid-cols-2 gap-4 border-t border-border/70 pt-4">
+                <div>
+                  <dt className="text-xs text-muted-foreground">Income</dt>
+                  <dd className="mt-0.5 text-base font-semibold tabular-nums text-foreground">
+                    <StatementValue value={selected.income.total} />
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">Expenses</dt>
+                  <dd className="mt-0.5 text-base font-semibold tabular-nums text-foreground">
+                    <StatementValue value={selected.expenses.total} />
+                  </dd>
+                </div>
+              </dl>
+            </section>
+
+            <StatementSection
+              title="Revenue"
+              rows={incomeCategoryDetails.map((item) => ({
+                rowKey: `income-${item.category}`,
+                label: item.label,
+                amount: item.amount,
+                items: item.items,
+                countLabel: `${item.count} ${item.count === 1 ? "transaction" : "transactions"}`,
+              }))}
+              emptyLabel="No revenue recorded in this period."
+              totalLabel="Gross profit"
+              total={selected.income.total}
+            />
+
+            <StatementSection
+              title="Operating expenses"
+              rows={expenseDisplayRows}
+              emptyLabel="No operating expenses recorded in this period."
+              totalLabel="Total operating expenses"
+              total={selected.expenses.total}
+            />
+
+            <section className="flex items-center justify-between gap-3 rounded-[22px] bg-card px-5 py-4">
+              <span className="text-lg font-semibold text-foreground">Net income</span>
+              <span className="text-lg font-semibold tabular-nums text-foreground">
+                <StatementValue value={selected.netProfit} />
+              </span>
+            </section>
+
+            <p className="px-1 text-xs text-muted-foreground">
+              Generated {new Date(selected.meta.generatedAt).toLocaleString()}.
             </p>
-            <div className="flex flex-wrap items-center justify-center gap-3 lg:justify-start">
+          </div>
+        ) : (
+          <>
+            <div className="space-y-1 px-1">
+              <h1 className="text-2xl font-semibold text-foreground">Profit &amp; Loss</h1>
+              <p className="text-sm text-muted-foreground">
+                Statements update on their own when you add or change income and expenses.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-3 rounded-full bg-muted p-1" role="group" aria-label="Statement period">
               {periodOptions.map((option) => (
-                <Button
+                <button
                   key={option.value}
                   type="button"
-                  variant={periodType === option.value ? "default" : "outline"}
-                  className="rounded-full px-4 sm:px-5"
+                  aria-pressed={periodType === option.value}
                   onClick={() => setPeriodType(option.value)}
+                  className={`rounded-full py-2 text-sm font-medium transition-colors ${
+                    periodType === option.value
+                      ? "bg-foreground text-background shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
                 >
                   {option.label}
-                </Button>
+                </button>
               ))}
             </div>
-          </div>
-        </div>
 
-        <HoursWorkedCard
-          variant="simple"
-          thisMonthHours={hoursStats.thisMonthHours}
-          thisYearHours={hoursStats.thisYearHours}
-          avgPerWeek={hoursStats.avgPerWeek}
-          hideWhenEmpty
-        />
+            <HoursWorkedCard
+              variant="simple"
+              thisMonthHours={hoursStats.thisMonthHours}
+              thisYearHours={hoursStats.thisYearHours}
+              avgPerWeek={hoursStats.avgPerWeek}
+              hideWhenEmpty
+            />
 
-        <Card className="border-border bg-card text-foreground shadow-sm">
-          <CardHeader className="pb-4">
-            <CardTitle className="text-lg text-foreground">
-              {periodType === "month"
-                ? "Monthly Statements"
-                : periodType === "quarter"
-                  ? "Quarterly Statements"
-                  : "Yearly Statements"}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="space-y-2">
-              <div className="text-sm font-medium text-foreground">
-                Select a {periodType === "month" ? "month" : periodType === "quarter" ? "quarter" : "year"}
-              </div>
-              <Select
-                value={selectedId ?? undefined}
-                onValueChange={(value) => {
-                  setSelectedId(value)
-                  setDetailsCollapsed(false)
-                }}
-              >
-                <SelectTrigger className="w-full justify-between rounded-xl border-border bg-card text-foreground hover:bg-muted data-[placeholder]:text-muted-foreground [&_svg]:text-muted-foreground">
-                  <SelectValue
-                    placeholder={
-                      statements.length > 0
-                        ? `Choose a ${periodType === "month" ? "month" : periodType === "quarter" ? "quarter" : "year"}`
-                        : `No ${periodType} statements available`
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent
-                  sideOffset={12}
-                  collisionPadding={{ top: 88, bottom: 16, left: 16, right: 16 }}
-                  className="z-[3000] border-border bg-card text-foreground shadow-lg"
-                >
+            <section aria-labelledby="statements-heading">
+              <h2 id="statements-heading" className="mb-2 px-1 text-lg font-semibold text-foreground">
+                {periodType === "month"
+                  ? "Monthly statements"
+                  : periodType === "quarter"
+                    ? "Quarterly statements"
+                    : "Yearly statements"}
+              </h2>
+
+              {loading && statements.length === 0 ? (
+                <div className="flex items-center rounded-[22px] bg-card px-4 py-6 text-sm text-muted-foreground">
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Loading saved statements...
+                </div>
+              ) : null}
+
+              {!loading && statements.length === 0 ? (
+                <p className="rounded-[22px] bg-card px-4 py-6 text-center text-sm text-muted-foreground">
+                  No {periodNoun} statements available yet.
+                </p>
+              ) : null}
+
+              {statements.length > 0 ? (
+                <ul className="divide-y divide-border/70 rounded-[22px] bg-card px-4">
                   {statements.map((statement) => (
-                    <SelectItem
-                      key={statement.id}
-                      value={statement.id}
-                      className="text-foreground focus:bg-muted focus:text-foreground"
-                    >
-                      <span className="flex min-w-0 flex-col">
-                        <span className="font-medium">{statement.label}</span>
-                        <span className="text-xs text-muted-foreground">
-                          Net {formatCurrency(statement.netProfit)}
+                    <li key={statement.id}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedId(statement.id)}
+                        className="flex w-full items-center gap-3 py-3.5 text-left"
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="block font-medium text-foreground">{statement.label}</span>
+                          <span className="block text-sm tabular-nums text-muted-foreground">
+                            Income {formatCurrency(statement.income.total)} · Expenses {formatCurrency(statement.expenses.total)}
+                          </span>
                         </span>
-                      </span>
-                    </SelectItem>
+                        <span className="shrink-0 text-right">
+                          <span className="block text-xs text-muted-foreground">Net</span>
+                          <span className="block font-semibold tabular-nums text-foreground">
+                            <StatementValue value={statement.netProfit} />
+                          </span>
+                        </span>
+                        <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                      </button>
+                    </li>
                   ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {loading && statements.length === 0 ? (
-              <div className="flex items-center text-sm text-muted-foreground">
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Loading saved statements...
-              </div>
-            ) : null}
-
-            {!loading && statements.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground">
-                No {periodType} statements available yet.
-              </div>
-            ) : null}
-
-            {selected ? (
-              <div className="rounded-xl border border-border bg-[rgba(248,250,252,0.7)] px-4 py-3 text-sm text-foreground">
-                <div className="font-medium text-foreground">{selected.label}</div>
-                <div className="mt-1 text-muted-foreground sm:hidden">
-                  <div className="tabular-nums">Income {formatCurrency(selected.income.total)}</div>
-                  <div className="tabular-nums">Expenses {formatCurrency(selected.expenses.total)}</div>
-                  <div className="tabular-nums">Net {formatCurrency(selected.netProfit)}</div>
-                </div>
-                <div className="mt-1 hidden text-muted-foreground sm:block">
-                  Income {formatCurrency(selected.income.total)} · Expenses{" "}
-                  {formatCurrency(selected.expenses.total)} · Net {formatCurrency(selected.netProfit)}
-                </div>
-              </div>
-            ) : null}
-          </CardContent>
-        </Card>
-
-        <div className="items-start grid gap-6">
-          <Card
-            id="profit-loss-content"
-            className="self-start overflow-hidden border-border bg-card text-foreground shadow-sm"
-          >
-            {selected ? (
-              <>
-                <CardHeader className="relative flex flex-col items-center gap-4 border-b border-border bg-[linear-gradient(180deg,#fefefe_0%,#f8fafc_100%)] pr-16 text-center sm:items-start sm:pr-20 sm:text-left">
-                  <StatementActionMenu
-                    className="absolute right-6 top-6"
-                    onPrint={() => handlePrint(selected)}
-                    onShare={() => void handleShare(selected)}
-                    onExportCsv={() => handleExportCsv(selected)}
-                  />
-                  <div className="w-full text-center sm:text-left">
-                    <p className="text-lg font-semibold text-foreground">Profit &amp; Loss Statement</p>
-                    <p className="mt-2 text-base font-semibold text-foreground">{activeWorkspace?.name}</p>
-                    <p className="mt-1 text-sm text-muted-foreground">{selected.label}</p>
-                  </div>
-                  <div className="flex w-full shrink-0 flex-wrap items-center justify-center gap-2 sm:justify-start">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="border-border bg-card text-foreground hover:bg-muted hover:text-foreground"
-                      onClick={() => setDetailsCollapsed((current) => !current)}
-                    >
-                      {detailsCollapsed ? (
-                        <ChevronDown className="h-4 w-4" />
-                      ) : (
-                        <ChevronUp className="h-4 w-4" />
-                      )}
-                      {detailsCollapsed ? "Expand" : "Collapse"}
-                    </Button>
-                  </div>
-                </CardHeader>
-                {!detailsCollapsed ? (
-                <CardContent className="space-y-6 px-0 pb-6">
-                  <div className="grid grid-cols-1 gap-1 border-b border-[rgba(16,24,40,0.14)] px-4 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-[rgba(17,24,39,0.55)] sm:grid-cols-[minmax(0,1fr)_140px]">
-                    <div>Description</div>
-                    <div className="sm:text-right">Amount</div>
-                  </div>
-
-                  <StatementSection
-                    title="Revenue"
-                    rows={incomeCategoryDetails.map((item) => ({
-                      rowKey: `income-${item.category}`,
-                      label: item.label,
-                      amount: item.amount,
-                      items: item.items,
-                      countLabel: `${item.count} ${item.count === 1 ? "transaction" : "transactions"}`,
-                    }))}
-                    emptyLabel="No revenue recorded in this period."
-                  />
-
-                  <div className="grid grid-cols-1 gap-1 border-t border-[rgba(16,24,40,0.14)] border-b border-[rgba(16,24,40,0.08)] bg-[rgba(248,250,252,0.85)] px-4 py-3 text-xs font-semibold uppercase tracking-[0.16em] text-[rgba(17,24,39,0.7)] sm:grid-cols-[minmax(0,1fr)_140px] sm:gap-4">
-                    <div>Gross Profit</div>
-                    <div className="normal-case tracking-normal text-sm font-semibold tabular-nums text-foreground sm:text-right">
-                      <StatementValue value={selected.income.total} />
-                    </div>
-                  </div>
-
-                  <StatementSection
-                    title="Operating Expenses"
-                    rows={expenseDisplayRows}
-                    emptyLabel="No operating expenses recorded in this period."
-                  />
-
-                  <div className="grid grid-cols-1 gap-1 border-t border-[rgba(16,24,40,0.14)] border-b border-[rgba(16,24,40,0.08)] bg-[rgba(248,250,252,0.85)] px-4 py-3 text-xs font-semibold uppercase tracking-[0.16em] text-[rgba(17,24,39,0.7)] sm:grid-cols-[minmax(0,1fr)_140px] sm:gap-4">
-                    <div>Total Operating Expenses</div>
-                    <div className="normal-case tracking-normal text-sm font-semibold tabular-nums text-foreground sm:text-right">
-                      <StatementValue value={selected.expenses.total} />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 gap-1 border-t border-[rgba(16,24,40,0.14)] bg-[linear-gradient(180deg,rgba(255,251,235,0.72)_0%,rgba(255,247,237,0.92)_100%)] px-4 py-4 text-sm font-semibold text-foreground sm:grid-cols-[minmax(0,1fr)_140px] sm:gap-4">
-                    <div className="font-serif text-lg tracking-[0.01em]">Net Income</div>
-                    <div className="font-serif text-lg tabular-nums sm:text-right">
-                      <StatementValue value={selected.netProfit} />
-                    </div>
-                  </div>
-
-                  <div className="text-xs text-muted-foreground">
-                    Generated {new Date(selected.meta.generatedAt).toLocaleString()}.
-                  </div>
-                </CardContent>
-                ) : null}
-              </>
-              ) : (
-                <>
-                  <CardHeader className="border-b border-border bg-[linear-gradient(180deg,#fefefe_0%,#f8fafc_100%)]">
-                    <CardTitle className="text-xl text-foreground">{detailLabel}</CardTitle>
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      Choose a saved {periodType === "month" ? "monthly" : periodType === "quarter" ? "quarterly" : "yearly"} statement above to open the full view.
-                    </p>
-                  </CardHeader>
-                  <CardContent className="flex min-h-[520px] items-center justify-center p-8 text-sm text-muted-foreground">
-                    Select a statement from the dropdown to open the full profit &amp; loss view.
-                  </CardContent>
-                </>
-              )}
-          </Card>
-        </div>
+                </ul>
+              ) : null}
+            </section>
+          </>
+        )}
       </div>
     </>
   )
