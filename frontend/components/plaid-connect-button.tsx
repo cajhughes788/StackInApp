@@ -331,14 +331,14 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
   return (
     <div className="space-y-3">
       {items === null && !loadFailed ? (
-        <div className="rounded-lg border border-muted px-3 py-2 space-y-2" aria-label="Checking your connected banks">
+        <div className="space-y-2 rounded-2xl bg-muted px-4 py-3" aria-label="Checking your connected banks">
           <Skeleton className="h-4 w-36" />
           <Skeleton className="h-3 w-20" />
         </div>
       ) : null}
 
       {items === null && loadFailed ? (
-        <div className="flex items-center justify-between gap-2 rounded-lg border border-muted px-3 py-2 text-sm">
+        <div className="flex items-center justify-between gap-2 rounded-2xl bg-muted px-4 py-3 text-sm">
           <span className="text-muted-foreground">Couldn&apos;t check your connected banks.</span>
           <Button variant="ghost" size="sm" onClick={() => void loadItems()}>
             Try again
@@ -347,7 +347,7 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
       ) : null}
 
       {(items ?? []).map((item) => (
-        <div key={item.id} className="rounded-lg border border-muted px-3 py-2 space-y-2">
+        <div key={item.id} className="space-y-2 rounded-2xl bg-muted px-4 py-3">
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm font-medium">{item.institutionName ?? "Connected bank"}</div>
@@ -381,7 +381,7 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
           </div>
 
           {item.status !== "error" && item.linkedAccounts.length > 0 ? (
-            <div className="space-y-1.5 border-t border-muted pt-2">
+            <div className="space-y-1.5 border-t border-border/70 pt-2">
               {item.linkedAccounts.map((account) => (
                 <div key={account.accountId} className="flex items-center justify-between gap-2">
                   <span className="text-xs text-muted-foreground">
@@ -414,7 +414,7 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
         </div>
       ))}
 
-      <Button variant="outline" className="w-full" onClick={handleConnect} disabled={isConnecting}>
+      <Button variant="outline" className="w-full rounded-xl" onClick={handleConnect} disabled={isConnecting}>
         {isConnecting ? "Connecting..." : items && items.length > 0 ? "Connect another bank" : "Connect a bank"}
       </Button>
 
@@ -444,7 +444,7 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
           <AlertDialogHeader>
             <AlertDialogTitle>Disconnect {unlinkPromptItem?.institutionName ?? "this bank"}?</AlertDialogTitle>
             <AlertDialogDescription>
-              StackIn will stop pulling in new transactions from this account. Transactions you've
+              521 will stop pulling in new transactions from this account. Transactions you've
               already reviewed and confirmed stay exactly as they are.
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -467,7 +467,7 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
               personal, business, or a mix?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              This helps StackIn guess right from your very first transaction instead of starting
+              This helps 521 guess right from your very first transaction instead of starting
               from scratch on every one. You can always fine-tune it later per account, or correct
               any individual transaction when you review it.
             </AlertDialogDescription>

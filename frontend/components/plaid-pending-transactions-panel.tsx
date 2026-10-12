@@ -705,8 +705,8 @@ export default function PlaidPendingTransactionsPanel() {
             <AlertDialogDescription>
               Future transactions from this merchant won&apos;t notify you or show up here
               anymore — they&apos;ll still be recorded quietly, in case a purchase from them is
-              ever actually a business expense. You can undo this later from Account Settings
-              &rarr; Learned Merchants.
+              ever actually a business expense. You can undo this later from Bank connections
+              &rarr; Learned merchants.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -737,7 +737,7 @@ export default function PlaidPendingTransactionsPanel() {
               Future transactions from the merchants in this batch won&apos;t notify you or show up
               here anymore if you choose &quot;Always&quot; — they&apos;ll still be recorded quietly,
               in case a purchase from one of them is ever actually a business expense. You can edit
-              or undo this later from Account Settings &rarr; Learned Merchants.
+              or undo this later from Bank connections &rarr; Learned merchants.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

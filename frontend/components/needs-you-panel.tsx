@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import Link from "next/link"
 import { CheckCircle2 } from "lucide-react"
 
 import { getPlaidItems } from "@/lib/api/plaidApi"
@@ -61,7 +62,9 @@ export default function NeedsYouPanel() {
             </span>
           ) : null}
         </h2>
-        <span className="text-xs text-muted-foreground">From your bank</span>
+        <Link href="/app/banks" className="text-xs font-medium text-primary">
+          Manage banks
+        </Link>
       </div>
 
       <PlaidIncomeReviewPanel />

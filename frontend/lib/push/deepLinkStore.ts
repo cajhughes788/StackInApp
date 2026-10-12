@@ -22,7 +22,7 @@ export type DeepLinkRequest = {
   // Null for older notifications that predate workspaceId in the payload —
   // those stay in the current workspace.
   workspaceId: string | null
-  route: "/app/home" | "/app/account"
+  route: "/app/home" | "/app/banks"
   review: DeepLinkReviewTab | null
 }
 
@@ -78,7 +78,8 @@ export function deepLinkRequestFromPushData(data: Record<string, unknown> | unde
     return { workspaceId, route: "/app/home", review: "expenses" }
   }
   if (deepLink.startsWith("stackin://plaid/reconnect")) {
-    return { workspaceId, route: "/app/account", review: null }
+    // Reconnecting a bank happens on the Bank connections page.
+    return { workspaceId, route: "/app/banks", review: null }
   }
   return null
 }

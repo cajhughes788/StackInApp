@@ -26,6 +26,7 @@ import { cn } from "@/lib/utils";
 import CommonSettingsSection from "./CommonSettings";
 import W2SettingsSection from "./W2Settings";
 import IndependentSettingsSection from "./IndependentSettings";
+import { AppearanceCard, WorkspaceDangerZone, WorkspaceNameCard } from "@/components/workspace-settings-cards";
 // ------------------------------------------------------------------------------------
 // Types
 // ------------------------------------------------------------------------------------
@@ -1015,11 +1016,18 @@ export default function SettingsPage() {
             <span className="text-xs text-muted-foreground">{settingsStatusMessage}</span>
           </div>) : null}
 
+        {!isInitialSettingsSetup ? <WorkspaceNameCard /> : null}
+
         {activeWorkspace?.type === "w2" && (<W2SettingsSection data={formData.w2} isInitialSetup={isInitialSettingsSetup} onChange={(patch, behavior) => updateSection("w2", patch, behavior)}/>)}
 
         {activeWorkspace?.type === "independent" && (<IndependentSettingsSection data={formData.independent} onChange={(patch, behavior) => updateSection("independent", patch, behavior)}/>)}
 
         <CommonSettingsSection data={formData.common} onChange={(patch, behavior) => updateSection("common", patch, behavior)}/>
+
+        {!isInitialSettingsSetup ? (<>
+            <AppearanceCard />
+            <WorkspaceDangerZone />
+          </>) : null}
 
         <div className="pt-4">
           {isInitialSettingsSetup &&

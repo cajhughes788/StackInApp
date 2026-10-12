@@ -521,7 +521,7 @@ export default function PlaidIncomeReviewPanel() {
             </AlertDialogTitle>
             <AlertDialogDescription>
               Future deposits from them won&apos;t notify you or show up here. They&apos;re still recorded, and you
-              can undo this from Account Settings &rarr; Learned Merchants.
+              can undo this from Bank connections &rarr; Learned merchants.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

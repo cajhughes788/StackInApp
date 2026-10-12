@@ -49,20 +49,25 @@ export default function StackInHeader() {
 
   const menuItems = [
     { label: "Home", href: "/app/home" },
-    { label: "Settings", href: "/app/settings" },
     activeWorkspace?.type === "independent"
       ? { label: "Profit & Loss", href: "/app/profitloss" }
       : { label: "Earnings", href: "/app/earnings" },
     ...(activeWorkspace?.type === "independent"
       ? [
           { label: "Receipts", href: "/app/receipts" },
+          { label: "Bank connections", href: "/app/banks" },
+        ]
+      : []),
+    { label: "Settings", href: "/app/settings" },
+    { label: "Account", href: "/app/account" },
+    ...(activeWorkspace?.type === "independent"
+      ? [
           {
             label: "Expense Category Guide",
             href: "/app/expense-category-guide",
           },
         ]
       : []),
-    { label: "Account", href: "/app/account" },
   ]
 
   const visibleItems = menuItems.filter((item) => item.href !== pathname)

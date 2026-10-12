@@ -43,7 +43,7 @@ export async function registerPushNotifications(): Promise<void> {
     // Tapping a notification (see pushNotificationService.ts's data) lands
     // on the right workspace and tab with the review list open: expense and
     // refund reviews on Expenses, deposits on Income, "reconnect your bank"
-    // on the account page. This only records the request — no
+    // on the Bank connections page. This only records the request — no
     // window.location navigation, which reboots the native app through the
     // landing page and loses the destination (see deepLinkStore.ts).
     // DeepLinkHandler performs it once the workspace list is ready. Capacitor
