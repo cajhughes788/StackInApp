@@ -13,7 +13,8 @@ import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import { useExpensesStore } from "@/lib/stores/useExpensesStore"
 import { useReceiptDraftsStore } from "@/lib/stores/useReceiptDraftsStore"
 import * as expenseRepository from "@/lib/domain/expenseRepository"
-import { useExpenseFocusStore } from "@/lib/stores/useExpenseFocusStore"
+import { selectExpenseMonth, useExpenseFocusStore } from "@/lib/stores/useExpenseFocusStore"
+import { useSettingsStore } from "@/lib/stores/useSettingsStore"
 import { formatCurrency } from "@/lib/helpers"
 import { computeReceiptCoverage, needsReceiptForAuditDefense, RECEIPT_REQUIRED_THRESHOLD } from "@shared/receiptRequirements"
 import { getCalendarMonthBucketFromDate } from "@shared/payPeriods"
@@ -60,7 +61,13 @@ function getReceiptLifecycleLabel(item: ReceiptDraft): string {
 export default function ReceiptsLibrary() {
   const router = useRouter()
   const [attachExpenseId, setAttachExpenseId] = useState<string | null>(null)
-  const [selectedMonth, setSelectedMonth] = useState<string>(getCurrentMonthValue)
+  // A link can ask for a specific month (useExpenseFocusStore.receiptsMonth).
+  const [selectedMonth, setSelectedMonth] = useState<string>(
+    () => useExpenseFocusStore.getState().receiptsMonth ?? getCurrentMonthValue()
+  )
+  useEffect(() => {
+    useExpenseFocusStore.getState().setReceiptsMonth(null)
+  }, [])
   const [monthExpenses, setMonthExpenses] = useState<any[]>([])
   const [expensesLoading, setExpensesLoading] = useState(false)
   const workspaceState = useWorkspaceStore((state) => state.state)
@@ -255,7 +262,11 @@ export default function ReceiptsLibrary() {
   // Opens the expense in the home page's expenses grid
   // (useExpenseFocusStore → home page → expenses grid).
   function viewExpense(expenseId: string) {
-    if (!activeWorkspaceId) return
+    if (!activeWorkspaceId || !activeWorkspace) return
+    const settings = useSettingsStore.getState().byWorkspaceId[activeWorkspaceId]?.data
+    if (settings) {
+      selectExpenseMonth(activeWorkspaceId, activeWorkspace.type, activeWorkspace.createdAt ?? null, settings, selectedMonth)
+    }
     useExpenseFocusStore.getState().focusExpense({
       workspaceId: activeWorkspaceId,
       expenseId,
@@ -297,7 +308,7 @@ export default function ReceiptsLibrary() {
           <div className="space-y-1">
             <h1 className="text-2xl font-semibold text-foreground">Receipts</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Receipts attached to expenses appear here. To add a receipt, attach one when creating an expense.
+              Receipts attached to expenses appear here. Attach one when you add an expense, or later from the expense itself.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">

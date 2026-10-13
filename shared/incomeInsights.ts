@@ -31,14 +31,20 @@ export const TYPICAL_MONTH_MIN_MONTHS = 3
 
 // "A typical month": the median of complete months (a median shrugs off one
 // unusually big or slow month), with the low and high. Null under 3 months.
+// `consistent` is false when the months are too far apart for one number to
+// mean anything — the gap between the best and worst month is bigger than
+// the typical month itself (say $0, $68, $1,504, $1,600 → "typical" $786,
+// a month that never happened). The UI then shows only the range.
 export function computeTypicalMonth(
   monthTotals: number[]
-): { typical: number; low: number; high: number } | null {
+): { typical: number; low: number; high: number; consistent: boolean } | null {
   if (monthTotals.length < TYPICAL_MONTH_MIN_MONTHS) return null
   const sorted = [...monthTotals].sort((a, b) => a - b)
   const middle = Math.floor(sorted.length / 2)
   const typical = sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2
-  return { typical, low: sorted[0], high: sorted[sorted.length - 1] }
+  const low = sorted[0]
+  const high = sorted[sorted.length - 1]
+  return { typical, low, high, consistent: typical > 0 && high - low <= typical }
 }
 
 // The complete months to look back over: up to `count` months before

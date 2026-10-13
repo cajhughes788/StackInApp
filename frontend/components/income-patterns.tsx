@@ -84,18 +84,31 @@ export default function IncomePatterns({ insights }: { insights: ProfitLossInsig
       <div className="divide-y divide-border/70 rounded-[22px] bg-card border border-card-border px-5">
         {typical ? (
           <div className="space-y-3 py-4">
-            <div>
-              <p className="text-sm text-muted-foreground">A typical month for you</p>
-              <p className="text-2xl font-semibold tabular-nums text-foreground">{wholeDollars.format(typical.typical)}</p>
-              <p className="text-sm text-muted-foreground">
-                Low <span className="tabular-nums text-foreground">{wholeDollars.format(typical.low)}</span> · High{" "}
-                <span className="tabular-nums text-foreground">{wholeDollars.format(typical.high)}</span> over the last{" "}
-                {months.length} months
-              </p>
-            </div>
+            {typical.consistent ? (
+              <div>
+                <p className="text-sm text-muted-foreground">A typical month for you</p>
+                <p className="text-2xl font-semibold tabular-nums text-foreground">{wholeDollars.format(typical.typical)}</p>
+                <p className="text-sm text-muted-foreground">
+                  Low <span className="tabular-nums text-foreground">{wholeDollars.format(typical.low)}</span> · High{" "}
+                  <span className="tabular-nums text-foreground">{wholeDollars.format(typical.high)}</span> over the last{" "}
+                  {months.length} months
+                </p>
+              </div>
+            ) : (
+              // Months too far apart for one "typical" number to mean anything.
+              <div>
+                <p className="text-sm text-muted-foreground">Your monthly income</p>
+                <p className="text-2xl font-semibold tabular-nums text-foreground">
+                  {wholeDollars.format(typical.low)} – {wholeDollars.format(typical.high)}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Varies a lot from month to month · last {months.length} months
+                </p>
+              </div>
+            )}
             <MiniBars
               label="Income by month"
-              reference={typical.typical}
+              reference={typical.consistent ? typical.typical : undefined}
               bars={months.map((month) => {
                 const date = DateTime.fromFormat(month.key, "yyyy-MM")
                 return {
@@ -107,7 +120,9 @@ export default function IncomePatterns({ insights }: { insights: ProfitLossInsig
                 }
               })}
             />
-            <p className="text-xs text-muted-foreground">Dashed line: your typical month.</p>
+            {typical.consistent ? (
+              <p className="text-xs text-muted-foreground">Dashed line: your typical month.</p>
+            ) : null}
           </div>
         ) : null}
 

@@ -3,6 +3,7 @@
 import { DateTime } from "luxon"
 import { ArrowDownRight, ArrowUpRight } from "lucide-react"
 
+import { formatCurrency } from "@/lib/helpers"
 import { compareWithPreviousMonth, type DatedAmount } from "@shared/incomeInsights"
 
 // "↗ Up 12% vs Sep 1–12". While the month is in progress it compares with the
@@ -30,6 +31,16 @@ export default function MonthCompare({
   const percent = Math.round(comparison.change * 100)
   const against = throughDay === 1 ? previous.toFormat("LLL d") : `${previous.toFormat("LLL")} 1–${throughDay}`
   const Icon = percent >= 0 ? ArrowUpRight : ArrowDownRight
+
+  // Nothing yet this month — "Down 100%" would read like something went wrong.
+  if (currentTotal <= 0) {
+    return (
+      <span className="mt-1 flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
+        None yet · <span className="tabular-nums text-foreground">{formatCurrency(comparison.previousTotal)}</span> by{" "}
+        {throughDay === 1 ? previous.toFormat("LLL d") : `${previous.toFormat("LLL")} ${throughDay}`}
+      </span>
+    )
+  }
 
   return (
     <span className="mt-1 flex flex-wrap items-center gap-1 text-sm text-muted-foreground">

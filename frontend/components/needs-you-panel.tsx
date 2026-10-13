@@ -10,7 +10,9 @@ import PlaidIncomeReviewPanel from "@/components/plaid-income-review-panel"
 import PlaidPendingTransactionsPanel from "@/components/plaid-pending-transactions-panel"
 import { useReviewCountsStore } from "@/lib/stores/useReviewCountsStore"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
-import { useExpensesData } from "@/lib/stores/useExpensesStore"
+import { useExpensesData, useExpensesStore } from "@/lib/stores/useExpensesStore"
+import { useExpenseFocusStore } from "@/lib/stores/useExpenseFocusStore"
+import { getCalendarMonthBucketAt } from "@shared/payPeriods"
 import { useSettingsData, useSettingsStore } from "@/lib/stores/useSettingsStore"
 import * as settingsService from "@/lib/domain/settingsService"
 import { useToast } from "@/hooks/use-toast"
@@ -40,6 +42,12 @@ export default function NeedsYouPanel() {
   const { toast } = useToast()
   const showMissingReceipts = settings?.independent?.missingReceiptsInNeedsYou !== false
   const missingReceipts = showMissingReceipts ? coverage.missing : 0
+  // The month home has loaded — may be a past month picked in the dropdown.
+  const expensesMonth = useExpensesStore((s) => (activeWorkspaceId ? s.byWorkspaceId[activeWorkspaceId]?.periodId : null)) ?? null
+  const isCurrentMonth = !expensesMonth || !settings || expensesMonth === getCalendarMonthBucketAt(settings)
+  const monthLabel = isCurrentMonth
+    ? "this month"
+    : `in ${new Date(`${expensesMonth}-15T12:00:00`).toLocaleDateString("en-US", { month: "long" })}`
   const total = (incomeCount ?? 0) + (expensesCount ?? 0) + missingReceipts
 
   async function hideMissingReceipts() {
@@ -112,7 +120,11 @@ export default function NeedsYouPanel() {
 
       {missingReceipts > 0 ? (
         <div className="flex items-center rounded-[18px] bg-card border border-card-border hover:bg-muted/40">
-        <Link href="/app/receipts" className="flex min-w-0 flex-1 items-center gap-3 p-4 pr-2">
+        <Link
+          href="/app/receipts"
+          onClick={() => useExpenseFocusStore.getState().setReceiptsMonth(expensesMonth)}
+          className="flex min-w-0 flex-1 items-center gap-3 p-4 pr-2"
+        >
           <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted text-foreground">
             <ReceiptText className="size-5" aria-hidden="true" />
           </span>
@@ -120,7 +132,7 @@ export default function NeedsYouPanel() {
             <span className="block font-medium text-foreground">
               {coverage.missing === 1 ? "1 expense needs a receipt" : `${coverage.missing} expenses need a receipt`}
             </span>
-            <span className="block text-sm text-muted-foreground">Audit-ready {coverage.percent}% this month</span>
+            <span className="block text-sm text-muted-foreground">Audit-ready {coverage.percent}% {monthLabel}</span>
           </span>
           <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         </Link>

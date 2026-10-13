@@ -156,6 +156,7 @@ export default function IndependentSettingsSection({
             </div>
 
             <Switch
+              aria-label="Weekly summary"
               checked={local.weeklyDigest ?? true} // unset = on
               onCheckedChange={(v) => update("weeklyDigest", v, "immediate")}
             />
@@ -170,6 +171,7 @@ export default function IndependentSettingsSection({
             </div>
 
             <Switch
+              aria-label="Missing receipts in Needs you"
               checked={local.missingReceiptsInNeedsYou ?? true} // unset = on
               onCheckedChange={(v) => update("missingReceiptsInNeedsYou", v, "immediate")}
             />

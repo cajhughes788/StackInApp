@@ -29,6 +29,7 @@ import { formatDate, formatCurrency } from "@/lib/helpers"
 import { printHtmlDocument } from "@/lib/print"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import { useProfitLossStore } from "@/lib/stores/useProfitLossStore"
+import { useSettingsData } from "@/lib/stores/useSettingsStore"
 import type {
   ProfitLossDetailItem,
   ProfitLossExpenseCategory,
@@ -430,6 +431,8 @@ export default function ProfitLossPage() {
   const refreshFromBackend = useProfitLossStore((s) => s.refreshFromBackend)
   // "This month so far" and "Your patterns" — a small separate summary.
   const insights = useProfitLossInsights(activeWorkspaceId, activeWorkspace?.type === "independent")
+  // Hours only for workspaces that track them (Settings → Track hours).
+  const trackHours = useSettingsData(activeWorkspaceId)?.independent?.trackHours === true
 
   const statements = entry?.statements ?? []
   const hasHydrated = entry?.hasHydrated ?? false
@@ -965,13 +968,15 @@ export default function ProfitLossPage() {
               ))}
             </div>
 
-            <HoursWorkedCard
-              variant="simple"
-              thisMonthHours={hoursStats.thisMonthHours}
-              thisYearHours={hoursStats.thisYearHours}
-              avgPerWeek={hoursStats.avgPerWeek}
-              hideWhenEmpty
-            />
+            {trackHours ? (
+              <HoursWorkedCard
+                variant="simple"
+                thisMonthHours={hoursStats.thisMonthHours}
+                thisYearHours={hoursStats.thisYearHours}
+                avgPerWeek={hoursStats.avgPerWeek}
+                hideWhenEmpty
+              />
+            ) : null}
 
             <section aria-labelledby="statements-heading">
               <h2 id="statements-heading" className="mb-2 px-1 text-lg font-semibold text-foreground">
