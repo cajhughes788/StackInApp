@@ -921,18 +921,19 @@ export const STATE_TAX_RATES: Record<string, StateTaxInfo> = {
   },
   SouthCarolina: {
     brackets: [
-      { upTo: 3640, rate: 0 },
-      { upTo: 18230, rate: 0.03 },
-      { upTo: null, rate: 0.06 },
+      { upTo: 30000, rate: 0.0199 },
+      { upTo: null, rate: 0.0521 },
     ],
+    // South Carolina Income Adjusted Deduction (SCIAD) base amounts; the
+    // phase-down at higher incomes isn't modeled.
     deduction: {
-      single: 8350,
-      marriedJoint: 16700,
-      marriedSeparate: 8350,
-      headOfHousehold: 12525,
+      single: 15000,
+      marriedJoint: 30000,
+      marriedSeparate: 15000,
+      headOfHousehold: 22500,
     },
     dependentDeduction: 4930,
-    notes: "Top rate remains 6.0% through June 30, 2026; current date is before the scheduled July 1 reversion.",
+    notes: "2026 rates under H.4216 / Act 110 (retroactive to Jan 1, 2026): 1.99% up to $30,000 and 5.21% above.",
     displayName: "South Carolina",
   },
   SouthDakota: {

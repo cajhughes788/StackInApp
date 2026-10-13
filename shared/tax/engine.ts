@@ -5,6 +5,7 @@ import { calculateFederalTax } from "./federal"
 import { calculateLocalTaxes } from "./locals"
 import { calculateStateTaxes } from "./registry"
 import { getStateCalculationMeta } from "./state"
+import { resolvePayrollYear } from "./payrollYears"
 import type { FilingStatus, PaycheckResult, TaxBreakdown, TaxContext, TaxProfileInput } from "./types"
 
 /**
@@ -26,6 +27,15 @@ export function calculateNetPay(profile: TaxProfileInput): PaycheckResult {
   const dependents = profile.dependents || 0
   const filingStatus = normalizeStatus(profile.filingStatus)
   const state = profile.state || "Default"
+  // The paycheck's year picks the federal payroll tables (payrollYears.ts).
+  const payrollYear = resolvePayrollYear(profile.payDate)
+  const payroll = payrollYear.params
+  if (payrollYear.isFallback) {
+    console.warn("[tax-engine] payroll_year_fallback", JSON.stringify({
+      requested: payrollYear.requested,
+      used: payrollYear.used,
+    }))
+  }
 
   // ---------------------
   // 1. PRE-TAX DEDUCTIONS
@@ -67,7 +77,7 @@ export function calculateNetPay(profile: TaxProfileInput): PaycheckResult {
       federalDeductions: profile.federalDeductions,
       federalExempt: profile.federalExempt,
       additionalFederalWithholding: profile.additionalFederalWithholding,
-    })
+    }, payroll)
   )
   
   let stateTax = ZERO
@@ -115,14 +125,16 @@ export function calculateNetPay(profile: TaxProfileInput): PaycheckResult {
   // ---------------------
   // 3. FICA (Social Security + Medicare)
   // ---------------------
-  const ssRate = d(0.062) // Social Security 6.2%
-  const medicareRate = d(0.0145) // Medicare 1.45%
+  const ssRate = d(payroll.socialSecurityRate)
+  const medicareRate = d(payroll.medicareRate)
   const annualGross = gross.mul(getPeriodsPerYear(freq))
-  const socialSecurityWageBase = d(184500)
+  const socialSecurityWageBase = d(payroll.socialSecurityWageBase)
   const annualSocialSecurity = min(annualGross, socialSecurityWageBase).mul(ssRate)
-  const additionalMedicareThreshold = d(getAdditionalMedicareThreshold(filingStatus))
+  // Employers withhold Additional Medicare above one threshold for everyone;
+  // the filing-status thresholds only apply on the employee's tax return.
+  const additionalMedicareThreshold = d(payroll.additionalMedicareWithholdingThreshold)
   const annualMedicare = annualGross.mul(medicareRate).add(
-    max(annualGross.sub(additionalMedicareThreshold), ZERO).mul(d(0.009))
+    max(annualGross.sub(additionalMedicareThreshold), ZERO).mul(d(payroll.additionalMedicareRate))
   )
   const socialSecurity = annualSocialSecurity.div(getPeriodsPerYear(freq)).toDecimalPlaces(2)
   const medicare = annualMedicare.div(getPeriodsPerYear(freq)).toDecimalPlaces(2)
@@ -243,6 +255,11 @@ export function calculateNetPay(profile: TaxProfileInput): PaycheckResult {
     breakdown,
     metadata: {
       state: getStateCalculationMeta(state),
+      taxYear: {
+        requested: payrollYear.requested,
+        used: payrollYear.used,
+        isFallback: payrollYear.isFallback,
+      },
     },
   }
 }
@@ -276,17 +293,5 @@ function getPeriodsPerYear(freq: TaxProfileInput["payFrequency"]): number {
       return 12
     case "annual":
       return 1
-  }
-}
-
-function getAdditionalMedicareThreshold(status: FilingStatus): number {
-  switch (status) {
-    case "marriedJoint":
-      return 250000
-    case "marriedSeparate":
-      return 125000
-    case "single":
-    case "headOfHousehold":
-      return 200000
   }
 }
