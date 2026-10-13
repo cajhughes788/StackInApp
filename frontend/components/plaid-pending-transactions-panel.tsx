@@ -33,6 +33,7 @@ import { RECEIPT_REQUIRED_THRESHOLD } from "@shared/receiptRequirements"
 import { normalizePlaidMerchantKey, resolvePlaidDisplayName } from "@shared/plaidClassification"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import { useSettingsStore } from "@/lib/stores/useSettingsStore"
+import { useExpensesStore } from "@/lib/stores/useExpensesStore"
 import {
   confirmPlaidPendingTransaction,
   getPlaidPendingTransactions,
@@ -418,6 +419,14 @@ export default function PlaidPendingTransactionsPanel() {
     receiptCapture.clearAttachedReceipt()
   }
 
+  // The expense is created server-side, so the local expenses store doesn't
+  // know about it — re-fetch whichever period the Expenses tab is showing.
+  function refreshVisibleExpenses(workspaceId: string) {
+    const store = useExpensesStore.getState()
+    const periodId = store.byWorkspaceId[workspaceId]?.periodId
+    if (periodId) void store.refreshFromBackend(workspaceId, periodId, { force: true }).catch(() => {})
+  }
+
   async function handleSetUpRecurring(suggestion: PlaidRecurringSuggestion) {
     if (!activeWorkspaceId) return
     setIsSettingUpRecurring(true)
@@ -504,6 +513,7 @@ export default function PlaidPendingTransactionsPanel() {
         alwaysPersonal: false,
         receiptAssetId,
       })
+      if (isBusiness) refreshVisibleExpenses(activeWorkspaceId)
       if (result.recurringSuggestion) setRecurringPrompt(result.recurringSuggestion)
       if (result.personalSuggestion) setPersonalPrompt(result.personalSuggestion)
     } catch {
@@ -553,6 +563,7 @@ export default function PlaidPendingTransactionsPanel() {
     })
 
     setIsBulkWorking(false)
+    if (isBusiness && failed.length < targets.length) refreshVisibleExpenses(activeWorkspaceId)
     if (failed.length > 0) {
       const failedIds = new Set(failed.map((t) => t.id))
       setTransactions((prev) => [...prev, ...failed.filter((t) => !prev.some((p) => p.id === t.id))])
@@ -801,13 +812,31 @@ export default function PlaidPendingTransactionsPanel() {
       <AlertDialog open={recurringPrompt != null} onOpenChange={(open) => !open && setRecurringPrompt(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>This looks recurring</AlertDialogTitle>
+            <AlertDialogTitle>Track {recurringPrompt?.vendor} automatically?</AlertDialogTitle>
             <AlertDialogDescription>
-              {recurringPrompt?.vendor} has come up {cadenceLabel(recurringPrompt?.cadence ?? { freq: "monthly" }).toLowerCase()} at
-              a similar amount. Set up a recurring rule and it&apos;ll be added to {recurringPrompt?.account} automatically from
-              now on — future bank transactions from this merchant won&apos;t need to be reviewed here anymore.
+              This charge has been added to your expenses. {recurringPrompt?.vendor} has come up{" "}
+              {cadenceLabel(recurringPrompt?.cadence ?? { freq: "monthly" }).toLowerCase()} at a similar amount, so you can
+              turn it into a recurring expense.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {recurringPrompt ? (
+            <ul className="list-disc space-y-1.5 pl-5 text-sm text-muted-foreground">
+              <li>
+                We&apos;ll add {formatCurrency(recurringPrompt.amount)} to {recurringPrompt.account}{" "}
+                {cadenceLabel(recurringPrompt.cadence).toLowerCase()} for you, starting{" "}
+                {new Date(`${recurringPrompt.anchorDate}T00:00:00`).toLocaleDateString(undefined, {
+                  month: "short",
+                  day: "numeric",
+                })}
+                .
+              </li>
+              <li>
+                Bank charges from {recurringPrompt.vendor} will stop showing up here for review, so they aren&apos;t
+                counted twice.
+              </li>
+              <li>If the amount changes, edit or delete the rule anytime under Recurring.</li>
+            </ul>
+          ) : null}
           <AlertDialogFooter>
             <AlertDialogCancel>Not now</AlertDialogCancel>
             <AlertDialogAction
