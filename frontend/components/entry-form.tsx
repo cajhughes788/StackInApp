@@ -290,17 +290,32 @@ export default function EntryForm() {
         // pointerdown as well as focusin: iOS WebKit doesn't focus buttons
         // (the category checkboxes) on tap, so focus alone can't tell a tap
         // inside the panel from one outside it.
-        const collapseIfOutside = (event: Event) => {
+        //
+        // Buttons and switches outside the panel collapse it on click, not on
+        // press: collapsing on press shortens the form under the pointer, so
+        // a button below the panel (Add entry) moves before the release and
+        // its click never fires — it took a second press. Text fields and
+        // blank space still collapse it right away.
+        const CLICK_TARGETS = "button, a, label, [role='button'], [role='switch'], [role='checkbox']";
+        const isOutside = (target: Element | null) =>
+            !target?.closest?.(`[data-breakdown-field="${openBreakdownField}"]`);
+        const collapseOnPressOrFocus = (event: Event) => {
             const target = event.target as Element | null;
-            if (target?.closest?.(`[data-breakdown-field="${openBreakdownField}"]`))
+            if (!isOutside(target) || target?.closest?.(CLICK_TARGETS))
                 return;
             setOpenBreakdownField(null);
         };
-        document.addEventListener("pointerdown", collapseIfOutside);
-        document.addEventListener("focusin", collapseIfOutside);
+        const collapseOnClick = (event: Event) => {
+            if (isOutside(event.target as Element | null))
+                setOpenBreakdownField(null);
+        };
+        document.addEventListener("pointerdown", collapseOnPressOrFocus);
+        document.addEventListener("focusin", collapseOnPressOrFocus);
+        document.addEventListener("click", collapseOnClick);
         return () => {
-            document.removeEventListener("pointerdown", collapseIfOutside);
-            document.removeEventListener("focusin", collapseIfOutside);
+            document.removeEventListener("pointerdown", collapseOnPressOrFocus);
+            document.removeEventListener("focusin", collapseOnPressOrFocus);
+            document.removeEventListener("click", collapseOnClick);
         };
     }, [openBreakdownField]);
     debugRender("entry-form", {
