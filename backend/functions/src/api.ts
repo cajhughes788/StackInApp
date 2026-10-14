@@ -35,6 +35,9 @@ import * as SECRETS from "./secrets"
 // Referenced by deleteUserData below (account deletion revokes any linked
 // Plaid items) as well as the Plaid routes further down this file.
 const PLAID_SECRETS = [SECRETS.PLAID_CLIENT_ID, SECRETS.PLAID_SECRET, SECRETS.PLAID_ENV, SECRETS.PLAID_TOKEN_ENCRYPTION_KEY]
+// Routes that run a transaction sync, which can ask Claude for a category
+// (see services/aiCategorySuggestion.ts).
+const PLAID_SYNC_SECRETS = [...PLAID_SECRETS, SECRETS.ANTHROPIC_API_KEY]
 
 // ---------------------------------------------------------------------------
 // Public routes (no auth)
@@ -439,7 +442,7 @@ export const importPlaidHistory = withCorsAuth(
     await importPlaidHistoryHandler(req, res)
   },
   true,
-  { secrets: PLAID_SECRETS, timeoutSeconds: 300 }
+  { secrets: PLAID_SYNC_SECRETS, timeoutSeconds: 300 }
 )
 
 export const getPlaidPendingTransactions = withCorsAuth(async (req, res) => {
@@ -491,7 +494,7 @@ export const restorePlaidHiddenTransfer = withCorsAuth(async (req, res) => {
 // the raw request body, which withCorsAuth's express.json() parsing would
 // otherwise consume before the handler sees it.
 export const plaidWebhook = onRequest(
-  { secrets: PLAID_SECRETS },
+  { secrets: PLAID_SYNC_SECRETS },
   async (req, res) => {
     const { plaidWebhookHandler } = await import("./routes/plaidWebhook.js")
     await plaidWebhookHandler(req as any, res as any)

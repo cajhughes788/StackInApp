@@ -1,11 +1,18 @@
 import { suggestExpenseCategoryFromText } from "./expenseKeywordMatching"
 import type { RecurringCadence } from "./schemas/recurringRule"
 import type { PaymentMethod } from "./schemas/entry"
+import type { PlaidSuggestionSource } from "./schemas/plaidPendingTransaction"
+
+export type { PlaidSuggestionSource }
 
 export type PlaidClassificationInput = {
   merchantName: string | null
   rawName: string
   personalFinanceCategoryPrimary: string | null
+  personalFinanceCategoryDetailed?: string | null
+  // Plaid's personal_finance_category.confidence_level (VERY_HIGH, HIGH,
+  // MEDIUM, LOW, UNKNOWN); null when Plaid didn't send one.
+  personalFinanceCategoryConfidence?: string | null
   amount: number
 }
 
@@ -13,6 +20,7 @@ export type PlaidClassificationResult = {
   suggestedExpenseAccount: string | null
   isBusinessGuess: boolean | null
   confidence: number
+  suggestionSource: PlaidSuggestionSource | null
 }
 
 // Normalizes a merchant name into a stable key for
@@ -109,22 +117,65 @@ const PFC_TO_EXPENSE_CATEGORY: Record<string, string> = {
   BANK_FEES: "Payment Processing Fees",
 }
 
+// Detailed-tier overrides, checked before the primary map above. Only
+// entries where the detailed category says something the primary one
+// gets wrong — rent filed under RENT_AND_UTILITIES isn't a utility, and
+// office supplies or electronics aren't consumables. null means "this
+// detailed category has no business analogue": no guess at all, rather
+// than falling back to the primary tier's (e.g. a donation or a tax
+// payment is not a deductible expense, whatever GOVERNMENT_AND_NON_PROFIT
+// maps to). Uses Plaid's v1 taxonomy names; an unrecognized detailed value
+// just falls back to the primary map.
+const PFC_DETAILED_TO_EXPENSE_CATEGORY: Record<string, string | null> = {
+  RENT_AND_UTILITIES_RENT: "Rent / Booth Rent",
+  GENERAL_MERCHANDISE_OFFICE_SUPPLIES: "Office Expenses",
+  GENERAL_MERCHANDISE_ELECTRONICS: "Equipment",
+  GENERAL_MERCHANDISE_CLOTHING_AND_ACCESSORIES: "Work Clothing",
+  GENERAL_MERCHANDISE_PET_SUPPLIES: null,
+  GENERAL_MERCHANDISE_TOBACCO_AND_VAPE: null,
+  GENERAL_MERCHANDISE_GIFTS_AND_NOVELTIES: null,
+  GENERAL_SERVICES_EDUCATION: "Education & Training",
+  GENERAL_SERVICES_INSURANCE: "Insurance",
+  GENERAL_SERVICES_POSTAGE_AND_SHIPPING: "Office Expenses",
+  GENERAL_SERVICES_AUTOMOTIVE: "Vehicle & Transportation",
+  GENERAL_SERVICES_CHILDCARE: null,
+  HOME_IMPROVEMENT_FURNITURE: "Equipment",
+  PERSONAL_CARE_LAUNDRY_AND_DRY_CLEANING: "Cleaning & Sanitation",
+  PERSONAL_CARE_GYMS_AND_FITNESS_CENTERS: null,
+  GOVERNMENT_AND_NON_PROFIT_DONATIONS: null,
+  GOVERNMENT_AND_NON_PROFIT_TAX_PAYMENT: null,
+  BANK_FEES_INTEREST_CHARGE: "Interest on Loan",
+}
+
 // Primary-tier PFC values confident enough to imply a business expense on
 // their own (a rent/utilities or transportation charge on a linked business
 // account is very likely business use). Everything else stays "no guess"
 // unless the keyword matcher finds a stronger signal.
 const CONFIDENT_BUSINESS_PFC = new Set(["RENT_AND_UTILITIES", "TRANSPORTATION", "LOAN_PAYMENTS", "BANK_FEES"])
 
+// Order: Plaid's category, then keywords, then a Plaid category Plaid itself
+// rated LOW (its docs: "there may be other categories that are more
+// accurate") — a keyword hit on the merchant name beats that.
 export function classifyPlaidTransaction(input: PlaidClassificationInput): PlaidClassificationResult {
-  const pfcCategory = input.personalFinanceCategoryPrimary
-    ? PFC_TO_EXPENSE_CATEGORY[input.personalFinanceCategoryPrimary] ?? null
+  const primary = input.personalFinanceCategoryPrimary
+  const detailed = input.personalFinanceCategoryDetailed ?? null
+  const hasDetailedMapping = detailed !== null && Object.prototype.hasOwnProperty.call(PFC_DETAILED_TO_EXPENSE_CATEGORY, detailed)
+  const pfcCategory = hasDetailedMapping
+    ? PFC_DETAILED_TO_EXPENSE_CATEGORY[detailed as string]
+    : primary
+    ? PFC_TO_EXPENSE_CATEGORY[primary] ?? null
     : null
+  const pfcSource: PlaidSuggestionSource = hasDetailedMapping ? "plaid_detailed" : "plaid_primary"
+  const isLowConfidence = input.personalFinanceCategoryConfidence === "LOW"
 
-  if (pfcCategory) {
+  if (pfcCategory && !isLowConfidence) {
+    const isHighConfidence =
+      input.personalFinanceCategoryConfidence === "VERY_HIGH" || input.personalFinanceCategoryConfidence === "HIGH"
     return {
       suggestedExpenseAccount: pfcCategory,
-      isBusinessGuess: CONFIDENT_BUSINESS_PFC.has(input.personalFinanceCategoryPrimary as string) ? true : null,
-      confidence: 0.6,
+      isBusinessGuess: CONFIDENT_BUSINESS_PFC.has(primary as string) ? true : null,
+      confidence: isHighConfidence ? 0.7 : 0.6,
+      suggestionSource: pfcSource,
     }
   }
 
@@ -134,6 +185,16 @@ export function classifyPlaidTransaction(input: PlaidClassificationInput): Plaid
       suggestedExpenseAccount: keywordCategory,
       isBusinessGuess: null,
       confidence: 0.4,
+      suggestionSource: "keyword",
+    }
+  }
+
+  if (pfcCategory) {
+    return {
+      suggestedExpenseAccount: pfcCategory,
+      isBusinessGuess: null,
+      confidence: 0.3,
+      suggestionSource: "plaid_low_confidence",
     }
   }
 
@@ -141,6 +202,7 @@ export function classifyPlaidTransaction(input: PlaidClassificationInput): Plaid
     suggestedExpenseAccount: null,
     isBusinessGuess: null,
     confidence: 0,
+    suggestionSource: null,
   }
 }
 

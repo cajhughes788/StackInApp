@@ -39,6 +39,21 @@ function normalizeLegacyDirection(raw: unknown): unknown {
   }
 }
 
+// Which signal produced suggestedExpenseAccount (see classifyPlaidTransaction
+// in shared/plaidClassification.ts and upsertPendingTransactionFromPlaid in
+// plaidService). Stored so confirms can be scored per signal.
+export const PlaidSuggestionSourceSchema = z.enum([
+  "merchant_memory",
+  "refund_purchase",
+  "plaid_detailed",
+  "plaid_primary",
+  "plaid_low_confidence",
+  "keyword",
+  "ai",
+])
+
+export type PlaidSuggestionSource = z.infer<typeof PlaidSuggestionSourceSchema>
+
 const PlaidPendingTransactionObjectSchema = z.object({
   id: z.string(),
   workspaceId: z.string(),
@@ -60,11 +75,21 @@ const PlaidPendingTransactionObjectSchema = z.object({
   // Plaid's detailed PFC tier (e.g. LOAN_PAYMENTS_CREDIT_CARD_PAYMENT) —
   // only stored since transfer detection; null on older records.
   personalFinanceCategoryDetailed: z.string().nullable().default(null),
+  // Plaid's confidence_level for the category above (VERY_HIGH … LOW,
+  // UNKNOWN). Null on older records and when Plaid didn't send one.
+  personalFinanceCategoryConfidence: z.string().nullable().default(null),
   // See classifyPlaidTransferSignal in shared/plaidClassification.ts.
   // Stored so a later transaction on another account can be matched against
   // this one as the other half of a transfer.
   transferSignal: z.enum(["transfer", "possible_transfer", "unknown"]).nullable().default(null),
   suggestedExpenseAccount: z.string().nullable(),
+  // Null when nothing was suggested, and on records from before this was tracked.
+  suggestionSource: PlaidSuggestionSourceSchema.nullable().default(null),
+  // Set when an expense or refund is confirmed: the category it was booked
+  // in, and whether that matches suggestedExpenseAccount (null if there was
+  // no suggestion to judge). Personal dismissals and income leave both unset.
+  confirmedExpenseAccount: z.string().optional(),
+  suggestionAccepted: z.boolean().nullable().optional(),
   // Income direction only: pre-fill for the income review, from this payer's
   // income memory when there is one (payment method otherwise falls back to
   // suggestPlaidIncomePaymentMethod). Null on spending and older records.

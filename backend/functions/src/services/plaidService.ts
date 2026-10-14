@@ -27,6 +27,7 @@ import {
   isLikelyPlaidRefund,
   pickRefundedPurchase,
   suggestPayerName,
+  type PlaidClassificationInput,
   type PlaidClassificationResult,
 } from "@shared/plaidClassification"
 import { isLikelyFuelPurchase } from "@shared/expenseKeywordMatching"
@@ -36,6 +37,7 @@ import type { IncomeCategory, PaymentMethod } from "@shared/schemas/entry"
 import * as expensesSvc from "./expensesService"
 import * as entriesSvc from "./entriesService"
 import { sendTransactionNotification } from "./pushNotificationService"
+import { suggestCategoriesWithAi, type AiCategoryRequest } from "./aiCategorySuggestion"
 import { PLAID_CLIENT_ID, PLAID_SECRET, PLAID_ENV, PLAID_TOKEN_ENCRYPTION_KEY } from "../secrets"
 import { encryptToken, decryptToken } from "../lib/tokenEncryption"
 
@@ -433,6 +435,7 @@ export async function syncTransactionsForItem(
 
   let cursor = item.cursor ?? undefined
   let addedCount = 0
+  const aiRequests: Array<AiCategoryRequest & { pendingId: string }> = []
   let hasMore = true
   // Collected across the whole sync run (which can span several Plaid
   // pages) instead of notifying inline per transaction — see the
@@ -447,7 +450,7 @@ export async function syncTransactionsForItem(
       })
       for (const transaction of response.data.added) {
         if (options.sinceDate && transaction.date < options.sinceDate) continue
-        const created = await upsertPendingTransactionFromPlaid(workspaceId, itemId, transaction, item.linkedAccounts)
+        const created = await upsertPendingTransactionFromPlaid(workspaceId, itemId, transaction, item.linkedAccounts, aiRequests)
         if (created) notifiable.push(created)
         addedCount += 1
       }
@@ -496,6 +499,9 @@ export async function syncTransactionsForItem(
       silent,
       isInitialSync,
     })
+    // Before notifying, so a single-transaction notification can name the
+    // category Claude suggested.
+    await applyAiCategorySuggestions(workspaceId, aiRequests, notifiable)
     if (!silent && notifiable.length > 0) {
       await notifyForSyncResults(workspaceId, itemId, notifiable)
     }
@@ -555,7 +561,10 @@ async function upsertPendingTransactionFromPlaid(
   workspaceId: string,
   plaidItemId: string,
   transaction: Record<string, any>,
-  linkedAccounts: PlaidLinkedAccountType[]
+  linkedAccounts: PlaidLinkedAccountType[],
+  // Collects transactions left without a category guess, for the AI
+  // fallback that runs once the whole sync is in (applyAiCategorySuggestions).
+  aiRequests: Array<AiCategoryRequest & { pendingId: string }> = []
 ): Promise<PlaidPendingTransactionType | null> {
   const priorId: string | undefined = transaction.pending_transaction_id ?? undefined
   const priorSnap = priorId ? await pendingTransactionsCol(workspaceId).doc(priorId).get() : null
@@ -615,6 +624,7 @@ async function upsertPendingTransactionFromPlaid(
     : expenseMerchantKey
   const linkedAccount = linkedAccounts.find((account) => account.accountId === transaction.account_id) ?? null
   const personalFinanceCategoryDetailed: string | null = transaction.personal_finance_category?.detailed ?? null
+  const personalFinanceCategoryConfidence: string | null = transaction.personal_finance_category?.confidence_level ?? null
   const transferSignal = classifyPlaidTransferSignal({
     merchantName,
     rawName,
@@ -644,6 +654,8 @@ async function upsertPendingTransactionFromPlaid(
         merchantName,
         rawName,
         personalFinanceCategoryPrimary,
+        personalFinanceCategoryDetailed,
+        personalFinanceCategoryConfidence,
         amount,
       })
     : direction === "income"
@@ -651,14 +663,22 @@ async function upsertPendingTransactionFromPlaid(
         suggestedExpenseAccount: null,
         isBusinessGuess: incomeMemory ? incomeMemory.lastOutcome === "income" : null,
         confidence: incomeMemory ? 0.95 : 0,
+        suggestionSource: null,
       }
     : memory
-    ? { suggestedExpenseAccount: memory.expenseCategory, isBusinessGuess: memory.isBusiness, confidence: 0.95 }
+    ? {
+        suggestedExpenseAccount: memory.expenseCategory,
+        isBusinessGuess: memory.isBusiness,
+        confidence: 0.95,
+        suggestionSource: memory.expenseCategory ? "merchant_memory" : null,
+      }
     : applyAccountDefault(
         classifyPlaidTransaction({
           merchantName,
           rawName,
-          personalFinanceCategoryPrimary: transaction.personal_finance_category?.primary ?? null,
+          personalFinanceCategoryPrimary,
+          personalFinanceCategoryDetailed,
+          personalFinanceCategoryConfidence,
           amount: transaction.amount,
         }),
         linkedAccount?.defaultBusiness ?? null
@@ -720,11 +740,13 @@ async function upsertPendingTransactionFromPlaid(
     merchantKey,
     personalFinanceCategoryPrimary,
     personalFinanceCategoryDetailed,
+    personalFinanceCategoryConfidence,
     transferSignal,
     isVenmoCashout,
     isRefund,
     refundOf,
     suggestedExpenseAccount: classification.suggestedExpenseAccount,
+    suggestionSource: classification.suggestionSource,
     suggestedIncomeCategory: incomeMemory?.lastOutcome === "income" ? incomeMemory.incomeCategory : null,
     suggestedPaymentMethod:
       direction === "income" && !isRefund
@@ -743,6 +765,26 @@ async function upsertPendingTransactionFromPlaid(
   }
   const parsed = PlaidPendingTransactionSchema.parse(pending)
   await pendingTransactionsCol(workspaceId).doc(parsed.id).set(stripUndefinedDeep(parsed), { merge: true })
+  // Only Plaid's enriched merchant name goes to the AI fallback — a raw
+  // descriptor can carry a person's name or a reference number, and
+  // payment-app charges are usually payments to people.
+  if (
+    parsed.status === "pending" &&
+    parsed.direction === "expense" &&
+    !parsed.suggestedExpenseAccount &&
+    !memory &&
+    merchantName &&
+    resolvePlaidDisplayName(merchantName, rawName) === merchantName &&
+    !isPeerToPeerDescriptor(merchantName, rawName)
+  ) {
+    aiRequests.push({
+      pendingId: parsed.id,
+      merchantKey: parsed.merchantKey,
+      merchantName,
+      personalFinanceCategoryPrimary,
+      personalFinanceCategoryDetailed,
+    })
+  }
 
   return autoDismiss ? null : parsed
 }
@@ -778,15 +820,22 @@ async function classifyRefund(
   workspaceId: string,
   refundOf: PlaidPendingTransactionType["refundOf"],
   memory: PlaidMerchantMemoryType | null,
-  input: { merchantName: string | null; rawName: string; personalFinanceCategoryPrimary: string | null; amount: number }
+  input: PlaidClassificationInput
 ): Promise<PlaidClassificationResult> {
   if (refundOf) {
     const expenseSnap = await db.doc(`workspaces/${workspaceId}/expenses/${refundOf.expenseId}`).get()
     const account = expenseSnap.exists ? (expenseSnap.data()?.account as string | undefined) : undefined
-    if (account) return { suggestedExpenseAccount: account, isBusinessGuess: true, confidence: 0.95 }
+    if (account) {
+      return { suggestedExpenseAccount: account, isBusinessGuess: true, confidence: 0.95, suggestionSource: "refund_purchase" }
+    }
   }
   if (memory) {
-    return { suggestedExpenseAccount: memory.expenseCategory, isBusinessGuess: memory.isBusiness, confidence: 0.8 }
+    return {
+      suggestedExpenseAccount: memory.expenseCategory,
+      isBusinessGuess: memory.isBusiness,
+      confidence: 0.8,
+      suggestionSource: memory.expenseCategory ? "merchant_memory" : null,
+    }
   }
   return classifyPlaidTransaction(input)
 }
@@ -911,6 +960,46 @@ async function pairWithTransferCounterpart(
     if (paired) return candidate.id
   }
   return null
+}
+
+// Fills in Claude's category for this sync's transactions that nothing else
+// could categorize (see aiCategorySuggestion.ts). Best-effort: a failure
+// just leaves those transactions without a suggestion, as before.
+async function applyAiCategorySuggestions(
+  workspaceId: string,
+  aiRequests: Array<AiCategoryRequest & { pendingId: string }>,
+  notifiable: PlaidPendingTransactionType[]
+): Promise<void> {
+  if (aiRequests.length === 0) return
+  try {
+    const suggestions = await suggestCategoriesWithAi(aiRequests)
+    for (const request of aiRequests) {
+      const category = suggestions.get(request.merchantKey)
+      if (!category) continue
+      const ref = pendingTransactionsCol(workspaceId).doc(request.pendingId)
+      // The user may have reviewed it (or another signal filled it) while
+      // Claude was answering — only fill a still-blank, still-pending one.
+      const applied = await db.runTransaction(async (txn) => {
+        const snap = await txn.get(ref)
+        const current = snap.exists ? PlaidPendingTransactionSchema.parse(snap.data()) : null
+        if (!current || current.status !== "pending" || current.suggestedExpenseAccount) return false
+        txn.set(
+          ref,
+          { suggestedExpenseAccount: category, suggestionSource: "ai", confidence: 0.5, updatedAt: new Date().toISOString() },
+          { merge: true }
+        )
+        return true
+      })
+      if (!applied) continue
+      const inMemory = notifiable.find((transaction) => transaction.id === request.pendingId)
+      if (inMemory) {
+        inMemory.suggestedExpenseAccount = category
+        inMemory.suggestionSource = "ai"
+      }
+    }
+  } catch (error) {
+    console.error("plaidService.applyAiCategorySuggestions: failed", { workspaceId, error })
+  }
 }
 
 // One notification per sync run, not one per transaction — a single sync
@@ -1554,7 +1643,12 @@ export async function confirmPendingTransaction(
     })
     expenseId = created.id
     await ref.set(
-      { status: "confirmed", committedExpenseId: expenseId, updatedAt: new Date().toISOString() },
+      {
+        status: "confirmed",
+        committedExpenseId: expenseId,
+        ...suggestionOutcome(pending, account),
+        updatedAt: new Date().toISOString(),
+      },
       { merge: true }
     )
   } catch (error) {
@@ -1684,13 +1778,30 @@ async function confirmRefundTransaction(
       clientMutationId: `plaid:${pending.plaidTransactionId}`,
     })
     await ref.set(
-      { status: "confirmed", committedExpenseId: created.id, updatedAt: new Date().toISOString() },
+      {
+        status: "confirmed",
+        committedExpenseId: created.id,
+        ...suggestionOutcome(pending, account),
+        updatedAt: new Date().toISOString(),
+      },
       { merge: true }
     )
     return { committedExpenseId: created.id }
   } catch (error) {
     await ref.set({ status: "pending", updatedAt: new Date().toISOString() }, { merge: true }).catch(() => {})
     throw error
+  }
+}
+
+// How the suggested category held up — read back per suggestionSource to
+// see which signal users keep and which they overrule.
+function suggestionOutcome(
+  pending: PlaidPendingTransactionType,
+  account: string
+): Pick<PlaidPendingTransactionType, "confirmedExpenseAccount" | "suggestionAccepted"> {
+  return {
+    confirmedExpenseAccount: account,
+    suggestionAccepted: pending.suggestedExpenseAccount ? pending.suggestedExpenseAccount === account : null,
   }
 }
 
