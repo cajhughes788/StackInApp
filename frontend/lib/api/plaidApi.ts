@@ -62,17 +62,30 @@ export type PlaidPendingTransaction = {
   transferPairId?: string
 }
 
-export async function getPlaidLinkToken(): Promise<string> {
-  const res = await tryWrite<{ linkToken: string }>(API_ENDPOINTS.plaid.createLinkToken, "POST", {})
+// "ios-native" = Plaid's native iOS SDK, which needs a different OAuth
+// redirect_uri than the browser flow — see redirectUriFor in plaidService.ts.
+export type PlaidLinkClient = "ios-native" | "browser"
+
+// apiFetch, not tryWrite: a link token is only useful right now, so a
+// request that fails offline must never be queued to replay later.
+export async function getPlaidLinkToken(client: PlaidLinkClient = "browser"): Promise<string> {
+  const res = await apiFetch<{ linkToken: string }>(API_ENDPOINTS.plaid.createLinkToken, {
+    method: "POST",
+    body: JSON.stringify({ client }),
+  })
   return res.linkToken
 }
 
 // Update mode — repairs an existing, broken bank connection in place rather
 // than creating a new one. See createUpdateLinkToken in plaidService.ts.
-export async function getPlaidUpdateLinkToken(workspaceId: string, itemId: string): Promise<string> {
-  const res = await tryWrite<{ linkToken: string }>(API_ENDPOINTS.plaid.createUpdateLinkToken, "POST", {
-    workspaceId,
-    itemId,
+export async function getPlaidUpdateLinkToken(
+  workspaceId: string,
+  itemId: string,
+  client: PlaidLinkClient = "browser"
+): Promise<string> {
+  const res = await apiFetch<{ linkToken: string }>(API_ENDPOINTS.plaid.createUpdateLinkToken, {
+    method: "POST",
+    body: JSON.stringify({ workspaceId, itemId, client }),
   })
   return res.linkToken
 }

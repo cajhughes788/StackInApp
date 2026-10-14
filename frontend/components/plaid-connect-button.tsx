@@ -35,8 +35,14 @@ import {
   unlinkPlaidItem,
   updatePlaidAccountDefault,
   type PlaidItem,
+  type PlaidLinkClient,
 } from "@/lib/api/plaidApi"
-import { waitForPlaidLinkExit } from "@/lib/mobile/plaidLinkDeepLink"
+import { waitForPlaidLinkExit, type PlaidLinkExitResult } from "@/lib/mobile/plaidLinkDeepLink"
+import {
+  isNativePlaidLinkAvailable,
+  openNativePlaidLink,
+  preloadNativePlaidLink,
+} from "@/lib/mobile/nativePlaidLink"
 
 type LinkMetadata = { institutionId: string | null; accounts: Array<{ name: string; mask: string | null }> }
 
@@ -88,8 +94,15 @@ function persistCachedPlaidItems(workspaceId: string, items: PlaidItem[]) {
 // Stripe checkout redirects and the public signup link) and doesn't serve
 // this Next.js app at all. This app's actual Firebase Hosting deploy lives
 // at stackin.web.app.
+//
+// Only used as a fallback now — iOS builds with NativePlaidLinkPlugin run
+// Plaid's native SDK instead (see runLinkFlow below).
 const STACKIN_APP_HOSTING_URL =
   process.env.NEXT_PUBLIC_STACKIN_APP_HOSTING_URL?.trim() || "https://stackin.web.app"
+
+// Plaid link tokens last 4 hours; anything older than this gets replaced
+// rather than risk handing Link one that's about to expire.
+const PREFETCHED_LINK_TOKEN_MAX_AGE_MS = 30 * 60 * 1000
 
 function WebPlaidLink({
   linkToken,
@@ -135,6 +148,48 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
   // dropdown someone has to notice on their own.
   const [classifyPrompt, setClassifyPrompt] = useState<PlaidItem | null>(null)
   const isNative = Capacitor.isNativePlatform()
+  const useNativeSdk = isNativePlaidLinkAvailable()
+  const linkClient: PlaidLinkClient = useNativeSdk ? "ios-native" : "browser"
+
+  // A link token for the next "Connect a bank" tap, fetched as soon as this
+  // page opens instead of after the tap. Fetching it on tap is what made the
+  // button sit on "Connecting..." for seconds: the token request often hit
+  // a cold-started server. On iOS the token also lets Plaid's SDK preload
+  // Link in the background, so the tap just shows it. Each token is used
+  // for a single Link session, so it's cleared when taken.
+  const prefetchedLinkTokenRef = useRef<{ promise: Promise<string>; fetchedAt: number } | null>(null)
+
+  const prefetchLinkToken = useCallback(() => {
+    const entry = { promise: getPlaidLinkToken(linkClient), fetchedAt: Date.now() }
+    prefetchedLinkTokenRef.current = entry
+    entry.promise.then(
+      (token) => {
+        if (useNativeSdk && prefetchedLinkTokenRef.current === entry) void preloadNativePlaidLink(token)
+      },
+      () => {
+        if (prefetchedLinkTokenRef.current === entry) prefetchedLinkTokenRef.current = null
+      }
+    )
+  }, [linkClient, useNativeSdk])
+
+  async function takeLinkToken(): Promise<string> {
+    const entry = prefetchedLinkTokenRef.current
+    prefetchedLinkTokenRef.current = null
+    if (entry && Date.now() - entry.fetchedAt < PREFETCHED_LINK_TOKEN_MAX_AGE_MS) {
+      try {
+        return await entry.promise
+      } catch {
+        // fall through to a fresh request
+      }
+    }
+    return getPlaidLinkToken(linkClient)
+  }
+
+  // On page open, and again once each Link flow finishes, so the next tap
+  // (e.g. "Connect another bank") is just as quick.
+  useEffect(() => {
+    if (!isConnecting && !prefetchedLinkTokenRef.current) prefetchLinkToken()
+  }, [isConnecting, prefetchLinkToken])
 
   const loadItems = useCallback(async (): Promise<PlaidItem[]> => {
     const requestId = ++activeRequestIdRef.current
@@ -208,13 +263,7 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
   // whether a truthy result gets exchanged or just treated as "done."
   async function runLinkFlow(linkToken: string, mode: "connect" | "reconnect") {
     if (isNative) {
-      const exitPromise = waitForPlaidLinkExit()
-      await Browser.open({ url: `${STACKIN_APP_HOSTING_URL}/plaid-link?linkToken=${encodeURIComponent(linkToken)}` })
-      const exitResult = await exitPromise
-      // No-op if the browser was already dismissed by the user (that's what
-      // resolved exitPromise in the first place) — closing an already-closed
-      // browser is harmless, but guard it so that can never throw here.
-      await Browser.close().catch(() => {})
+      const exitResult = useNativeSdk ? await runNativeSdkLink(linkToken) : await runBrowserLink(linkToken)
       if (mode === "connect") {
         if (exitResult) {
           await finishExchange(exitResult.publicToken, {
@@ -242,10 +291,37 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
     }
   }
 
+  // Plaid's native iOS SDK — see NativePlaidLinkPlugin.swift.
+  async function runNativeSdkLink(linkToken: string): Promise<PlaidLinkExitResult | null> {
+    const result = await openNativePlaidLink(linkToken)
+    if (result.status === "success") {
+      return { publicToken: result.publicToken, institutionId: result.institutionId, accounts: result.accounts }
+    }
+    // No message when the user simply closed Link — only when it failed.
+    if (result.errorMessage) {
+      toast({ title: "Couldn't connect your bank", description: result.errorMessage, variant: "destructive" })
+    }
+    return null
+  }
+
+  // Fallback for native builds without the plugin: Plaid's web Link on the
+  // /plaid-link page in an in-app browser, which hands the result back via
+  // the stackin:// redirect.
+  async function runBrowserLink(linkToken: string): Promise<PlaidLinkExitResult | null> {
+    const exitPromise = waitForPlaidLinkExit()
+    await Browser.open({ url: `${STACKIN_APP_HOSTING_URL}/plaid-link?linkToken=${encodeURIComponent(linkToken)}` })
+    const exitResult = await exitPromise
+    // No-op if the browser was already dismissed by the user (that's what
+    // resolved exitPromise in the first place) — closing an already-closed
+    // browser is harmless, but guard it so that can never throw here.
+    await Browser.close().catch(() => {})
+    return exitResult
+  }
+
   async function handleConnect() {
     setIsConnecting(true)
     try {
-      const linkToken = await getPlaidLinkToken()
+      const linkToken = await takeLinkToken()
       await runLinkFlow(linkToken, "connect")
     } catch {
       toast({ title: "Couldn't start bank connection", variant: "destructive" })
@@ -256,8 +332,12 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
   async function handleReconnect(itemId: string) {
     setIsConnecting(true)
     setReconnectingItemId(itemId)
+    // The SDK holds one preloaded session at a time and this reconnect
+    // replaces it, so drop the prefetched token too — a fresh one (and
+    // preload) follows once this flow finishes.
+    if (useNativeSdk) prefetchedLinkTokenRef.current = null
     try {
-      const linkToken = await getPlaidUpdateLinkToken(workspaceId, itemId)
+      const linkToken = await getPlaidUpdateLinkToken(workspaceId, itemId, linkClient)
       await runLinkFlow(linkToken, "reconnect")
     } catch {
       toast({ title: "Couldn't start reconnect", variant: "destructive" })

@@ -108,8 +108,22 @@ const PLAID_WEBHOOK_URL = "https://plaidwebhook-3lc2fwdgwq-uc.a.run.app"
 // the user authenticates with their bank — see frontend/app/plaid-link/page.tsx,
 // which resumes the Link flow from this exact URL via receivedRedirectUri.
 const PLAID_OAUTH_REDIRECT_URI = "https://stackin.web.app/plaid-link"
+// The native iOS SDK (LinkKit, see frontend/ios/App/App/NativePlaidLinkPlugin.swift)
+// needs a Universal Link instead: the bank sends the user back here, iOS
+// hands the URL to the app (via the applinks entitlement and the
+// apple-app-site-association file on this domain), and LinkKit resumes on
+// its own. Also registered in the Plaid Dashboard. App builds from before
+// the native SDK never send client "ios-native", so they keep getting the
+// browser-page URI above and their OAuth flow keeps working.
+const PLAID_NATIVE_IOS_REDIRECT_URI = "https://app.the521app.com/plaid/oauth-return"
 
-export async function createLinkToken(uid: string): Promise<{ link_token: string }> {
+export type PlaidLinkClient = "ios-native" | "browser"
+
+function redirectUriFor(client: PlaidLinkClient): string {
+  return client === "ios-native" ? PLAID_NATIVE_IOS_REDIRECT_URI : PLAID_OAUTH_REDIRECT_URI
+}
+
+export async function createLinkToken(uid: string, client: PlaidLinkClient = "browser"): Promise<{ link_token: string }> {
   const plaid = getPlaidClient()
   const response = await plaid.linkTokenCreate({
     user: { client_user_id: uid },
@@ -118,7 +132,7 @@ export async function createLinkToken(uid: string): Promise<{ link_token: string
     country_codes: [CountryCode.Us],
     language: "en",
     webhook: PLAID_WEBHOOK_URL,
-    redirect_uri: PLAID_OAUTH_REDIRECT_URI,
+    redirect_uri: redirectUriFor(client),
   })
   return { link_token: response.data.link_token }
 }
@@ -134,7 +148,8 @@ export async function createLinkToken(uid: string): Promise<{ link_token: string
 export async function createUpdateLinkToken(
   workspaceId: string,
   uid: string,
-  itemId: string
+  itemId: string,
+  client: PlaidLinkClient = "browser"
 ): Promise<{ link_token: string }> {
   await assertWorkspaceMembership(workspaceId, uid)
   const snap = await plaidItemsCol(workspaceId).doc(itemId).get()
@@ -148,7 +163,7 @@ export async function createUpdateLinkToken(
     country_codes: [CountryCode.Us],
     language: "en",
     webhook: PLAID_WEBHOOK_URL,
-    redirect_uri: PLAID_OAUTH_REDIRECT_URI,
+    redirect_uri: redirectUriFor(client),
     access_token: decryptToken(item.accessTokenEncrypted, PLAID_TOKEN_ENCRYPTION_KEY.value()),
   })
   return { link_token: response.data.link_token }
