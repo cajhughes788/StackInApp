@@ -13,7 +13,7 @@
 //
 export { API_ENDPOINTS } from "@/lib/api/core/endpoints";
 export { ApiError, shouldQueueOfflineMutation } from "@/lib/api/core/errors";
-export { apiFetch, clearApiCaches } from "@/lib/api/core/client";
+export { apiFetch } from "@/lib/api/core/client";
 export { replayPending } from "@/lib/api/core/offlineReplay";
 export { getAppBootstrap } from "@/lib/api/bootstrapApi";
 export { getSettings, patchSettings } from "@/lib/api/settingsApi";
