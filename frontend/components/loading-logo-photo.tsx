@@ -11,7 +11,7 @@ type LoadingLogoPhotoProps = {
 
 export default function LoadingLogoPhoto({
   className,
-  label = "Loading StackIn...",
+  label = "Loading 521...",
   showLabel = true,
   size = 260,
 }: LoadingLogoPhotoProps) {

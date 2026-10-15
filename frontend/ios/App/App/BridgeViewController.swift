@@ -9,6 +9,7 @@ class BridgeViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(NativePlacePickerPlugin())
         bridge?.registerPluginInstance(NativePrintPlugin())
         bridge?.registerPluginInstance(AppCheckPlugin())
+        bridge?.registerPluginInstance(NativePlaidLinkPlugin())
 
         // WKWebView's own pinch gesture recognizer can zoom the page even
         // when the HTML viewport meta tag says user-scalable=no — the meta

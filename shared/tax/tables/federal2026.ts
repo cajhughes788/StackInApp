@@ -12,7 +12,7 @@ import type { FederalTaxYear } from "../types"
 export const FEDERAL_2026: FederalTaxYear = {
   single: {
     standardDeduction: 16100,
-    dependentCredit: 2000,
+    dependentCredit: 2200,
     brackets: [
       { upTo: 12400, rate: 0.10 },
       { upTo: 50400, rate: 0.12 },
@@ -25,7 +25,7 @@ export const FEDERAL_2026: FederalTaxYear = {
   },
   marriedJoint: {
     standardDeduction: 32200,
-    dependentCredit: 2000,
+    dependentCredit: 2200,
     brackets: [
       { upTo: 24800, rate: 0.10 },
       { upTo: 100800, rate: 0.12 },
@@ -38,7 +38,7 @@ export const FEDERAL_2026: FederalTaxYear = {
   },
   marriedSeparate: {
     standardDeduction: 16100,
-    dependentCredit: 2000,
+    dependentCredit: 2200,
     brackets: [
       { upTo: 12400, rate: 0.10 },
       { upTo: 50400, rate: 0.12 },
@@ -51,14 +51,14 @@ export const FEDERAL_2026: FederalTaxYear = {
   },
   headOfHousehold: {
     standardDeduction: 24150,
-    dependentCredit: 2000,
+    dependentCredit: 2200,
     brackets: [
       { upTo: 17700, rate: 0.10 },
       { upTo: 67450, rate: 0.12 },
       { upTo: 105700, rate: 0.22 },
       { upTo: 201750, rate: 0.24 },
       { upTo: 256200, rate: 0.32 },
-      { upTo: 626350, rate: 0.35 },
+      { upTo: 640600, rate: 0.35 },
       { upTo: null, rate: 0.37 },
     ],
   },

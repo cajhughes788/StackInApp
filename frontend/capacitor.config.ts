@@ -2,7 +2,7 @@ import { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.cajetanhughes.stackin',
-  appName: 'StackIn',
+  appName: '521',
   webDir: 'out',
   plugins: {
     PushNotifications: {

@@ -199,10 +199,12 @@ export default function LoginPage() {
         try {
             setOpeningSignup(true);
             if (isNativeApp) {
-                const { Browser } = await import("@capacitor/browser");
-                await Browser.open({
-                    url: signupUrl,
-                });
+                // Purchases happen on the website, which App Review only allows
+                // (US storefront) when it opens in the default browser — not an
+                // in-app SFSafariViewController. Capacitor hands top-level
+                // navigations to external hosts to UIApplication.open, which
+                // launches Safari.
+                window.location.href = signupUrl;
                 return;
             }
             window.open(signupUrl, "_blank", "noopener,noreferrer");
@@ -267,8 +269,8 @@ export default function LoginPage() {
           <CardDescription className="text-center">
             {isNativeApp
                 ? showCreateAccount
-                    ? "Sign in with your StackIn email and password."
-                    : "International users need to create their account on the StackIn website first, then return to the app to sign in."
+                    ? "Sign in with your 521 email and password."
+                    : "Sign in with your existing 521 email and password."
                 : "Log in to access your account."}
           </CardDescription>
         </CardHeader>
@@ -300,15 +302,9 @@ export default function LoginPage() {
               </button>
             </div>
 
-            {isNativeApp && !showCreateAccount ? (
-              <div className="rounded-xl border border-border bg-card/60 px-4 py-3 text-center text-sm text-muted-foreground">
-                Sign in with your existing StackIn email and password. If you are outside the U.S., create your account on the StackIn website first, then return to the app to log in.
-              </div>
-            ) : null}
-
             {showCreateAccount ? (
               <div className="text-sm text-center mt-2">
-                Need a StackIn account?{" "}
+                Need a 521 account?{" "}
                 <button type="button" onClick={handleCreateAccount} disabled={openingSignup} className="text-primary underline underline-offset-2 hover:opacity-80 transition disabled:opacity-60">
                   {openingSignup ? "Opening..." : "Create Account"}
                 </button>
@@ -346,11 +342,6 @@ export default function LoginPage() {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Need help signing in?</DialogTitle>
-            {!showCreateAccount ? (
-              <DialogDescription>
-                International users need to create their account on the StackIn website first, then return here to sign in.
-              </DialogDescription>
-            ) : null}
           </DialogHeader>
 
           <div className="space-y-3 text-sm text-muted-foreground">

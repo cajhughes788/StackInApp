@@ -152,12 +152,12 @@ export default function WelcomePage() {
   const hasSingleWorkspaceType = allowedWorkspaceTypes.length === 1
   const accessUnavailableMessage = hasReachedWorkspaceLimit
     ? isNativeApp
-      ? "This StackIn account has reached its current workspace limit."
+      ? "This 521 account has reached its current workspace limit."
       : `You have used ${currentWorkspaceCount} of ${maxWorkspaces} available workspaces on this subscription.`
     : isNativeApp
       ? authority?.isSubscriptionActive
-        ? "This StackIn account does not currently include mobile access to create another workspace."
-        : "This mobile app is for existing StackIn customers with mobile access. If you expected access, contact support."
+        ? "This 521 account does not currently include mobile access to create another workspace."
+        : "This mobile app is for existing 521 customers with mobile access. If you expected access, contact support."
       : authority?.isSubscriptionActive
         ? "Your current subscription does not allow additional workspace creation."
         : "We couldn't find an active subscription for this account yet."
@@ -193,10 +193,10 @@ export default function WelcomePage() {
             : "Subscription required",
         description: hasReachedWorkspaceLimit
           ? isNativeApp
-            ? "This StackIn account has reached its current workspace limit."
+            ? "This 521 account has reached its current workspace limit."
             : "Your current subscription has reached its workspace limit."
           : isNativeApp
-            ? "This mobile app is for existing StackIn customers with mobile access."
+            ? "This mobile app is for existing 521 customers with mobile access."
             : "Create your subscription first, then come back here to set up your workspace.",
         variant: "destructive",
       })

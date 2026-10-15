@@ -23,7 +23,7 @@ export default function ReceiptCaptureField({ capture }: { capture: ReceiptCaptu
   } = capture
 
   return (
-    <div className="space-y-2 rounded-xl border border-dashed border-border px-4 py-3">
+    <div className="space-y-2 rounded-2xl bg-muted px-4 py-3">
       <div className="flex items-center gap-2">
         <Paperclip className="h-4 w-4 text-muted-foreground" />
         <span className="text-sm font-medium text-foreground">
@@ -33,7 +33,7 @@ export default function ReceiptCaptureField({ capture }: { capture: ReceiptCaptu
       </div>
 
       {attachedReceiptAsset ? (
-        <div className={`${ROW_CLASS} rounded-lg border border-border bg-muted/20 px-3`}>
+        <div className={`${ROW_CLASS} rounded-xl bg-card px-3`}>
           {attachedReceiptAsset.dataUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img

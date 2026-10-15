@@ -96,7 +96,7 @@ You can also view this in your Safe Money account.
 export async function sendSupportEmail(payload: SupportEmailPayload) {
     try {
         sgMail.setApiKey(SENDGRID_API_KEY.value());
-        const subject = `[StackIn Support] ${payload.kind} - ${payload.context.route}`;
+        const subject = `[521 Support] ${payload.kind} - ${payload.context.route}`;
         const serializedLogs = payload.context.recentLogs.length > 0
             ? payload.context.recentLogs.map((entry) => JSON.stringify(entry)).join("\n")
             : "No recent client logs captured.";
@@ -125,7 +125,7 @@ Recent Client Logs:
 ${serializedLogs}
 `;
         const html = `
-    <h2>StackIn Support Request</h2>
+    <h2>521 Support Request</h2>
     <p><b>Type:</b> ${payload.kind}</p>
     <p><b>User ID:</b> ${payload.userId}</p>
     <p><b>User Email:</b> ${payload.userEmail ?? "unknown"}</p>

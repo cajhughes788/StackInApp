@@ -291,7 +291,7 @@ export function NativeLocationPicker({ value, onSelect, onError, onBeforePick, }
           {searching ? (<p className="text-sm text-muted-foreground">Searching nearby matches...</p>) : null}
 
           {suggestions.length > 0 ? (<div className="overflow-hidden rounded-xl border border-border bg-background shadow-sm">
-              <div className="border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+              <div className="border-b border-border px-3 py-2 text-xs font-medium text-muted-foreground">
                 {isAndroidInlineSearch ? "Nearby Matches" : "Matches"}
               </div>
               <div className="max-h-72 overflow-y-auto">

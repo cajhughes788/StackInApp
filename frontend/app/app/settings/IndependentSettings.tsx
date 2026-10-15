@@ -4,6 +4,8 @@ import { useState, useEffect } from "react"
 import { Info } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { IndependentSettingsType } from "@shared/schemas/settings"
+import { isCashSourceEnabled, isPosSalesSourceEnabled } from "@shared/entryVisibility"
+import { SHOW_TAX_SET_ASIDE, TAX_SET_ASIDE_DEFAULT_PERCENT } from "@shared/taxSetAside"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Switch } from "@/components/ui/switch"
@@ -39,6 +41,11 @@ export default function IndependentSettingsSection({
     onChange({ [field]: value }, behavior)
   }
 
+  function updateMany(patch: Partial<IndependentSettingsType>, behavior: "immediate" | "deferred" = "deferred") {
+    setLocal((prev) => ({ ...prev, ...patch }))
+    onChange(patch, behavior)
+  }
+
   // --- Custom income fields ---
   function updateCustomField(index: number, label: string) {
     // FIX: customIncomeFields may be undefined in sparse-doc mode
@@ -63,15 +70,15 @@ export default function IndependentSettingsSection({
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-5">
       <Card>
         <CardHeader>
-          <CardTitle>Gauge Targets</CardTitle>
+          <CardTitle>Monthly targets</CardTitle>
         </CardHeader>
 
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="incomeTargetPerMonth">Target Income Per Month ($)</Label>
+            <Label htmlFor="incomeTargetPerMonth">Income goal per month ($)</Label>
             <Input
               id="incomeTargetPerMonth"
               type="number"
@@ -88,7 +95,7 @@ export default function IndependentSettingsSection({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="expenseTargetPerMonth">Expense Budget Per Month ($)</Label>
+            <Label htmlFor="expenseTargetPerMonth">Expense budget per month ($)</Label>
             <Input
               id="expenseTargetPerMonth"
               type="number"
@@ -104,22 +111,84 @@ export default function IndependentSettingsSection({
             />
           </div>
 
+          {SHOW_TAX_SET_ASIDE ? (
+          <div className="space-y-2">
+            <Label htmlFor="taxSetAsidePercent">Set aside for taxes (% of profit)</Label>
+            <Input
+              id="taxSetAsidePercent"
+              type="number"
+              step="1"
+              min="0"
+              max="100"
+              placeholder={`${TAX_SET_ASIDE_DEFAULT_PERCENT} (default)`}
+              value={local.taxSetAsidePercent ?? ""}
+              onChange={(e) => {
+                const raw = e.target.value
+                if (raw === "") return update("taxSetAsidePercent", undefined, "deferred")
+                update("taxSetAsidePercent", Math.min(100, Math.max(0, Number(raw))), "deferred")
+              }}
+            />
+          </div>
+          ) : null}
+
           <p className="text-sm text-muted-foreground">
-            When targets are set, your monthly income and expense gauges will scale based on progress toward those amounts.
+            Your home screen shows each month’s income as a % of the goal and expenses as a % of the budget.
+            {SHOW_TAX_SET_ASIDE
+              ? " “Safe to spend” is your profit minus the share you set aside for taxes — a rough estimate, not tax advice."
+              : null}
           </p>
+        </CardContent>
+      </Card>
+
+      {/* WEEKLY SUMMARY */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Notifications</CardTitle>
+        </CardHeader>
+
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <Label>Weekly summary</Label>
+              <p className="text-sm text-muted-foreground">
+                Monday morning: what you earned and kept last week, and anything that needs you.
+              </p>
+            </div>
+
+            <Switch
+              aria-label="Weekly summary"
+              checked={local.weeklyDigest ?? true} // unset = on
+              onCheckedChange={(v) => update("weeklyDigest", v, "immediate")}
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <Label>Missing receipts in Needs you</Label>
+              <p className="text-sm text-muted-foreground">
+                Remind you about expenses over $75 that don&apos;t have a receipt yet.
+              </p>
+            </div>
+
+            <Switch
+              aria-label="Missing receipts in Needs you"
+              checked={local.missingReceiptsInNeedsYou ?? true} // unset = on
+              onCheckedChange={(v) => update("missingReceiptsInNeedsYou", v, "immediate")}
+            />
+          </div>
         </CardContent>
       </Card>
 
       {/* HOURS TRACKING */}
       <Card>
         <CardHeader>
-          <CardTitle>Hours Tracking</CardTitle>
+          <CardTitle>Hours tracking</CardTitle>
         </CardHeader>
 
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
-              <Label>Track Hours</Label>
+              <Label>Track hours</Label>
               <p className="text-sm text-muted-foreground">
                 Enable manual hour tracking for daily entries.
               </p>
@@ -136,16 +205,21 @@ export default function IndependentSettingsSection({
       {/* TIPS */}
       <Card>
         <CardHeader>
-          <CardTitle>Tip Settings</CardTitle>
+          <CardTitle>Tips</CardTitle>
         </CardHeader>
 
         <CardContent className="space-y-6">
-          {/* Main toggle */}
-          <div className="flex items-center justify-between">
+          {/* One switch for every source: a Tips line inside Venmo / Apple
+              Pay / Zelle's split, and on top of sales for Card / POS and
+              Cash (see paymentCategoryConfig in lib/incomeBreakdown.ts). It
+              replaced the separate Credit Card Tips / Reported Cash toggles,
+              which now just count as those sources being on. */}
+          <div className="flex items-center justify-between gap-4">
             <div className="space-y-0.5">
-              <Label>Receives Tips</Label>
+              <Label>Receives tips</Label>
               <p className="text-sm text-muted-foreground">
-                Allows you to track all forms of tips.
+                Adds a Tips line to each income source below. For Card / POS and Cash, tips are entered on top of
+                sales.
               </p>
             </div>
 
@@ -157,71 +231,25 @@ export default function IndependentSettingsSection({
             />
           </div>
 
-          {local.isTippedIndependent && (
-            <div className="space-y-5 pl-3 border-l">
-              <div className="flex items-center justify-between">
-                <Label>Credit Card Tips</Label>
-                <Switch
-                  checked={local.askCardTips ?? false}
-                  onCheckedChange={(v) =>
-                    update("askCardTips", v, "immediate")
-                  }
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <Label>Reported Cash</Label>
-                <Switch
-                  checked={local.askReportedCash ?? false}
-                  onCheckedChange={(v) =>
-                    update("askReportedCash", v, "immediate")
-                  }
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label>Personal Cash</Label>
-                  <p className="text-xs text-muted-foreground">
-                    For personal tracking only — not used in taxes.
-                  </p>
-                </div>
-
-                <Switch
-                  checked={local.askUnreportedCash ?? false}
-                  onCheckedChange={(v) =>
-                    update("askUnreportedCash", v, "immediate")
-                  }
-                />
-              </div>
-
-              {/* Include personal cash in UI */}
-              {local.askUnreportedCash && (
-                <div className="flex items-center justify-between pl-2">
-                  <div>
-                    <Label>Include in income totals?</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Adds personal cash to gauge + averages.
-                    </p>
-                  </div>
-
-                  <Switch
-                    checked={local.includeUnreportedInUI ?? false}
-                    onCheckedChange={(v) =>
-                    update("includeUnreportedInUI", v, "immediate")
-                    }
-                  />
-                </div>
-              )}
-            </div>
-          )}
+          {/* Tips live inside sources now — with none on, there'd be nowhere
+              to enter them (the old standalone Credit Card Tips field is gone). */}
+          {local.isTippedIndependent &&
+          !local.enableVenmo &&
+          !local.enableApplePay &&
+          !local.enableZelle &&
+          !isPosSalesSourceEnabled(local) &&
+          !isCashSourceEnabled(local) ? (
+            <p className="rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">
+              Turn on the income sources you&apos;re paid through below — that&apos;s where tips are entered.
+            </p>
+          ) : null}
         </CardContent>
       </Card>
 
       {/* BUILT-IN INCOME SOURCES */}
       <Card>
         <CardHeader>
-          <CardTitle>Built-In Income Sources</CardTitle>
+          <CardTitle>Income sources</CardTitle>
         </CardHeader>
 
         <CardContent className="space-y-4">
@@ -255,25 +283,60 @@ export default function IndependentSettingsSection({
             />
           </div>
 
+          {/* Shown on for anyone who had Credit Card Tips on (card tips live
+              here now); turning it off clears both. */}
           <div className="flex items-center justify-between">
-            <Label>POS Sales</Label>
+            <Label>Card / POS Sales</Label>
             <Switch
-              checked={local.enablePosSales ?? false} // FIX: optional boolean fallback
+              checked={isPosSalesSourceEnabled(local)}
               onCheckedChange={(v) =>
-                update("enablePosSales", v, "immediate")
+                updateMany(v ? { enablePosSales: true } : { enablePosSales: false, askCardTips: false }, "immediate")
               }
             />
           </div>
 
+          {/* Same for Reported Cash (cash tips). */}
           <div className="flex items-center justify-between">
-            <Label>Cash Sales</Label>
+            <Label>Cash</Label>
             <Switch
-              checked={local.enableCashSales ?? false}
+              checked={isCashSourceEnabled(local)}
               onCheckedChange={(v) =>
-                update("enableCashSales", v, "immediate")
+                updateMany(v ? { enableCashSales: true } : { enableCashSales: false, askReportedCash: false }, "immediate")
               }
             />
           </div>
+
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <Label>Personal cash</Label>
+              <p className="text-xs text-muted-foreground">
+                For personal tracking only — not used in taxes.
+              </p>
+            </div>
+            <Switch
+              checked={local.askUnreportedCash ?? false}
+              onCheckedChange={(v) =>
+                update("askUnreportedCash", v, "immediate")
+              }
+            />
+          </div>
+
+          {local.askUnreportedCash && (
+            <div className="flex items-center justify-between gap-4 border-l pl-3">
+              <div>
+                <Label>Include in income totals?</Label>
+                <p className="text-xs text-muted-foreground">
+                  Adds personal cash to your totals and averages.
+                </p>
+              </div>
+              <Switch
+                checked={local.includeUnreportedInUI ?? false}
+                onCheckedChange={(v) =>
+                  update("includeUnreportedInUI", v, "immediate")
+                }
+              />
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -286,7 +349,7 @@ export default function IndependentSettingsSection({
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <div className="flex items-center gap-2">
-                <Label>Enable Vehicle Tracking</Label>
+                <Label>Enable vehicle tracking</Label>
                 <Popover>
                   <PopoverTrigger asChild>
                     <button
@@ -332,10 +395,18 @@ export default function IndependentSettingsSection({
       {/* CUSTOM INCOME FIELDS */}
       <Card>
         <CardHeader>
-          <CardTitle>Custom Income Fields</CardTitle>
+          <CardTitle>Other income names</CardTitle>
         </CardHeader>
 
         <CardContent className="space-y-4">
+          {/* The shared list behind "Who paid you?" in the entry form and the
+              bank deposit review (lib/incomeNames.ts) — new names are added
+              automatically as they're used. */}
+          <p className="text-sm text-muted-foreground">
+            Who pays you outside your built-in sources — clients and platforms like DoorDash. Keeping one name per
+            payer makes your totals easy to check against the 1099s they send. Names you type when adding income are
+            saved here automatically.
+          </p>
           {(local.customIncomeFields ?? []).map((field, i) => (
             <div key={i} className="flex items-center gap-2">
               <Input
@@ -343,7 +414,7 @@ export default function IndependentSettingsSection({
                 onChange={(e) =>
                   updateCustomField(i, e.target.value)
                 }
-                placeholder="Custom income name"
+                placeholder="e.g. DoorDash"
               />
 
               <Button
@@ -356,7 +427,7 @@ export default function IndependentSettingsSection({
           ))}
 
           <Button variant="outline" onClick={addCustomField}>
-            + Add Custom Field
+            + Add name
           </Button>
         </CardContent>
       </Card>
@@ -364,7 +435,7 @@ export default function IndependentSettingsSection({
       {/* RECURRING */}
       <Card>
         <CardHeader>
-          <CardTitle>Recurring Expenses & Income</CardTitle>
+          <CardTitle>Recurring expenses and income</CardTitle>
         </CardHeader>
         <CardContent>
           <p className="mb-3 text-sm text-muted-foreground">

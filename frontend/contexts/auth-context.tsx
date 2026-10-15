@@ -3,7 +3,6 @@
 import { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef, type ReactNode, } from "react";
 import { getAuthSafe } from "@/lib/firebase";
 import { logout as firebaseLogout } from "@/lib/auth";
-import { clearApiCaches } from "@/lib/api";
 import { clearAllSettingsHints } from "@/lib/storage/localSettingsHint";
 import { bumpAuthSessionVersion } from "@/lib/authSession";
 import { debugError, debugLog } from "@/lib/debugLoop";
@@ -113,7 +112,6 @@ export function AuthProvider({ children }: {
                 // ----------------------------------------------------
                 if (!fbUser) {
                     bumpAuthSessionVersion();
-                    clearApiCaches();
                     clearAllSettingsHints();
                     setUser(null);
                     try {

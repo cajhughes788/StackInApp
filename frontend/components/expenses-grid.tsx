@@ -4,36 +4,32 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { GridEditorPopoverContent } from "@/components/grid-editor-popover-content"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { AlertCircle, MessageCircle, MoreVertical } from "lucide-react"
+import { MessageCircle, MoreVertical } from "lucide-react"
 import {
   useExpensesData,
   useExpensesRenderState,
 } from "@/lib/stores/useExpensesStore"
 import { useSettingsData } from "@/lib/stores/useSettingsStore"
-import * as expensesService from "@/lib/domain/expenseService"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
-import {
-  findExpenseCategoryGuideEntry,
-  getVisibleExpenseCategoryOptions,
-  normalizeExpenseCategoryLabel,
-  resolveExpenseCategoryLabel,
-} from "@/lib/expenseCategories"
 import { formatCurrency, parseLocalDate } from "@/lib/helpers"
 import { thBase, tdBase } from "@/lib/tableStyles"
 import { cn } from "@/lib/utils"
-import { useToast } from "@/hooks/use-toast"
-import ReceiptViewerTrigger from "@/components/receipt-viewer-trigger"
 import AttachReceiptDialog from "@/components/attach-receipt-dialog"
+import { useExpenseFocusStore } from "@/lib/stores/useExpenseFocusStore"
 import SyncStatusIndicator from "@/components/sync-status-indicator"
+import { GridSkeleton } from "@/components/loading-skeletons"
 import { needsReceiptForAuditDefense, RECEIPT_REQUIRED_THRESHOLD } from "@shared/receiptRequirements"
+import {
+  ExpenseDetails,
+  ExpenseFieldEditor,
+  deleteExpenseWithConfirm,
+  expenseNeedsAttention,
+  type EditableExpenseField,
+} from "@/components/expense-cell-editors"
 
 const formatShortDate = (iso: string) =>
   parseLocalDate(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" })
-
-type EditableExpenseField = "amount" | "account" | "vendor"
 
 function getEditableCellClasses(armed: boolean, alignment: "center" | "right" = "center") {
   return cn(
@@ -47,7 +43,6 @@ function getEditableCellClasses(armed: boolean, alignment: "center" | "right" = 
 
 export default function ExpensesGrid() {
   const gridRootRef = useRef<HTMLDivElement>(null)
-  const { toast } = useToast()
   const workspaceState = useWorkspaceStore((s) => s.state)
   const activeWorkspaceId =
     workspaceState.status === "ready"
@@ -63,11 +58,11 @@ export default function ExpensesGrid() {
   } = useExpensesRenderState(activeWorkspaceId)
   const settings = useSettingsData(activeWorkspaceId)
 
-  // Track which popover is open + initial value
+  // Which editor is open. The editors (expense-cell-editors.tsx, shared with
+  // the home page's expense categories) hold their own input values.
   const [popoverState, setPopoverState] = useState<{
     id: string
     field: EditableExpenseField
-    value: string
   } | null>(null)
   const [armedCell, setArmedCell] = useState<{
     id: string
@@ -78,42 +73,20 @@ export default function ExpensesGrid() {
 
   const customExpenseCategories =
     settings?.independent?.customExpenseCategories ?? []
-  const expenseCategoryOptions = useMemo(
-    () =>
-      getVisibleExpenseCategoryOptions(
-        customExpenseCategories,
-        {
-          workspaceType: activeWorkspaceType,
-          independentSettings: settings?.independent ?? null,
-        },
-        {
-          includeCategories:
-            popoverState?.field === "account" && popoverState.value
-              ? [popoverState.value]
-              : [],
-        }
-      ),
-    [
-      activeWorkspaceType,
-      customExpenseCategories,
-      popoverState,
-      settings?.independent,
-    ]
-  )
   const hasRenderableExpenses =
     expenses.length > 0 || expensesLastSuccessfulSyncAt !== null
 
-  const openEditor = useCallback((id: string, field: EditableExpenseField, value: string) => {
+  const openEditor = useCallback((id: string, field: EditableExpenseField) => {
     setArmedCell(null)
-    setPopoverState({ id, field, value })
+    setPopoverState({ id, field })
   }, [])
 
   const closeEditor = useCallback(() => setPopoverState(null), [])
 
   const armOrOpenEditor = useCallback(
-    (id: string, field: EditableExpenseField, value: string) => {
+    (id: string, field: EditableExpenseField) => {
       if (armedCell?.id === id && armedCell.field === field) {
-        openEditor(id, field, value)
+        openEditor(id, field)
         return
       }
 
@@ -153,94 +126,55 @@ export default function ExpensesGrid() {
     }
   }, [])
 
-  const categorySuggestions = useMemo(() => {
-    if (popoverState?.field !== "account") return []
-
-    const query = popoverState.value.trim().toLowerCase()
-    if (!query) return expenseCategoryOptions
-
-    return expenseCategoryOptions.filter((option) =>
-      option.toLowerCase().includes(query)
-    )
-  }, [expenseCategoryOptions, popoverState])
-
-  const selectedCategoryEntry = useMemo(() => {
-    if (popoverState?.field !== "account") return null
-    return findExpenseCategoryGuideEntry(popoverState.value)
-  }, [popoverState])
-
-  const handleSave = async () => {
-    if (!popoverState) return
-    if (!activeWorkspaceId) return
-
-    const { id, field, value } = popoverState
-
-    let patch: any = {}
-
-    if (field === "amount") {
-      const num = Number(value)
-      if (isNaN(num)) {
-        toast({ title: "Invalid amount", description: "Enter a valid number.", variant: "destructive" })
-        return
-      }
-      patch.amount = num
-    }
-
-    if (field === "account") {
-      const normalizedAccount = resolveExpenseCategoryLabel(
-        value,
-        customExpenseCategories
-      )
-      if (!normalizedAccount) {
-        toast({ title: "Invalid category", description: "Please choose a valid expense category.", variant: "destructive" })
-        return
-      }
-      patch.account = normalizedAccount
-    }
-
-    if (field === "vendor") {
-      patch.vendor = value.trim()
-    }
-
-    try {
-      await expensesService.updateExpense(activeWorkspaceId, id, patch)
-      closeEditor()
-    } catch (error) {
-      toast({
-        title: "Save failed",
-        description: error instanceof Error ? error.message : "Could not save your change. Please try again.",
-        variant: "destructive",
-      })
-    }
-  }
-
-  const handleDelete = async (id: string) => {
-    if (!activeWorkspaceId) return
-    if (!confirm("Delete this expense?")) return
-    try {
-      await expensesService.deleteExpense(activeWorkspaceId, id)
-    } catch (error) {
-      toast({
-        title: "Delete failed",
-        description: error instanceof Error
-          ? error.message
-          : "Failed to delete expense. Nothing was removed from the backend.",
-        variant: "destructive",
-      })
-    }
-  }
+  // Wires a shared editor to the grid's arm-then-open taps.
+  const editorProps = (expense: any, field: EditableExpenseField, className: string) => ({
+    expense,
+    field,
+    customExpenseCategories,
+    workspaceType: activeWorkspaceType,
+    independentSettings: settings?.independent ?? null,
+    workspaceId: activeWorkspaceId,
+    isOpen: !!popoverState && popoverState.id === expense.id && popoverState.field === field,
+    onClose: closeEditor,
+    onTriggerClick: () => armOrOpenEditor(expense.id, field),
+    onSaved: closeEditor,
+    triggerClassName: className,
+  })
 
   const sorted = useMemo(
     () => [...expenses].sort((a, b) => (a.date ?? "").localeCompare(b.date ?? "")),
     [expenses]
   )
 
+  // "View expense" (useExpenseFocusStore): once the row is rendered, scroll
+  // to it and flash it briefly. Waits a tick so AllRecordsSection has
+  // un-hidden the grid before scrolling.
+  const highlightExpenseId = useExpenseFocusStore((s) => s.highlightExpenseId)
+  const [flashExpenseId, setFlashExpenseId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!highlightExpenseId || !sorted.some((e) => e.id === highlightExpenseId)) return
+    const scrollTimer = window.setTimeout(() => {
+      const row = gridRootRef.current?.querySelector(
+        `[data-expense-id="${CSS.escape(highlightExpenseId)}"]`
+      )
+      row?.scrollIntoView({ behavior: "smooth", block: "center" })
+      setFlashExpenseId(highlightExpenseId)
+      useExpenseFocusStore.getState().setHighlight(null)
+    }, 150)
+    return () => window.clearTimeout(scrollTimer)
+  }, [highlightExpenseId, sorted])
+  useEffect(() => {
+    if (!flashExpenseId) return
+    const clearTimer = window.setTimeout(() => setFlashExpenseId(null), 2500)
+    return () => window.clearTimeout(clearTimer)
+  }, [flashExpenseId])
+
   const totalAmount = useMemo(() => {
     return sorted.reduce((acc, e) => acc + (e.amount ?? 0), 0)
   }, [sorted])
 
   if (workspaceState.status !== "ready" || (expensesHydrating && !hasRenderableExpenses)) {
-    return <div className="p-4 text-gray-400 text-sm">Loading expenses…</div>
+    return <GridSkeleton label="Loading expenses…" />
   }
 
   return (
@@ -280,7 +214,13 @@ export default function ExpensesGrid() {
                     e.id ??
                     `${e.date ?? "no-date"}-${e.vendor ?? "no-vendor"}-${e.amount ?? 0}-${index}`
                   }
-                  className="bg-card even:bg-secondary/55 divide-x divide-border"
+                  data-expense-id={e.id}
+                  className={cn(
+                    "divide-x divide-border transition-colors duration-700",
+                    flashExpenseId != null && flashExpenseId === e.id
+                      ? "bg-emerald-100 dark:bg-emerald-500/15"
+                      : "bg-card even:bg-secondary/55"
+                  )}
                 >
                   {/* NOTES BUBBLE — always interactive so a receipt can be
                       attached to any expense after the fact, regardless of
@@ -311,84 +251,18 @@ export default function ExpensesGrid() {
                             )}
                             aria-hidden="true"
                           />
-                          {e.flaggedReason === "bank_reversed" || needsReceiptForAuditDefense(e.amount ?? 0, e.receiptAssetId) ? (
+                          {expenseNeedsAttention(e) ? (
                             <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-destructive" />
                           ) : null}
                         </button>
                       </PopoverTrigger>
                       <PopoverContent className="max-w-xs rounded-2xl border border-border bg-popover p-3 text-popover-foreground shadow-md">
-                        <div className="space-y-3">
-                          {e.flaggedReason === "bank_reversed" && activeWorkspaceId ? (
-                            <div className="space-y-2 rounded-lg border border-destructive/30 bg-destructive/10 p-2.5">
-                              <p className="flex items-start gap-1.5 text-xs text-destructive">
-                                <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                                Your bank removed this transaction after it was recorded — it may have been reversed,
-                                a hold that never settled, or a duplicate. Review it and delete this expense if it
-                                didn&apos;t actually happen.
-                              </p>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="w-full"
-                                onClick={() =>
-                                  void expensesService.updateExpense(activeWorkspaceId, e.id, { flaggedReason: null })
-                                }
-                              >
-                                Got it, clear this flag
-                              </Button>
-                            </div>
-                          ) : null}
-                          {e.description ? (
-                            <p className="whitespace-pre-wrap text-sm">{e.description}</p>
-                          ) : null}
-                          {Array.isArray(e.allocations) && e.allocations.length > 0 ? (
-                            <div className="space-y-2">
-                              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                                Category Breakdown
-                              </p>
-                              <div className="space-y-1">
-                                {e.allocations.map((allocation: any, allocationIndex: number) => (
-                                  <div
-                                    key={`${e.id ?? "expense"}-allocation-${allocationIndex}`}
-                                    className="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-muted/35 px-3 py-2 text-sm"
-                                  >
-                                    <span className="min-w-0 truncate">{allocation.category}</span>
-                                    <span className="shrink-0 font-medium">
-                                      {formatCurrency(allocation.amount ?? 0)}
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          ) : null}
-                          {e.receiptAssetId && activeWorkspaceId ? (
-                            <ReceiptViewerTrigger
-                              workspaceId={activeWorkspaceId}
-                              receiptAssetId={e.receiptAssetId}
-                              title={e.vendor || e.description || "Receipt"}
-                              label="View Receipt"
-                              variant="outline"
-                              className="w-full"
-                              onClose={() => setNotesPopoverExpenseId(null)}
-                            />
-                          ) : (
-                            <div className="space-y-1.5">
-                              {needsReceiptForAuditDefense(e.amount ?? 0, e.receiptAssetId) ? (
-                                <p className="flex items-center gap-1.5 text-xs text-destructive">
-                                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                                  Over {formatCurrency(RECEIPT_REQUIRED_THRESHOLD)} — a receipt is recommended for audit defense.
-                                </p>
-                              ) : null}
-                              <Button
-                                variant="outline"
-                                className="w-full"
-                                onClick={() => setAttachReceiptExpenseId(e.id)}
-                              >
-                                Attach Receipt
-                              </Button>
-                            </div>
-                          )}
-                        </div>
+                        <ExpenseDetails
+                          expense={e}
+                          workspaceId={activeWorkspaceId}
+                          onAttachReceipt={() => setAttachReceiptExpenseId(e.id)}
+                          onReceiptViewerClose={() => setNotesPopoverExpenseId(null)}
+                        />
                       </PopoverContent>
                     </Popover>
                   </td>
@@ -400,182 +274,28 @@ export default function ExpensesGrid() {
 
                   {/* VENDOR (popover editor) */}
                   <td className={`${tdBase} px-0.5 py-1.5 text-center align-middle`}>
-                    <Popover
-                      open={
-                        !!popoverState &&
-                        popoverState.id === e.id &&
-                        popoverState.field === "vendor"
-                      }
-                      onOpenChange={(open) => {
-                        if (!open) closeEditor()
-                      }}
-                    >
-                      <PopoverTrigger asChild>
-                          <button
-                            className={getEditableCellClasses(
-                            armedCell?.id === e.id && armedCell?.field === "vendor"
-                            )}
-                          onClick={() => armOrOpenEditor(e.id, "vendor", e.vendor ?? "")}
-                        >
-                          <span className="block truncate text-center">
-                            {e.vendor || <span className="text-muted-foreground italic">No vendor</span>}
-                          </span>
-                        </button>
-                      </PopoverTrigger>
-
-                      <GridEditorPopoverContent
-                        data-grid-popover="expenses"
-                        side="top"
-                        align="end"
-                        className="w-56 space-y-3 p-3 z-50"
-                        onOpenAutoFocus={(event) => event.preventDefault()}
-                      >
-                        <div className="text-sm font-medium">Edit Vendor</div>
-                        <Input
-                          value={popoverState?.value ?? ""}
-                          onChange={(evt) =>
-                            setPopoverState((s) =>
-                              s ? { ...s, value: evt.target.value } : s
-                            )
-                          }
-                        />
-                        <Button className="w-full" onClick={handleSave}>
-                          Save
-                        </Button>
-                      </GridEditorPopoverContent>
-                    </Popover>
+                    <ExpenseFieldEditor
+                      {...editorProps(e, "vendor", getEditableCellClasses(armedCell?.id === e.id && armedCell?.field === "vendor"))}
+                    />
                   </td>
 
                   {/* AMOUNT (popover editor) */}
                   <td className={`${tdBase} px-1 py-1.5 text-center align-middle whitespace-nowrap tabular-nums`}>
-                    <Popover
-                      open={
-                        !!popoverState &&
-                        popoverState?.id === e.id &&
-                        popoverState.field === "amount"
-                      }
-                      onOpenChange={(open) => {
-                        if (!open) closeEditor()
-                      }}
-                    >
-                      <PopoverTrigger asChild>
-                          <button
-                            className={getEditableCellClasses(
-                            armedCell?.id === e.id && armedCell?.field === "amount"
-                            )}
-                          onClick={() =>
-                            armOrOpenEditor(e.id, "amount", String(e.amount ?? ""))
-                          }
-                        >
-                          {formatCurrency(e.amount ?? 0)}
-                        </button>
-                      </PopoverTrigger>
-
-                      <GridEditorPopoverContent
-                        data-grid-popover="expenses"
-                        side="top"
-                        align="end"
-                        className="w-56 space-y-3 p-3 z-50"
-                        onOpenAutoFocus={(event) => event.preventDefault()}
-                      >
-                        <div className="text-sm font-medium">Edit Amount</div>
-                        <Input
-                          inputMode="decimal"
-                          className="text-right"
-                          value={popoverState?.value ?? ""}
-                          onChange={(evt) =>
-                            setPopoverState((s) =>
-                              s ? { ...s, value: evt.target.value } : s
-                            )
-                          }
-                        />
-                        <Button className="w-full" onClick={handleSave}>
-                          Save
-                        </Button>
-                      </GridEditorPopoverContent>
-                    </Popover>
+                    <ExpenseFieldEditor
+                      {...editorProps(e, "amount", getEditableCellClasses(armedCell?.id === e.id && armedCell?.field === "amount"))}
+                    />
                   </td>
 
                   {/* CATEGORY (popover editor) */}
                   <td className={`${tdBase} px-0.5 py-1.5 text-center align-middle`}>
                     <div className="relative min-h-7 pr-5">
-                      <Popover
-                        open={
-                          !!popoverState &&
-                          popoverState?.id === e.id &&
-                          popoverState.field === "account"
-                        }
-                        onOpenChange={(open) => {
-                          if (!open) closeEditor()
-                        }}
-                      >
-                        <PopoverTrigger asChild>
-                          <button
-                            className={cn(
-                              getEditableCellClasses(
-                                armedCell?.id === e.id && armedCell?.field === "account"
-                              ),
-                              "min-w-0"
-                            )}
-                            onClick={() =>
-                              armOrOpenEditor(e.id, "account", e.account ?? "")
-                            }
-                          >
-                            <span className="block truncate text-center">
-                              {e.account || (
-                                <span className="text-muted-foreground italic">
-                                  No category
-                                </span>
-                              )}
-                            </span>
-                          </button>
-                        </PopoverTrigger>
-
-                        <GridEditorPopoverContent
-                          data-grid-popover="expenses"
-                          side="top"
-                          align="end"
-                          className="w-64 space-y-3 p-3 z-50"
-                          onOpenAutoFocus={(event) => event.preventDefault()}
-                        >
-                          <div className="text-sm font-medium">Edit Category</div>
-                          <Input
-                            value={popoverState?.value ?? ""}
-                            onChange={(evt) =>
-                              setPopoverState((s) =>
-                                s ? { ...s, value: evt.target.value } : s
-                              )
-                            }
-                            placeholder="Start typing to choose a category"
-                          />
-                          <div className="max-h-44 overflow-y-auto rounded-md border border-border">
-                            {categorySuggestions.map((category) => (
-                              <button
-                                key={category}
-                                type="button"
-                                className="block w-full border-b border-border px-3 py-2 text-left text-sm last:border-b-0 hover:bg-accent"
-                                onClick={() => {
-                                  setPopoverState((state) =>
-                                    state ? { ...state, value: category } : state
-                                  )
-                                }}
-                              >
-                                {category}
-                              </button>
-                            ))}
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {selectedCategoryEntry
-                              ? `Saving as ${normalizeExpenseCategoryLabel(
-                                  selectedCategoryEntry.category
-                                )}`
-                              : "Choose one of your available expense categories."}
-                          </div>
-                          <Button className="w-full" onClick={handleSave}>
-                            Save
-                          </Button>
-                        </GridEditorPopoverContent>
-                      </Popover>
+                      <ExpenseFieldEditor
+                        {...editorProps(
+                          e,
+                          "account",
+                          cn(getEditableCellClasses(armedCell?.id === e.id && armedCell?.field === "account"), "min-w-0")
+                        )}
+                      />
 
                       <div className="absolute right-0 top-1/2 -translate-y-1/2">
                         <Popover>
@@ -593,7 +313,7 @@ export default function ExpensesGrid() {
                             <Button
                               variant="destructive"
                               className="w-full"
-                              onClick={() => handleDelete(e.id)}
+                              onClick={() => void deleteExpenseWithConfirm(activeWorkspaceId, e.id)}
                             >
                               Delete
                             </Button>
@@ -612,7 +332,7 @@ export default function ExpensesGrid() {
               <td className="px-2 py-1.5"></td>
               <td className="px-2 py-1.5 font-semibold text-center">Totals</td>
               <td className="px-2 py-1.5"></td>
-              <td className="px-2 py-1.5 text-center tabular-nums text-slate-700 dark:text-white">
+              <td className="px-2 py-1.5 text-center tabular-nums text-foreground/80">
                 {formatCurrency(totalAmount)}
               </td>
               <td className="px-2 py-1.5"></td>

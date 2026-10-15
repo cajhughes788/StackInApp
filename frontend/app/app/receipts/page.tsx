@@ -38,7 +38,7 @@ export default function ReceiptsPage() {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <StackInHeader />
-      <main className="flex-1 px-4 pb-6 pt-4 max-w-4xl mx-auto w-full">
+      <main className="flex-1 px-4 pb-10 pt-4 max-w-3xl mx-auto w-full">
         <ReceiptsLibrary />
       </main>
     </div>

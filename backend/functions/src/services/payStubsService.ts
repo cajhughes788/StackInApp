@@ -245,6 +245,9 @@ function buildPayStubDocument(params: {
             grossIncome,
             payFrequency: settings.w2?.payFrequency ?? "biweekly",
             customDeductions: nonTaxDeductions,
+            // The period's end date stands in for the pay date (not stored);
+            // it picks that tax year's payroll tables.
+            payDate: end,
         }));
         console.log("[payStubsService.buildPayStubDocument] tax_result", JSON.stringify({
             workspaceId,

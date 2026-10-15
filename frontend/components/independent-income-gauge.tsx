@@ -132,7 +132,7 @@ export default function IndependentIncomeGauge() {
     (entriesHydrating && !hasRenderableEntries) ||
     (settingsHydrating && !hasRenderableSettings)
   ) {
-    return <div className="p-4 text-gray-400 text-sm">Loading monthly income…</div>
+    return <div className="p-4 text-muted-foreground text-sm">Loading monthly income…</div>
   }
 
   return (
@@ -151,10 +151,10 @@ export default function IndependentIncomeGauge() {
 
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="px-3 text-center">
-            <div className="text-2xl font-bold tabular-nums text-black sm:text-3xl">
+            <div className="text-2xl font-bold tabular-nums text-foreground sm:text-3xl">
               {formatCurrency(totals.incomeGauge)}
             </div>
-            <div className="text-xs text-slate-600 sm:text-sm">
+            <div className="text-xs text-muted-foreground sm:text-sm">
               Gross Income
               {targetIncome ? ` of ${formatCurrency(targetIncome)}` : ""}
             </div>

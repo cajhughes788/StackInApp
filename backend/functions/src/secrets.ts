@@ -31,6 +31,11 @@ export const PLAID_ENV = defineSecret("PLAID_ENV")
 // a base64-encoded 32-byte AES-256 key, generated with `openssl rand -base64 32`.
 export const PLAID_TOKEN_ENCRYPTION_KEY = defineSecret("PLAID_TOKEN_ENCRYPTION_KEY")
 
+// Anthropic — category suggestions for bank charges nothing else could
+// categorize (services/aiCategorySuggestion.ts). Left unset, that fallback
+// is simply off.
+export const ANTHROPIC_API_KEY = defineSecret("ANTHROPIC_API_KEY")
+
 // StackIn Content Log (Google Sheet) — shared secret the Apps Script web app
 // checks on every signup row. The webhook URL itself is a plain env var
 // (CONTENT_LOG_WEBHOOK_URL in functions/.env; see .env.example).

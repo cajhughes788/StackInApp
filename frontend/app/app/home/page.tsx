@@ -1,14 +1,14 @@
 // /app/home/page.tsx
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AppLoader from "@/components/app-loader";
 import StackInHeader from "@/components/stackin-header";
 import IncomeGauge from "@/components/income-gauge";
-import IndependentIncomeGauge from "@/components/independent-income-gauge";
-import IndependentExpenseGauge from "@/components/independent-expense-gauge";
+import IncomeStreamsOverview from "@/components/income-streams-overview";
+import ExpenseCategoriesOverview from "@/components/expense-categories-overview";
+import NeedsYouPanel from "@/components/needs-you-panel";
 import EntryForm from "@/components/entry-form";
-import EntriesGrid from "@/components/entries-grid";
 import { useAuth } from "@/contexts/auth-context";
 import {
     useSettingsData,
@@ -25,17 +25,17 @@ import { useTaxProfileStore } from "@/lib/stores/useTaxProfileStore";
 import { usePayStubsStore } from "@/lib/stores/usePaystubsStore";
 import { getCalendarMonthBucketAt, getCalendarMonthBucketFromDate, getCurrentCalendarMonthPeriodAt, getCurrentEntryPeriod } from "@shared/payPeriods";
 import { useSelectedPeriod } from "@/lib/stores/usePeriodSelectionStore";
+import { selectExpenseMonth, useExpenseFocusStore } from "@/lib/stores/useExpenseFocusStore";
 import ExpenseForm from "@/components/expense-form";
-import ExpensesGrid from "@/components/expenses-grid";
 import VenmoImportPanel from "@/components/venmo-import-panel";
-import PlaidPendingTransactionsPanel from "@/components/plaid-pending-transactions-panel";
+import { useReviewRequestNonce } from "@/lib/push/deepLinkStore";
 import {
     useExpensesData,
     useExpensesRenderState,
     useExpensesStore,
 } from "@/lib/stores/useExpensesStore";
 import { debugLog, debugRender } from "@/lib/debugLoop";
-import { formatCurrency } from "@/lib/helpers";
+import AllRecordsSection from "@/components/all-records-section";
 import { getActiveProfileTrace } from "@/lib/observability/profileTrace";
 import { useAppBootstrapState } from "@/contexts/app-bootstrap-context";
 import { useHomepageLayoutShiftDiagnostics } from "@/hooks/useHomepageLayoutShiftDiagnostics";
@@ -63,11 +63,10 @@ export default function HomePage() {
         : true;
     // ---- INCOME vs EXPENSES TOGGLE ----
     const [mode, setMode] = useState<"income" | "expenses">("income");
-    const [showNet, setShowNet] = useState(false);
-    // Lets a push-notification tap (registerPush.ts) or other deep link land
-    // directly on the Expenses tab via /app/home?mode=expenses. Reads
-    // window.location directly rather than useSearchParams() so this page
-    // doesn't need a Suspense boundary.
+    // Lets a link land directly on the Expenses tab via
+    // /app/home?mode=expenses (web). Reads window.location directly rather
+    // than useSearchParams() so this page doesn't need a Suspense boundary.
+    // Notification taps go through deepLinkStore instead — see below.
     useEffect(() => {
         if (typeof window === "undefined") return;
         const params = new URLSearchParams(window.location.search);
@@ -75,6 +74,32 @@ export default function HomePage() {
             setMode("expenses");
         }
     }, []);
+    // A notification tap (deepLinkStore.ts) picks the tab — including when
+    // the app was already open on this page, which a mount-time check would
+    // miss. Once per tap (nonce).
+    const expensesReviewNonce = useReviewRequestNonce("expenses", activeWorkspaceId);
+    const incomeReviewNonce = useReviewRequestNonce("income", activeWorkspaceId);
+    const appliedReviewNonceRef = useRef<number | null>(null);
+    useEffect(() => {
+        const nonce = expensesReviewNonce ?? incomeReviewNonce;
+        if (nonce == null || appliedReviewNonceRef.current === nonce) return;
+        appliedReviewNonceRef.current = nonce;
+        setMode(expensesReviewNonce != null ? "expenses" : "income");
+    }, [expensesReviewNonce, incomeReviewNonce]);
+    // "View expense" from elsewhere (e.g. Receipts): show the Expenses tab
+    // for the expense's month, then hand off to the grid to scroll to it.
+    const expenseFocusRequest = useExpenseFocusStore((s) => s.request);
+    useEffect(() => {
+        if (!expenseFocusRequest || !settings || !activeWorkspace || !activeWorkspaceId) return;
+        if (expenseFocusRequest.workspaceId !== activeWorkspaceId) return;
+        // Usually already selected by the caller before navigating; this
+        // covers requests made while home is already open.
+        selectExpenseMonth(activeWorkspaceId, activeWorkspace.type, activeWorkspace.createdAt ?? null, settings, expenseFocusRequest.month);
+        setMode("expenses");
+        const focusStore = useExpenseFocusStore.getState();
+        focusStore.setHighlight(expenseFocusRequest.expenseId);
+        focusStore.clearRequest();
+    }, [expenseFocusRequest, settings, activeWorkspace, activeWorkspaceId]);
     // ---- ENTRIES STORE ----
     const entries = useEntriesData(activeWorkspaceId);
     const entriesState = useEntriesRenderState(activeWorkspaceId);
@@ -133,24 +158,20 @@ export default function HomePage() {
         mode,
     ]);
     useEffect(() => {
-        if (!supportsExpenses && mode === "expenses") {
+        // Only once the workspace is known: before that supportsExpenses is
+        // false for every workspace, and this used to undo a deep link's
+        // Expenses tab during startup.
+        if (workspaceState.status === "ready" && !supportsExpenses && mode === "expenses") {
             debugLog("home-page", "force_income_mode");
             setMode("income");
         }
-    }, [supportsExpenses, mode]);
+    }, [workspaceState.status, supportsExpenses, mode]);
     useEffect(() => {
         debugLog("home-page", "workspace_changed_reset_hydration", {
             activeWorkspaceId,
         });
         didHydrateKeyRef.current = null;
     }, [activeWorkspaceId]);
-    useEffect(() => {
-        debugLog("home-page", "mode_or_workspace_reset_show_net", {
-            mode,
-            activeWorkspaceId,
-        });
-        setShowNet(false);
-    }, [mode, activeWorkspaceId]);
     useEffect(() => {
         if (didMarkUsefulRenderRef.current)
             return;
@@ -264,70 +285,54 @@ export default function HomePage() {
     // Layout already gates on workspace ready; this is a safety net for direct navigation.
     const showBlockingLoader = workspaceState.status !== "ready";
     const showDashboardShell = !showBlockingLoader && !!user;
-    const independentNet = useMemo(() => {
-        const grossIncome = entries.reduce((sum, entry) => sum + (entry.totals?.dayTotal ?? 0), 0);
-        const grossExpenses = expenses.reduce((sum, expense) => sum + (expense.amount ?? 0), 0);
-        return grossIncome - grossExpenses;
-    }, [entries, expenses]);
     if (showBlockingLoader) {
         return <AppLoader label="Loading your dashboard..."/>;
     }
     if (!showDashboardShell) {
         return null;
     }
+    if (supportsExpenses) {
+        // Independent home: Income/Expenses switch, the period's total, the bank
+        // review ("Needs you", shared by both tabs), the breakdown, the entry
+        // form, and the full grid tucked away at the bottom. The overviews
+        // return order-1 (total) and order-3 (breakdown) sections so the review
+        // can sit between them while staying mounted across tab switches.
+        return (<div className="min-h-screen bg-background flex flex-col">
+      <StackInHeader />
+
+      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-5 px-4 pb-10 pt-4">
+        <div className="order-0 grid grid-cols-2 rounded-full bg-muted p-1" role="group" aria-label="Show income or expenses">
+          {(["income", "expenses"] as const).map((tab) => (<button key={tab} type="button" aria-pressed={mode === tab} onClick={() => setMode(tab)} className={`rounded-full py-2 text-sm font-medium transition-colors ${mode === tab
+                ? "bg-foreground text-background shadow-sm"
+                : "text-muted-foreground hover:text-foreground"}`}>
+              {tab === "income" ? "Income" : "Expenses"}
+            </button>))}
+        </div>
+
+        {mode === "income" ? <IncomeStreamsOverview /> : <ExpenseCategoriesOverview />}
+
+        <div className="order-2 space-y-5">
+          <NeedsYouPanel />
+          {showVenmoImportPanel ? <VenmoImportPanel /> : null}
+        </div>
+
+        <div className="order-4">
+          {mode === "income" ? <EntryForm /> : <ExpenseForm />}
+        </div>
+
+        <AllRecordsSection kind={mode === "income" ? "entries" : "expenses"} count={mode === "income" ? entries.length : expenses.length}/>
+      </main>
+    </div>);
+    }
+    // W-2 home: the pay period's total, the entry form, and the grid (the
+    // only place W-2 entries are edited, so it starts open).
     return (<div className="min-h-screen bg-background flex flex-col">
       <StackInHeader />
 
-      <main className="flex-1 px-4 pb-6 pt-4 max-w-3xl mx-auto w-full space-y-4">
-        {activeWorkspace?.type === "independent" ? (mode === "income" ? <IndependentIncomeGauge /> : <IndependentExpenseGauge />) : (<IncomeGauge />)}
-
-        {/* Toggle */}
-        <div className="flex justify-center gap-3 mt-4">
-          <button onClick={() => setMode("income")} className={`px-4 py-2 rounded-lg border font-medium transition
-      ${mode === "income"
-            ? "border-border bg-primary text-primary-foreground"
-            : "bg-card text-card-foreground border-border hover:bg-accent"}
-    `}>
-            Income
-          </button>
-
-          {supportsExpenses && (<button onClick={() => setMode("expenses")} className={`px-4 py-2 rounded-lg border font-medium transition
-      ${mode === "expenses"
-                ? "border-border bg-primary text-primary-foreground"
-                : "bg-card text-card-foreground border-border hover:bg-accent"}
-    `}>
-              Expenses
-            </button>)}
-        </div>
-
-        {supportsExpenses && (<div className="flex justify-center">
-            <button onClick={() => setShowNet((current) => !current)} className="text-sm font-medium text-emerald-700 hover:text-emerald-800 transition-colors">
-              {showNet
-                ? `Net: ${formatCurrency(independentNet)}`
-                : "Net $"}
-            </button>
-          </div>)}
-
-        {supportsExpenses ? (<div className="space-y-3">
-            <div className={mode === "expenses" ? undefined : "hidden"}>
-              <PlaidPendingTransactionsPanel />
-            </div>
-            {showVenmoImportPanel ? <VenmoImportPanel /> : null}
-            {/* ReceiptCapturePanel removed — receipt attachment now happens inside ExpenseForm */}
-          </div>) : null}
-
-        {/* Mode */}
-        <div className="space-y-4 mt-6">
-          {mode === "income" && (<>
-              <EntryForm />
-              <EntriesGrid />
-            </>)}
-
-          {supportsExpenses && mode === "expenses" && (<>
-              <ExpenseForm />
-              <ExpensesGrid />
-            </>)}
-        </div>
+      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-5 px-4 pb-10 pt-4">
+        <IncomeGauge />
+        <EntryForm />
+        <AllRecordsSection kind="entries" count={entries.length} defaultOpen className=""/>
       </main>
     </div>);
 }

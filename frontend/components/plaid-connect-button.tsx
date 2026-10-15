@@ -1,6 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { Plus } from "lucide-react"
+
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Capacitor } from "@capacitor/core"
 import { Browser } from "@capacitor/browser"
 import { usePlaidLink } from "react-plaid-link"
@@ -15,6 +17,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Select,
   SelectContent,
@@ -32,8 +35,14 @@ import {
   unlinkPlaidItem,
   updatePlaidAccountDefault,
   type PlaidItem,
+  type PlaidLinkClient,
 } from "@/lib/api/plaidApi"
-import { waitForPlaidLinkExit } from "@/lib/mobile/plaidLinkDeepLink"
+import { waitForPlaidLinkExit, type PlaidLinkExitResult } from "@/lib/mobile/plaidLinkDeepLink"
+import {
+  isNativePlaidLinkAvailable,
+  openNativePlaidLink,
+  preloadNativePlaidLink,
+} from "@/lib/mobile/nativePlaidLink"
 
 type LinkMetadata = { institutionId: string | null; accounts: Array<{ name: string; mask: string | null }> }
 
@@ -42,22 +51,26 @@ type LinkMetadata = { institutionId: string | null; accounts: Array<{ name: stri
 // Settings) shows "no bank connected" for a beat before loadItems() resolves,
 // even when a connection has existed for months. Cache the last-known list
 // per workspace so the connected-bank cards render immediately, then let
-// loadItems() silently reconcile in the background as before.
+// loadItems() silently reconcile in the background.
+//
+// No expiry: the snapshot is always revalidated on mount, so an old one only
+// ever shows briefly before being corrected — whereas the 5-minute TTL this
+// used to have meant almost every visit (they're rarely 5 minutes apart)
+// started from nothing and flashed "Connect a bank" anyway.
 const PLAID_ITEMS_CACHE_PREFIX = "plaid_items_snapshot:"
-const PLAID_ITEMS_CACHE_TTL_MS = 5 * 60 * 1000
 
-function loadCachedPlaidItems(workspaceId: string): PlaidItem[] {
-  if (typeof window === "undefined") return []
+// null = no snapshot for this workspace on this device (vs. a snapshot that
+// says "no banks"), so the first load can show a loading state instead of
+// an empty, unconnected-looking section.
+function loadCachedPlaidItems(workspaceId: string): PlaidItem[] | null {
+  if (typeof window === "undefined") return null
   try {
     const raw = window.localStorage.getItem(PLAID_ITEMS_CACHE_PREFIX + workspaceId)
-    if (!raw) return []
-    const parsed = JSON.parse(raw) as { items?: unknown; writtenAt?: unknown }
-    if (!Array.isArray(parsed.items)) return []
-    const writtenAt = typeof parsed.writtenAt === "number" ? parsed.writtenAt : 0
-    if (Date.now() - writtenAt > PLAID_ITEMS_CACHE_TTL_MS) return []
-    return parsed.items as PlaidItem[]
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as { items?: unknown }
+    return Array.isArray(parsed.items) ? (parsed.items as PlaidItem[]) : null
   } catch {
-    return []
+    return null
   }
 }
 
@@ -81,8 +94,15 @@ function persistCachedPlaidItems(workspaceId: string, items: PlaidItem[]) {
 // Stripe checkout redirects and the public signup link) and doesn't serve
 // this Next.js app at all. This app's actual Firebase Hosting deploy lives
 // at stackin.web.app.
+//
+// Only used as a fallback now — iOS builds with NativePlaidLinkPlugin run
+// Plaid's native SDK instead (see runLinkFlow below).
 const STACKIN_APP_HOSTING_URL =
   process.env.NEXT_PUBLIC_STACKIN_APP_HOSTING_URL?.trim() || "https://stackin.web.app"
+
+// Plaid link tokens last 4 hours; anything older than this gets replaced
+// rather than risk handing Link one that's about to expire.
+const PREFETCHED_LINK_TOKEN_MAX_AGE_MS = 30 * 60 * 1000
 
 function WebPlaidLink({
   linkToken,
@@ -110,7 +130,13 @@ function WebPlaidLink({
 
 export default function PlaidConnectButton({ workspaceId }: { workspaceId: string }) {
   const { toast } = useToast()
-  const [items, setItems] = useState<PlaidItem[]>(() => loadCachedPlaidItems(workspaceId))
+  // null until either the cached snapshot or the first fetch says what's
+  // connected — rendered as a loading state, never as "no banks".
+  const [items, setItems] = useState<PlaidItem[] | null>(() => loadCachedPlaidItems(workspaceId))
+  const [loadFailed, setLoadFailed] = useState(false)
+  // Guards against a slow response for a previous workspace landing after a
+  // switch and overwriting the current one's list.
+  const activeRequestIdRef = useRef(0)
   const [isConnecting, setIsConnecting] = useState(false)
   const [webLinkToken, setWebLinkToken] = useState<string | null>(null)
   const [webLinkMode, setWebLinkMode] = useState<"connect" | "reconnect">("connect")
@@ -122,22 +148,79 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
   // dropdown someone has to notice on their own.
   const [classifyPrompt, setClassifyPrompt] = useState<PlaidItem | null>(null)
   const isNative = Capacitor.isNativePlatform()
+  const useNativeSdk = isNativePlaidLinkAvailable()
+  const linkClient: PlaidLinkClient = useNativeSdk ? "ios-native" : "browser"
+
+  // A link token for the next "Connect a bank" tap, fetched as soon as this
+  // page opens instead of after the tap. Fetching it on tap is what made the
+  // button sit on "Connecting..." for seconds: the token request often hit
+  // a cold-started server. On iOS the token also lets Plaid's SDK preload
+  // Link in the background, so the tap just shows it. Each token is used
+  // for a single Link session, so it's cleared when taken.
+  const prefetchedLinkTokenRef = useRef<{ promise: Promise<string>; fetchedAt: number } | null>(null)
+
+  const prefetchLinkToken = useCallback(() => {
+    const entry = { promise: getPlaidLinkToken(linkClient), fetchedAt: Date.now() }
+    prefetchedLinkTokenRef.current = entry
+    entry.promise.then(
+      (token) => {
+        if (useNativeSdk && prefetchedLinkTokenRef.current === entry) void preloadNativePlaidLink(token)
+      },
+      () => {
+        if (prefetchedLinkTokenRef.current === entry) prefetchedLinkTokenRef.current = null
+      }
+    )
+  }, [linkClient, useNativeSdk])
+
+  async function takeLinkToken(): Promise<string> {
+    const entry = prefetchedLinkTokenRef.current
+    prefetchedLinkTokenRef.current = null
+    if (entry && Date.now() - entry.fetchedAt < PREFETCHED_LINK_TOKEN_MAX_AGE_MS) {
+      try {
+        return await entry.promise
+      } catch {
+        // fall through to a fresh request
+      }
+    }
+    return getPlaidLinkToken(linkClient)
+  }
+
+  // On page open, and again once each Link flow finishes, so the next tap
+  // (e.g. "Connect another bank") is just as quick.
+  useEffect(() => {
+    if (!isConnecting && !prefetchedLinkTokenRef.current) prefetchLinkToken()
+  }, [isConnecting, prefetchLinkToken])
 
   const loadItems = useCallback(async (): Promise<PlaidItem[]> => {
+    const requestId = ++activeRequestIdRef.current
     try {
       const fetched = await getPlaidItems(workspaceId)
-      setItems(fetched)
+      if (activeRequestIdRef.current === requestId) {
+        setItems(fetched)
+        setLoadFailed(false)
+      }
       persistCachedPlaidItems(workspaceId, fetched)
       return fetched
     } catch {
-      // Best-effort — the account page still functions without the list.
+      // Keep whatever is showing (the cached list) rather than blanking it —
+      // a failed request says nothing about whether banks are connected.
+      if (activeRequestIdRef.current === requestId) setLoadFailed(true)
       return []
     }
   }, [workspaceId])
 
+  // On mount and on workspace switch (this component isn't remounted when
+  // the active workspace changes): show that workspace's snapshot, then
+  // revalidate.
+  const mountedWorkspaceIdRef = useRef(workspaceId)
   useEffect(() => {
+    if (mountedWorkspaceIdRef.current !== workspaceId) {
+      mountedWorkspaceIdRef.current = workspaceId
+      setItems(loadCachedPlaidItems(workspaceId))
+      setLoadFailed(false)
+    }
     void loadItems()
-  }, [loadItems])
+  }, [workspaceId, loadItems])
 
   const finishExchange = useCallback(
     async (publicToken: string, linkMetadata: LinkMetadata) => {
@@ -180,13 +263,7 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
   // whether a truthy result gets exchanged or just treated as "done."
   async function runLinkFlow(linkToken: string, mode: "connect" | "reconnect") {
     if (isNative) {
-      const exitPromise = waitForPlaidLinkExit()
-      await Browser.open({ url: `${STACKIN_APP_HOSTING_URL}/plaid-link?linkToken=${encodeURIComponent(linkToken)}` })
-      const exitResult = await exitPromise
-      // No-op if the browser was already dismissed by the user (that's what
-      // resolved exitPromise in the first place) — closing an already-closed
-      // browser is harmless, but guard it so that can never throw here.
-      await Browser.close().catch(() => {})
+      const exitResult = useNativeSdk ? await runNativeSdkLink(linkToken) : await runBrowserLink(linkToken)
       if (mode === "connect") {
         if (exitResult) {
           await finishExchange(exitResult.publicToken, {
@@ -214,10 +291,37 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
     }
   }
 
+  // Plaid's native iOS SDK — see NativePlaidLinkPlugin.swift.
+  async function runNativeSdkLink(linkToken: string): Promise<PlaidLinkExitResult | null> {
+    const result = await openNativePlaidLink(linkToken)
+    if (result.status === "success") {
+      return { publicToken: result.publicToken, institutionId: result.institutionId, accounts: result.accounts }
+    }
+    // No message when the user simply closed Link — only when it failed.
+    if (result.errorMessage) {
+      toast({ title: "Couldn't connect your bank", description: result.errorMessage, variant: "destructive" })
+    }
+    return null
+  }
+
+  // Fallback for native builds without the plugin: Plaid's web Link on the
+  // /plaid-link page in an in-app browser, which hands the result back via
+  // the stackin:// redirect.
+  async function runBrowserLink(linkToken: string): Promise<PlaidLinkExitResult | null> {
+    const exitPromise = waitForPlaidLinkExit()
+    await Browser.open({ url: `${STACKIN_APP_HOSTING_URL}/plaid-link?linkToken=${encodeURIComponent(linkToken)}` })
+    const exitResult = await exitPromise
+    // No-op if the browser was already dismissed by the user (that's what
+    // resolved exitPromise in the first place) — closing an already-closed
+    // browser is harmless, but guard it so that can never throw here.
+    await Browser.close().catch(() => {})
+    return exitResult
+  }
+
   async function handleConnect() {
     setIsConnecting(true)
     try {
-      const linkToken = await getPlaidLinkToken()
+      const linkToken = await takeLinkToken()
       await runLinkFlow(linkToken, "connect")
     } catch {
       toast({ title: "Couldn't start bank connection", variant: "destructive" })
@@ -228,8 +332,12 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
   async function handleReconnect(itemId: string) {
     setIsConnecting(true)
     setReconnectingItemId(itemId)
+    // The SDK holds one preloaded session at a time and this reconnect
+    // replaces it, so drop the prefetched token too — a fresh one (and
+    // preload) follows once this flow finishes.
+    if (useNativeSdk) prefetchedLinkTokenRef.current = null
     try {
-      const linkToken = await getPlaidUpdateLinkToken(workspaceId, itemId)
+      const linkToken = await getPlaidUpdateLinkToken(workspaceId, itemId, linkClient)
       await runLinkFlow(linkToken, "reconnect")
     } catch {
       toast({ title: "Couldn't start reconnect", variant: "destructive" })
@@ -242,6 +350,7 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
     const defaultBusiness = value === "business" ? true : value === "personal" ? false : null
     const previousItems = items
     setItems((prev) =>
+      prev &&
       prev.map((item) =>
         item.id === itemId
           ? {
@@ -275,6 +384,7 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
         )
       )
       setItems((prev) =>
+        prev &&
         prev.map((current) =>
           current.id === item.id
             ? {
@@ -302,22 +412,48 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
 
   return (
     <div className="space-y-3">
-      {items.map((item) => (
-        <div key={item.id} className="rounded-lg border border-muted px-3 py-2 space-y-2">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm font-medium">{item.institutionName ?? "Connected bank"}</div>
+      {items === null && !loadFailed ? (
+        <div className="space-y-2 rounded-2xl bg-muted px-4 py-3" aria-label="Checking your connected banks">
+          <Skeleton className="h-4 w-36" />
+          <Skeleton className="h-3 w-20" />
+        </div>
+      ) : null}
+
+      {items === null && loadFailed ? (
+        <div className="flex items-center justify-between gap-2 rounded-2xl bg-muted px-4 py-3 text-sm">
+          <span className="text-muted-foreground">Couldn&apos;t check your connected banks.</span>
+          <Button variant="ghost" size="sm" onClick={() => void loadItems()}>
+            Try again
+          </Button>
+        </div>
+      ) : null}
+
+      {(items ?? []).map((item) => (
+        <div key={item.id} className="space-y-3 rounded-2xl bg-muted p-4">
+          <div className="flex items-center gap-3">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-card text-base font-semibold text-foreground" aria-hidden="true">
+              {(item.institutionName ?? "B").charAt(0).toUpperCase()}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-medium text-foreground">{item.institutionName ?? "Connected bank"}</div>
               {item.status === "error" ? (
-                <div className="text-xs text-destructive">Connection needs attention</div>
+                <div className="flex items-center gap-1.5 text-xs text-destructive">
+                  <span className="size-1.5 rounded-full bg-destructive" aria-hidden="true" />
+                  Connection needs attention
+                </div>
               ) : (
-                <div className="text-xs text-muted-foreground">{item.linkedAccounts.length} account(s)</div>
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <span className="size-1.5 rounded-full bg-primary" aria-hidden="true" />
+                  Connected · {item.linkedAccounts.length} account(s)
+                </div>
               )}
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex shrink-0 items-center gap-1">
               {item.status === "error" ? (
                 <Button
                   variant="default"
                   size="sm"
+                  className="rounded-full"
                   onClick={() => handleReconnect(item.id)}
                   disabled={isConnecting}
                   title="Fixes this connection in place (e.g. after a bank password change) without creating a duplicate, separately-tracked connection."
@@ -328,7 +464,7 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-muted-foreground hover:text-destructive"
+                className="rounded-full text-muted-foreground hover:text-destructive"
                 onClick={() => setUnlinkPromptItem(item)}
               >
                 Unlink
@@ -337,10 +473,10 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
           </div>
 
           {item.status !== "error" && item.linkedAccounts.length > 0 ? (
-            <div className="space-y-1.5 border-t border-muted pt-2">
+            <div className="divide-y divide-border/70 rounded-xl bg-card px-3">
               {item.linkedAccounts.map((account) => (
-                <div key={account.accountId} className="flex items-center justify-between gap-2">
-                  <span className="text-xs text-muted-foreground">
+                <div key={account.accountId} className="flex items-center justify-between gap-2 py-2">
+                  <span className="min-w-0 truncate text-xs text-muted-foreground">
                     {account.name}
                     {account.mask ? ` ••${account.mask}` : ""}
                   </span>
@@ -354,7 +490,7 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
                     }
                     onValueChange={(value) => void handleAccountDefaultChange(item.id, account.accountId, value)}
                   >
-                    <SelectTrigger className="h-7 w-[150px] text-xs" title="New transactions from this account default to this classification unless a specific merchant has been confirmed or dismissed before.">
+                    <SelectTrigger className="h-7 w-[150px] shrink-0 rounded-full border-0 bg-muted text-xs shadow-none" title="New transactions from this account default to this classification unless a specific merchant has been confirmed or dismissed before.">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -370,8 +506,9 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
         </div>
       ))}
 
-      <Button variant="outline" className="w-full" onClick={handleConnect} disabled={isConnecting}>
-        {isConnecting ? "Connecting..." : "Connect a bank"}
+      <Button className="h-11 w-full rounded-2xl text-base font-semibold" onClick={handleConnect} disabled={isConnecting}>
+        <Plus className="size-4" aria-hidden="true" />
+        {isConnecting ? "Connecting..." : items && items.length > 0 ? "Connect another bank" : "Connect a bank"}
       </Button>
 
       {webLinkToken ? (
@@ -400,7 +537,7 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
           <AlertDialogHeader>
             <AlertDialogTitle>Disconnect {unlinkPromptItem?.institutionName ?? "this bank"}?</AlertDialogTitle>
             <AlertDialogDescription>
-              StackIn will stop pulling in new transactions from this account. Transactions you've
+              521 will stop pulling in new transactions from this account. Transactions you've
               already reviewed and confirmed stay exactly as they are.
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -423,7 +560,7 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
               personal, business, or a mix?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              This helps StackIn guess right from your very first transaction instead of starting
+              This helps 521 guess right from your very first transaction instead of starting
               from scratch on every one. You can always fine-tune it later per account, or correct
               any individual transaction when you review it.
             </AlertDialogDescription>

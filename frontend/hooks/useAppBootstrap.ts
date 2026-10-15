@@ -225,7 +225,12 @@ export function useAppBootstrap() {
             setStatus(workspaceHydrateSettled ? "ready" : "workspace-loading");
             return;
         }
-        let cancelled = false;
+        // The request belongs to this workspace, not to this run of the
+        // effect: the effect re-runs whenever the workspace list refreshes
+        // (and the re-run skips refetching the same workspace), so only a
+        // switch to another workspace or a sign-out makes the result stale.
+        const isStale = () => bootstrappedWorkspaceIdRef.current !== activeWorkspaceId ||
+            hydratedUserIdRef.current !== user.uid;
         bootstrappedWorkspaceIdRef.current = activeWorkspaceId;
         setActiveWorkspaceBootstrapSettled(false);
         setAuthorityStatus("loading");
@@ -245,7 +250,7 @@ export function useAppBootstrap() {
         const activeReadStartedAt = Date.now();
         void measureAsync("app_bootstrap.cached_settings_seed", () => settingsService.readCachedSnapshot(activeWorkspaceId), { workspaceId: activeWorkspaceId })
             .then((cached) => {
-            if (cancelled || !cached) {
+            if (isStale() || !cached) {
                 return;
             }
             const existing = useSettingsStore.getState().byWorkspaceId[activeWorkspaceId];
@@ -269,7 +274,7 @@ export function useAppBootstrap() {
             step: "startup.bootstrap_request",
         }), BOOTSTRAP_REQUEST_TIMEOUT_MS, "app bootstrap"), { workspaceId: activeWorkspaceId })
             .then(async (response) => {
-            if (cancelled)
+            if (isStale())
                 return;
             debugLog("bootstrap", "snapshot_response", {
                 workspaceId: activeWorkspaceId,
@@ -321,7 +326,7 @@ export function useAppBootstrap() {
                     settingsKeys: resolvedSettings ? Object.keys(resolvedSettings) : [],
                 });
             }
-            if (cancelled)
+            if (isStale())
                 return;
             setSettings(activeWorkspaceId, resolvedSettings, {
                 source: settingsSource === "snapshot" ? "bootstrap" : "backend",
@@ -349,7 +354,7 @@ export function useAppBootstrap() {
                 message: error?.message ?? "Unknown bootstrap error",
                 stack: error?.stack ?? null,
             });
-            if (!cancelled) {
+            if (!isStale()) {
                 setAuthority(null);
                 setAuthorityStatus("error");
                 // 403 = membership revoked / workspace not found; 404 = workspace deleted.
@@ -374,7 +379,7 @@ export function useAppBootstrap() {
                     : null,
             }), BOOTSTRAP_REQUEST_TIMEOUT_MS, "settings fallback"), { workspaceId: activeWorkspaceId })
                 .then((result) => {
-                if (cancelled)
+                if (isStale())
                     return;
                 debugLog("bootstrap", "settings_fallback_complete", {
                     workspaceId: activeWorkspaceId,
@@ -395,7 +400,7 @@ export function useAppBootstrap() {
                 });
             })
                 .finally(() => {
-                if (cancelled)
+                if (isStale())
                     return;
                 timer.success({
                     source: "settings-fallback",
@@ -407,9 +412,6 @@ export function useAppBootstrap() {
                 setActiveWorkspaceBootstrapSettled(true);
             });
         });
-        return () => {
-            cancelled = true;
-        };
     }, [authLoading, user, workspaceState, setSettings, syncAccountAuthority, workspaceHydrateSettled]);
     const refreshAuthority = useCallback(async () => {
         if (workspaceState.status !== "ready") {

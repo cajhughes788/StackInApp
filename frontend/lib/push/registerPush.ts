@@ -3,6 +3,7 @@ import { PushNotifications } from "@capacitor/push-notifications"
 import { FcmToken } from "@/plugins/FcmToken"
 import { registerDeviceToken } from "@/lib/api/devicesApi"
 import { debugError, debugLog } from "@/lib/debugLoop"
+import { deepLinkRequestFromPushData, useDeepLinkStore } from "@/lib/push/deepLinkStore"
 
 let hasRegistered = false
 
@@ -39,27 +40,22 @@ export async function registerPushNotifications(): Promise<void> {
       debugError("push-notifications", "registration_error", { error: String(error) })
     })
 
-    // Tapping a transaction notification (see pushNotificationService.ts's
-    // data.deepLink) should land the user on the Expenses tab where pending
-    // transactions are reviewed, not wherever the app happened to be left.
-    // A hard navigation (window.location.href) is used rather than the
-    // Next.js router since this runs outside any component's render tree.
+    // Tapping a notification (see pushNotificationService.ts's data) lands
+    // on the right workspace and tab with the review list open: expense and
+    // refund reviews on Expenses, deposits on Income, "reconnect your bank"
+    // on the Bank connections page. This only records the request — no
+    // window.location navigation, which reboots the native app through the
+    // landing page and loses the destination (see deepLinkStore.ts).
+    // DeepLinkHandler performs it once the workspace list is ready. Capacitor
+    // retains a tap that launched the app until this listener is attached.
     PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
-      const deepLink = action.notification.data?.deepLink as string | undefined
-      if (typeof deepLink === "string" && deepLink.startsWith("stackin://plaid/pending/")) {
-        // openReview=1 tells plaid-pending-transactions-panel.tsx to skip its
-        // own auto-collapse-when-many-pending behavior — tapping a "review
-        // your new transactions" notification should always land on an
-        // already-expanded list, not a collapsed one.
-        window.location.href = "/app/home?mode=expenses&openReview=1"
-      } else if (typeof deepLink === "string" && deepLink.startsWith("stackin://plaid/reconnect")) {
-        // "Reconnect your bank" (flagStalePlaidItemsDaily.ts) — land
-        // straight on the account page, where the broken connection already
-        // shows "Connection needs attention" plus a Reconnect button
-        // (plaid-connect-button.tsx), instead of leaving the user to find
-        // Settings on their own.
-        window.location.href = "/app/account"
-      }
+      const request = deepLinkRequestFromPushData(action.notification.data)
+      debugLog("push-notifications", "action_performed", {
+        deepLink: action.notification.data?.deepLink ?? null,
+        workspaceId: action.notification.data?.workspaceId ?? null,
+        recognized: request !== null,
+      })
+      if (request) useDeepLinkStore.getState().request(request)
     })
 
     await PushNotifications.register()

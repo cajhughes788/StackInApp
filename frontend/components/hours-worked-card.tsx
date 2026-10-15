@@ -99,18 +99,18 @@ function TrendVariant({ monthlyBuckets }: { monthlyBuckets: MonthlyHoursBucket[]
           <StatTile label="Avg / Week (This Year)" value={formatHours(yearAvgPerWeek)} accent />
 
           {yearBuckets.length > 0 ? (
-            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 dark:border-slate-700 dark:bg-slate-800/50">
+            <div className="rounded-2xl bg-muted px-4 py-4">
               <div className="flex items-baseline justify-between gap-3">
                 <div>
-                  <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+                  <div className="text-xs text-muted-foreground">
                     {selectedBucket?.label ?? "Select a month"}
                   </div>
-                  <div className="mt-1 text-lg font-semibold tabular-nums text-slate-900 dark:text-white">
+                  <div className="mt-1 text-lg font-semibold tabular-nums text-foreground">
                     {selectedBucket ? `${formatHours(selectedBucket.totalHours)} hrs` : "—"}
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">Avg / Week</div>
+                  <div className="text-xs text-muted-foreground">Avg / Week</div>
                   <div className="mt-1 text-base font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">
                     {formatHours(selectedAvgPerWeek)}
                   </div>
@@ -136,14 +136,14 @@ function TrendVariant({ monthlyBuckets }: { monthlyBuckets: MonthlyHoursBucket[]
                       <div className="flex h-16 w-full items-end">
                         <div
                           className={`w-full rounded-t-md transition-colors ${
-                            isSelected ? "bg-emerald-500 dark:bg-emerald-400" : "bg-slate-200 dark:bg-slate-600"
+                            isSelected ? "bg-emerald-500 dark:bg-emerald-400" : "bg-secondary "
                           }`}
                           style={{ height: `${heightPct}%` }}
                         />
                       </div>
                       <span
                         className={`text-[10px] ${
-                          isSelected ? "font-semibold text-slate-900 dark:text-white" : "text-slate-500 dark:text-slate-400"
+                          isSelected ? "font-semibold text-foreground" : "text-muted-foreground"
                         }`}
                       >
                         {bucket.label.slice(0, 3)}
@@ -156,7 +156,7 @@ function TrendVariant({ monthlyBuckets }: { monthlyBuckets: MonthlyHoursBucket[]
           ) : null}
         </>
       ) : (
-        <div className="rounded-2xl border border-dashed border-slate-200 p-4 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+        <div className="rounded-2xl bg-muted p-4 text-sm text-muted-foreground">
           No hours logged yet.
         </div>
       )}
@@ -186,11 +186,11 @@ function SimpleVariant({
 
 function StatTile({ label, value, accent = false }: { label: string; value: string; accent?: boolean }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50/90 px-3 py-3 dark:border-slate-700 dark:bg-slate-800/60">
-      <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">{label}</div>
+    <div className="rounded-2xl bg-muted px-3 py-3">
+      <div className="text-xs text-muted-foreground">{label}</div>
       <div
         className={`mt-1 text-xl font-semibold tabular-nums ${
-          accent ? "text-emerald-700 dark:text-emerald-400" : "text-slate-900 dark:text-white"
+          accent ? "text-emerald-700 dark:text-emerald-400" : "text-foreground"
         }`}
       >
         {value}
@@ -203,26 +203,26 @@ function HoursWorkedShell({ subtitle, children }: { subtitle: string; children: 
   const [isExpanded, setIsExpanded] = useState(false)
 
   return (
-    <div className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-white shadow-sm dark:border-slate-700/80 dark:bg-card">
+    <div className="overflow-hidden rounded-[22px] bg-card border border-card-border">
       <button
         type="button"
         onClick={() => setIsExpanded((current) => !current)}
-        className="flex w-full items-center justify-between gap-4 px-4 py-4 text-left transition hover:bg-slate-50/70 dark:hover:bg-slate-800/70 min-[420px]:px-5 sm:px-6"
+        className="flex w-full items-center justify-between gap-4 px-4 py-4 text-left transition hover:bg-muted/70 min-[420px]:px-5 sm:px-6"
         aria-expanded={isExpanded}
       >
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
             <Clock3 className="h-5 w-5" />
           </div>
           <div>
-            <div className="text-base font-semibold text-slate-900 dark:text-white">Hours Worked</div>
-            <div className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">{subtitle}</div>
+            <div className="text-base font-semibold text-foreground">Hours worked</div>
+            <div className="mt-0.5 text-sm text-muted-foreground">{subtitle}</div>
           </div>
         </div>
         <motion.span
           animate={{ rotate: isExpanded ? 180 : 0 }}
           transition={{ duration: 0.2, ease: "easeOut" }}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground"
         >
           <ChevronDown className="h-4 w-4" />
         </motion.span>
@@ -236,7 +236,7 @@ function HoursWorkedShell({ subtitle, children }: { subtitle: string; children: 
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-            className="overflow-hidden border-t border-slate-200/70 dark:border-slate-700/70"
+            className="overflow-hidden border-t border-border/70"
           >
             <div className="space-y-5 px-4 py-5 min-[420px]:px-5 sm:px-6">{children}</div>
           </motion.div>

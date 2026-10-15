@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 import { db } from "../admin"
+import { reconcileVenmoCashoutsWithImport } from "./plaidService"
 import {
   BadRequestError,
   ForbiddenError,
@@ -197,7 +198,37 @@ export async function createImportBatch(
   }
   await writer.commit()
 
+  if (batch.source === "venmo_csv") {
+    return { batch: await reconcileBankVenmoCashouts(workspaceId, batchRef, batch, items), items }
+  }
   return { batch, items }
+}
+
+// A Venmo statement and a linked bank both see Venmo money — the statement
+// as individual payments, the bank as cash-outs — so the first statement
+// import switches Venmo income over to the statement side (see
+// reconcileVenmoCashoutsWithImport). Best-effort: the import itself is
+// already saved, and a failure here only loses the overlap warning.
+async function reconcileBankVenmoCashouts(
+  workspaceId: string,
+  batchRef: FirebaseFirestore.DocumentReference,
+  batch: ImportBatch,
+  items: ImportItem[]
+): Promise<ImportBatch> {
+  const dates = items
+    .map((item) => item.occurredAt?.slice(0, 10))
+    .filter((date): date is string => typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date))
+    .sort()
+  const period = dates.length > 0 ? { start: dates[0], end: dates[dates.length - 1] } : null
+  try {
+    const overlap = await reconcileVenmoCashoutsWithImport(workspaceId, period)
+    if (overlap.count === 0) return batch
+    await batchRef.set({ bankCashoutOverlap: overlap }, { merge: true })
+    return { ...batch, bankCashoutOverlap: overlap }
+  } catch (error) {
+    console.error("importsService.createImportBatch: Venmo cash-out reconciliation failed", error)
+    return batch
+  }
 }
 
 export async function getImportBatches(

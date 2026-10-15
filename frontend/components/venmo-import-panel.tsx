@@ -818,8 +818,29 @@ export default function VenmoImportPanel() {
           ) : null}
         </div>
 
-        {message ? <p className="text-sm text-emerald-700">{message}</p> : null}
+        {message ? <p className="text-sm text-emerald-700 dark:text-emerald-400">{message}</p> : null}
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
+
+        {selectedBatch?.bankCashoutOverlap && selectedBatch.bankCashoutOverlap.count > 0 ? (
+          // Bank Venmo cash-outs already confirmed as income in this
+          // statement's period — see reconcileVenmoCashoutsWithImport.
+          <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
+            <p className="font-medium">
+              {selectedBatch.bankCashoutOverlap.count === 1
+                ? "1 Venmo cash-out from your bank"
+                : `${selectedBatch.bankCashoutOverlap.count} Venmo cash-outs from your bank`}{" "}
+              ({formatCurrency(selectedBatch.bankCashoutOverlap.total)}) were already added as income for this period.
+            </p>
+            <p className="mt-1">
+              That&apos;s the same money as the Venmo payments below. Saving both counts it twice, so either skip the
+              matching payments here or delete those bank income entries:{" "}
+              {selectedBatch.bankCashoutOverlap.deposits
+                .map((deposit) => `${deposit.date} ${formatCurrency(deposit.amount)}`)
+                .join(", ")}
+              .
+            </p>
+          </div>
+        ) : null}
 
         {selectedBatch && pendingItems.length > 0 ? (
           <div className="rounded-lg border p-3 space-y-3">
@@ -924,7 +945,7 @@ export default function VenmoImportPanel() {
                   return (
                   <div key={item.id} className="rounded-xl border p-4">
                     {duplicate ? (
-                      <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
                         <Badge variant="outline">Possible duplicate</Badge>
                         <span>
                           A matching {item.kind === "expense" ? "expense" : "entry"} already exists for this date and amount.
@@ -950,7 +971,7 @@ export default function VenmoImportPanel() {
                           {item.counterparty ? ` • ${item.counterparty}` : ""}
                         </p>
                         {item.parseWarnings.length > 0 ? (
-                          <p className="text-xs text-amber-700">
+                          <p className="text-xs text-amber-700 dark:text-amber-300">
                             {item.parseWarnings.join(" • ")}
                           </p>
                         ) : null}

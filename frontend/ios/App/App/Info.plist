@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>StackIn</string>
+	<string>521</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -34,17 +34,17 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>StackIn uses your location to remind you to log entries when you arrive at or leave work locations.</string>
+	<string>521 uses your location to remind you to log entries when you arrive at or leave work locations.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
-	<string>StackIn uses your location to remind you to log entries when you arrive at or leave work locations.</string>
+	<string>521 uses your location to remind you to log entries when you arrive at or leave work locations.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>StackIn uses your camera to capture receipt photos for business expense records.</string>
+	<string>521 uses your camera to capture receipt photos for business expense records.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>This app uses your location to set reminders when you arrive at work.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>StackIn lets you choose receipt photos from your library for business expense records.</string>
+	<string>521 lets you choose receipt photos from your library for business expense records.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>StackIn saves receipt photos to your photo library when you choose to keep exported or captured images.</string>
+	<string>521 saves receipt photos to your photo library when you choose to keep exported or captured images.</string>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>

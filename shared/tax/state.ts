@@ -329,7 +329,7 @@ export function getStateCalculationMeta(state: string): StateCalculationMeta {
         needsWorkLocation: true,
         notes: [
           ...(base.notes ?? []),
-          "South Carolina payroll withholding uses the 2026 SC formula with $5,000 per allowance, a 10% standard deduction when one or more allowances are claimed, and the current 6.0% top withholding rate.",
+          "South Carolina payroll withholding uses the 2026 H.4216 rates (1.99% up to $30,000, 5.21% above) with $5,000 per allowance and a 10% standard deduction when one or more allowances are claimed.",
           "Military-spouse exemption certificates and other South Carolina exempt-certificate scenarios are only handled when the employee's exempt election is provided.",
         ],
       }

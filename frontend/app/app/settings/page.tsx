@@ -26,6 +26,7 @@ import { cn } from "@/lib/utils";
 import CommonSettingsSection from "./CommonSettings";
 import W2SettingsSection from "./W2Settings";
 import IndependentSettingsSection from "./IndependentSettings";
+import { AppearanceCard, WorkspaceDeleteCard, WorkspaceNameCard } from "@/components/workspace-settings-cards";
 // ------------------------------------------------------------------------------------
 // Types
 // ------------------------------------------------------------------------------------
@@ -993,15 +994,15 @@ export default function SettingsPage() {
     return (<>
       {!isInitialSettingsSetup ? <StackInHeader /> : null}
 
-      <div className="max-w-3xl mx-auto px-4 py-8 space-y-8" onFocusCapture={handleTypedFieldFocusCapture} onBlurCapture={handleTypedFieldBlurCapture}>
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold">Settings</h1>
-          <span className="text-xs uppercase tracking-wide text-muted-foreground">
-            Workspace: {activeWorkspace?.type === "w2" ? "W-2" : "Independent"}
+      <div className="max-w-3xl mx-auto px-4 pb-10 pt-4 space-y-5" onFocusCapture={handleTypedFieldFocusCapture} onBlurCapture={handleTypedFieldBlurCapture}>
+        <div className="flex items-center justify-between gap-3 px-1">
+          <h1 className="text-2xl font-semibold">Settings</h1>
+          <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">
+            {activeWorkspace?.type === "w2" ? "W-2" : "Self-employed"}
           </span>
         </div>
 
-        {!isInitialSettingsSetup && saveStatusMeta ? (<div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2 text-sm">
+        {!isInitialSettingsSetup && saveStatusMeta ? (<div className="flex items-center justify-between gap-3 rounded-2xl bg-card px-4 py-2.5 text-sm">
             <div className="flex items-center gap-2">
               <span className={cn("inline-flex size-2 rounded-full", saveStatusMeta.tone === "saving"
                     ? "bg-amber-500"
@@ -1015,29 +1016,36 @@ export default function SettingsPage() {
             <span className="text-xs text-muted-foreground">{settingsStatusMessage}</span>
           </div>) : null}
 
+        {!isInitialSettingsSetup ? <WorkspaceNameCard /> : null}
+
         {activeWorkspace?.type === "w2" && (<W2SettingsSection data={formData.w2} isInitialSetup={isInitialSettingsSetup} onChange={(patch, behavior) => updateSection("w2", patch, behavior)}/>)}
 
         {activeWorkspace?.type === "independent" && (<IndependentSettingsSection data={formData.independent} onChange={(patch, behavior) => updateSection("independent", patch, behavior)}/>)}
 
         <CommonSettingsSection data={formData.common} onChange={(patch, behavior) => updateSection("common", patch, behavior)}/>
 
+        {!isInitialSettingsSetup ? (<>
+            <AppearanceCard />
+            <WorkspaceDeleteCard />
+          </>) : null}
+
         <div className="pt-4">
           {isInitialSettingsSetup &&
               showInitialValidationFeedback &&
-              currentValidationErrors.length > 0 ? (<div className="stackin-safe-page-message mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              currentValidationErrors.length > 0 ? (<div className="stackin-safe-page-message mb-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
               <p className="font-medium">Finish these before continuing:</p>
               <ul className="mt-2 list-disc pl-5">
                 {currentValidationErrors.map((error) => (<li key={error}>{error}</li>))}
               </ul>
             </div>) : null}
-          {isInitialSettingsSetup ? (<Button className={cn("w-full", isInitialSetupReadyToSave
-                ? "bg-emerald-600 text-white hover:bg-emerald-600 focus-visible:ring-emerald-300 disabled:bg-emerald-600/75 disabled:text-white"
-                : "bg-slate-200 text-slate-700 hover:bg-slate-200 focus-visible:ring-slate-300 disabled:bg-slate-200 disabled:text-slate-700")} onClick={handleSaveAndContinue} disabled={isPrimarySaveDisabled} variant="default">
+          {isInitialSettingsSetup ? (<Button className={cn("h-12 w-full rounded-2xl text-base font-semibold", isInitialSetupReadyToSave
+                ? "disabled:opacity-75"
+                : "bg-secondary text-foreground/80 hover:bg-secondary focus-visible:ring-ring/40 disabled:bg-secondary disabled:text-foreground/80")} onClick={handleSaveAndContinue} disabled={isPrimarySaveDisabled} variant="default">
               {saveState.status === "error"
-                    ? "Retry Save and Continue"
+                    ? "Retry save and continue"
                     : isSaving
                         ? "Saving..."
-                        : "Save and Continue to Home"}
+                        : "Save and continue to home"}
             </Button>) : null}
           {isInitialSettingsSetup ? (<p className="mt-3 text-sm text-muted-foreground">
               Create your initial settings record before entering the app.
@@ -1052,7 +1060,7 @@ export default function SettingsPage() {
         <DialogContent className="max-w-md text-center space-y-4">
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold">
-              Welcome to StackIn!
+              Welcome to 521!
             </DialogTitle>
             <DialogDescription>
               Configure your settings to start tracking your earnings
@@ -1060,7 +1068,7 @@ export default function SettingsPage() {
             </DialogDescription>
           </DialogHeader>
           <Button onClick={() => setShowWelcome(false)} className="w-full">
-            Get Started
+            Get started
           </Button>
         </DialogContent>
       </Dialog>

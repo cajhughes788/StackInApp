@@ -23,16 +23,20 @@ function getPeriodsPerYear(freq: SouthCarolinaPayrollFrequency): number {
   }
 }
 
+// 2026 rates under H.4216 / Act 110, retroactive to Jan 1, 2026: 1.99% up to
+// $30,000, then 5.21% less $966 (the same tax at $30,000). Replaces the
+// 0% / 3% / 6% schedule. The allowance and 10% deduction below are the
+// pre-Act formula — check them against SCDOR's 2026 withholding tables.
 function calculateSouthCarolinaAnnualTax(annualTaxableIncome: number): number {
-  if (annualTaxableIncome < 3_640) {
+  if (annualTaxableIncome <= 0) {
     return 0
   }
 
-  if (annualTaxableIncome < 18_230) {
-    return annualTaxableIncome * 0.03 - 109.2
+  if (annualTaxableIncome < 30_000) {
+    return annualTaxableIncome * 0.0199
   }
 
-  return annualTaxableIncome * 0.06 - 656.1
+  return annualTaxableIncome * 0.0521 - 966
 }
 
 export function isSouthCarolinaWithholdingState(profile: {

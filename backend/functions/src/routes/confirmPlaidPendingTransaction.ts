@@ -1,5 +1,6 @@
 import type { Request, Response } from "express"
 import { z } from "zod"
+import { IncomeCategorySchema, PaymentMethodSchema } from "@shared/schemas/entry"
 import { confirmPendingTransaction } from "../services/plaidService"
 import { BadRequestError, UnauthorizedError, sendHttpError } from "../lib/httpErrors"
 
@@ -13,6 +14,10 @@ const BodySchema = z.object({
   account: z.string().optional(),
   alwaysPersonal: z.boolean().optional(),
   receiptAssetId: z.string().optional(),
+  incomeCategory: IncomeCategorySchema.optional(),
+  paymentMethod: PaymentMethodSchema.optional(),
+  // "Who paid you?" — only used with paymentMethod "other".
+  incomeLabel: z.string().trim().max(60).optional(),
 })
 
 export async function confirmPlaidPendingTransactionHandler(req: Request, res: Response): Promise<void> {

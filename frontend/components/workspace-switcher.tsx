@@ -1,24 +1,43 @@
 "use client"
 
-import { startTransition } from "react"
+import { startTransition, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Check, ChevronDown, Plus } from "lucide-react"
 
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import { debugRender } from "@/lib/debugLoop"
 import { useNavigationGuardStore } from "@/lib/stores/useNavigationGuardStore"
 import { useToast } from "@/hooks/use-toast"
 import { useAppBootstrapState } from "@/contexts/app-bootstrap-context"
 
+// A workspace's colored initial: green for self-employed, blue for W-2.
+function WorkspaceAvatar({ name, type, size = "sm" }: { name: string; type: string; size?: "sm" | "lg" }) {
+  return (
+    <span
+      className={`flex shrink-0 items-center justify-center rounded-full font-semibold uppercase ${
+        size === "lg" ? "size-10 text-base" : "size-7 text-xs"
+      } ${type === "w2" ? "bg-sky-500/15 text-sky-700 dark:text-sky-300" : "bg-primary/15 text-primary"}`}
+      aria-hidden="true"
+    >
+      {name.trim().charAt(0) || "?"}
+    </span>
+  )
+}
+
+function workspaceTypeLabel(type: string) {
+  return type === "w2" ? "W-2" : "Self-employed"
+}
+
 export default function WorkspaceSwitcher() {
+  const [open, setOpen] = useState(false)
   const router = useRouter()
   const { toast } = useToast()
   const workspaceState = useWorkspaceStore((s) => s.state)
@@ -77,6 +96,7 @@ export default function WorkspaceSwitcher() {
       })
     }
 
+    setOpen(false)
     setActiveWorkspace(workspaceId)
     startTransition(() => {
       router.push("/app/home")
@@ -84,52 +104,67 @@ export default function WorkspaceSwitcher() {
   }
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+    <Sheet open={open} onOpenChange={setOpen}>
+      <SheetTrigger asChild>
         <button
           type="button"
-          className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1 text-sm font-medium text-primary shadow-sm transition hover:bg-accent"
+          className="flex min-w-0 items-center gap-2 rounded-full border border-card-border bg-card py-1 pl-1 pr-3 text-sm font-medium text-foreground transition hover:bg-muted"
           aria-label="Open workspace switcher"
         >
-          <span>{activeWorkspace.name}</span>
-          <span className="text-xs text-primary/80">
-            ({activeWorkspace.type === "w2" ? "W-2" : "Independent"})
-          </span>
-          <ChevronDown className="h-4 w-4 text-primary" />
+          <WorkspaceAvatar name={activeWorkspace.name} type={activeWorkspace.type} />
+          <span className="truncate">{activeWorkspace.name}</span>
+          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
         </button>
-      </DropdownMenuTrigger>
+      </SheetTrigger>
 
-      <DropdownMenuContent align="start" className="w-64">
-        <DropdownMenuLabel>Workspaces</DropdownMenuLabel>
-        {workspaces.map((workspace) => {
-          const isActive = workspace.id === activeWorkspaceId
-          return (
-            <DropdownMenuItem
-              key={workspace.id}
-              onClick={() => void handleWorkspaceSelect(workspace.id)}
-              className="flex items-center justify-between"
+      <SheetContent
+        side="bottom"
+        className="mx-auto max-w-lg gap-0 rounded-t-[22px] border-x border-t border-card-border bg-card px-4 pb-[calc(1.25rem+var(--safe-area-inset-bottom))] pt-2"
+      >
+        <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-muted" aria-hidden="true" />
+        <SheetHeader className="px-0 pb-3 pt-1">
+          <SheetTitle className="text-lg">Switch workspace</SheetTitle>
+          <SheetDescription className="sr-only">Choose which workspace to view.</SheetDescription>
+        </SheetHeader>
+
+        <div className="space-y-2">
+          {workspaces.map((workspace) => {
+            const isActive = workspace.id === activeWorkspaceId
+            return (
+              <button
+                key={workspace.id}
+                type="button"
+                onClick={() => void handleWorkspaceSelect(workspace.id)}
+                aria-current={isActive ? "true" : undefined}
+                className={`flex w-full items-center gap-3 rounded-2xl border p-3 text-left transition-colors ${
+                  isActive ? "border-primary bg-muted" : "border-transparent bg-muted hover:border-card-border"
+                }`}
+              >
+                <WorkspaceAvatar name={workspace.name} type={workspace.type} size="lg" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium text-foreground">{workspace.name}</span>
+                  <span className="block text-xs text-muted-foreground">{workspaceTypeLabel(workspace.type)}</span>
+                </span>
+                {isActive ? <Check className="h-5 w-5 shrink-0 text-primary" /> : null}
+              </button>
+            )
+          })}
+
+          {canAddWorkspace ? (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false)
+                router.push("/welcome?mode=add-workspace")
+              }}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-card-border p-3 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
             >
-              <div className="min-w-0">
-                <div className="truncate font-medium">{workspace.name}</div>
-                <div className="text-xs text-muted-foreground">
-                  {workspace.type === "w2" ? "W-2 workspace" : "Independent workspace"}
-                </div>
-              </div>
-              {isActive ? <Check className="h-4 w-4 text-primary" /> : null}
-            </DropdownMenuItem>
-          )
-        })}
-
-        {canAddWorkspace ? (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => router.push("/welcome?mode=add-workspace")}>
               <Plus className="h-4 w-4 text-primary" />
-              Add Workspace
-            </DropdownMenuItem>
-          </>
-        ) : null}
-      </DropdownMenuContent>
-    </DropdownMenu>
+              Add workspace
+            </button>
+          ) : null}
+        </div>
+      </SheetContent>
+    </Sheet>
   )
 }

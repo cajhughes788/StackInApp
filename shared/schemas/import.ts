@@ -99,7 +99,18 @@ export const CreateImportBatchSchema = z.object({
   items: z.array(ImportItemInputSchema).default([]),
 })
 
+// Set on a Venmo statement import when bank Venmo cash-outs in the same
+// period were already confirmed as income — that money would be counted
+// twice once the statement's payments are added. See
+// reconcileVenmoCashoutsWithImport in backend plaidService.
+export const ImportBankCashoutOverlapSchema = z.object({
+  count: z.number().int().nonnegative(),
+  total: z.number().nonnegative(),
+  deposits: z.array(z.object({ date: z.string(), amount: z.number() })),
+})
+
 export const ImportBatchSchema = ImportBatchInputSchema.extend({
+  bankCashoutOverlap: ImportBankCashoutOverlapSchema.optional(),
   id: z.string(),
   workspaceId: z.string(),
   itemCount: z.number().int().nonnegative(),

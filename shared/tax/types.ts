@@ -78,6 +78,9 @@ export type FilingStatus =
 // Unified input object for any tax calculation
 export interface TaxProfileInput {
   grossIncome: number
+  // Paycheck date (YYYY-MM-DD). Picks the tax year's payroll tables; today
+  // when omitted.
+  payDate?: string
   filingStatus: FilingStatus
   dependents?: number
   federalMultipleJobsCheckbox?: boolean
@@ -308,5 +311,37 @@ export interface PaycheckResult {
   breakdown: TaxBreakdown
   metadata?: {
     state: StateCalculationMeta
+    // Which year's federal payroll tables were used. isFallback = the
+    // paycheck's year has no tables yet, so the nearest year's were used.
+    taxYear?: { requested: number; used: number; isFallback: boolean }
   }
+}
+
+// One year of federal payroll withholding parameters (IRS Publication 15-T,
+// SSA wage base, Form W-4 credits). See tables/payroll<year>.ts.
+export type AnnualRateScheduleRow = {
+  atLeast: number
+  lessThan: number | null
+  baseWithholding: number
+  rate: number
+  baseThreshold: number
+}
+
+export type AnnualScheduleSet = Record<FilingStatus, AnnualRateScheduleRow[]>
+
+export interface PayrollYearParams {
+  year: number
+  socialSecurityRate: number
+  socialSecurityWageBase: number
+  medicareRate: number
+  additionalMedicareRate: number
+  // Employer withholding threshold — the same for every filing status.
+  additionalMedicareWithholdingThreshold: number
+  // Form W-4 Step 3 amounts, used when no Step 3 total was entered.
+  childTaxCredit: number
+  otherDependentCredit: number
+  // Publication 15-T Worksheet 1A line 1g (no Step 2 checkbox).
+  worksheet1AAdjustment: { marriedJoint: number; other: number }
+  standardSchedules: AnnualScheduleSet
+  step2Schedules: AnnualScheduleSet
 }

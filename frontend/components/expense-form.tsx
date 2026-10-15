@@ -157,6 +157,10 @@ function writeVehicleModePreference(
   }
 }
 
+// Soft filled fields and quiet labels for the restyled form.
+const FIELD_INPUT_CLASS = "h-11 rounded-xl border-0 bg-muted px-3.5 shadow-none"
+const FIELD_LABEL_CLASS = "mb-1.5 block text-sm font-normal text-muted-foreground"
+
 function VendorLabel({
   htmlFor,
   optional = false,
@@ -165,8 +169,8 @@ function VendorLabel({
   optional?: boolean
 }) {
   return (
-    <div className="flex items-center gap-2">
-      <Label htmlFor={htmlFor}>
+    <div className="mb-1.5 flex items-center gap-1">
+      <Label htmlFor={htmlFor} className="text-sm font-normal text-muted-foreground">
         Vendor
         {optional ? " (Optional)" : ""}
       </Label>
@@ -848,10 +852,10 @@ export default function ExpenseForm() {
 
   if (workspaceState.status !== "ready") {
     return (
-      <Card className="gap-0 py-4">
+      <Card className="gap-0 rounded-[22px] py-4 shadow-none">
         <CardHeader className="flex flex-row items-center justify-between space-y-0 px-5">
           <div className="flex items-center gap-2">
-            <CardTitle>Add Expense</CardTitle>
+            <CardTitle className="text-lg">Add expense</CardTitle>
             <Popover>
               <PopoverTrigger asChild>
                 <button
@@ -885,34 +889,32 @@ export default function ExpenseForm() {
   }
 
   return (
-    <Card className={expanded ? "gap-6 py-6" : "gap-0 py-4"}>
-      <CardHeader
-        className={`flex flex-row items-center justify-between space-y-0 ${
-          expanded ? "" : "px-5"
-        }`}
-      >
-        <div className="flex items-center gap-2">
-          <CardTitle>Add Expense</CardTitle>
-          <Popover>
-            <PopoverTrigger asChild>
-              <button
-                type="button"
-                className="text-muted-foreground hover:text-foreground"
-                aria-label="Expense form help"
-              >
-                <Info className="h-4 w-4" />
-              </button>
-            </PopoverTrigger>
-            <PopoverContent className="w-64 text-sm">
-              Tap the plus button to expand and add a new expense.
-            </PopoverContent>
-          </Popover>
-        </div>
+    <Card
+      className={`rounded-[22px] shadow-none ${
+        expanded ? "gap-5 py-5" : "gap-0 py-4"
+      }`}
+    >
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 px-5">
+        <button
+          type="button"
+          onClick={() => setExpanded((current) => !current)}
+          className="flex min-w-0 flex-col items-start gap-0.5 text-left"
+          aria-hidden="true"
+          tabIndex={-1}
+        >
+          <CardTitle className="text-lg">Add expense</CardTitle>
+          {!expanded ? (
+            <span className="text-sm text-muted-foreground">
+              Log a purchase or mileage for any day
+            </span>
+          ) : null}
+        </button>
 
         <Button
           type="button"
-          variant="outline"
+          variant={expanded ? "ghost" : "default"}
           size="icon"
+          className="size-10 shrink-0 rounded-full"
           onClick={() => setExpanded((current) => !current)}
           aria-label={expanded ? "Collapse expense form" : "Expand expense form"}
         >
@@ -923,7 +925,7 @@ export default function ExpenseForm() {
       {!expanded ? (
         <CardContent className="px-5 pt-0 pb-0" />
       ) : (
-        <CardContent>
+        <CardContent className="px-5">
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Receipt attachment — placed first so the user can kick off the
                 upload immediately while filling in the rest of the form.
@@ -935,9 +937,12 @@ export default function ExpenseForm() {
                 pendingReceiptCapture handling. */}
             <ReceiptCaptureField capture={receiptCapture} />
 
-            <div>
-              <Label htmlFor="date">Date</Label>
+            <div className="flex items-center justify-between gap-3 rounded-2xl bg-muted px-4 py-1.5">
+              <Label htmlFor="date" className="shrink-0 text-sm font-normal text-muted-foreground">
+                Date
+              </Label>
               <Input
+                className="h-9 w-auto min-w-0 border-0 bg-transparent px-0 text-right font-medium shadow-none focus-visible:ring-0"
                 id="date"
                 type="date"
                 data-stackin-date-input="true"
@@ -949,9 +954,11 @@ export default function ExpenseForm() {
               />
             </div>
 
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <Label htmlFor="account-trigger">Category</Label>
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-1">
+                <Label htmlFor="account-trigger" className="text-sm font-normal text-muted-foreground">
+                  Category
+                </Label>
                 {selectedCategoryGuide ? (
                   <Popover>
                     <PopoverTrigger asChild>
@@ -987,6 +994,7 @@ export default function ExpenseForm() {
                 value={form.account}
                 onSelect={updateAccount}
                 placeholder="Choose an expense category"
+                triggerClassName={FIELD_INPUT_CLASS}
               />
 
               <p className="text-xs text-muted-foreground">
@@ -995,7 +1003,7 @@ export default function ExpenseForm() {
             </div>
 
             {isVehicleCategorySelected ? (
-              <div className="space-y-4 rounded-xl border border-border bg-muted/20 p-4">
+              <div className="space-y-4 rounded-2xl border border-border/70 p-4">
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Vehicle Expense Mode</div>
                   <ToggleGroup
@@ -1006,14 +1014,19 @@ export default function ExpenseForm() {
                         updateVehicleMode(value)
                       }
                     }}
-                    variant="outline"
-                    className="grid w-full grid-cols-2"
+                    className="grid w-full grid-cols-2 rounded-full bg-muted p-1"
                     aria-label="Vehicle expense mode"
                   >
-                    <ToggleGroupItem value="mileage" className="w-full">
+                    <ToggleGroupItem
+                      value="mileage"
+                      className="w-full rounded-full text-muted-foreground data-[state=on]:bg-card data-[state=on]:text-foreground data-[state=on]:shadow-sm"
+                    >
                       Mileage
                     </ToggleGroupItem>
-                    <ToggleGroupItem value="direct_expense" className="w-full">
+                    <ToggleGroupItem
+                      value="direct_expense"
+                      className="w-full rounded-full text-muted-foreground data-[state=on]:bg-card data-[state=on]:text-foreground data-[state=on]:shadow-sm"
+                    >
                       Direct Expense
                     </ToggleGroupItem>
                   </ToggleGroup>
@@ -1024,6 +1037,7 @@ export default function ExpenseForm() {
                     <div className="relative">
                       <VendorLabel htmlFor="vehicleMileageVendor" optional />
                       <Input
+                        className={FIELD_INPUT_CLASS}
                         id="vehicleMileageVendor"
                         type="text"
                         value={form.vehicle.mileage.vendor}
@@ -1038,12 +1052,12 @@ export default function ExpenseForm() {
                         autoComplete="off"
                       />
                       {vendorSuggestions.length > 0 ? (
-                        <div className="absolute z-10 mt-1 w-full rounded-md border border-border bg-card shadow">
+                        <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-xl border border-border bg-popover py-1 shadow-lg">
                           {vendorSuggestions.map((vendor) => (
                             <button
                               key={vendor}
                               type="button"
-                              className="block w-full px-3 py-1 text-left text-sm hover:bg-muted"
+                              className="block w-full px-3 py-2 text-left text-sm hover:bg-muted"
                               onMouseDown={(event) => {
                                 event.preventDefault()
                                 updateVehicleMileageField("vendor", vendor)
@@ -1059,8 +1073,9 @@ export default function ExpenseForm() {
 
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div>
-                        <Label htmlFor="businessMiles">Business Miles</Label>
+                        <Label htmlFor="businessMiles" className={FIELD_LABEL_CLASS}>Business Miles</Label>
                         <Input
+                          className={FIELD_INPUT_CLASS}
                           id="businessMiles"
                           type="number"
                           step="0.1"
@@ -1077,8 +1092,9 @@ export default function ExpenseForm() {
                       </div>
 
                       <div>
-                        <Label htmlFor="fuel">Fuel</Label>
+                        <Label htmlFor="fuel" className={FIELD_LABEL_CLASS}>Fuel</Label>
                         <Input
+                          className={FIELD_INPUT_CLASS}
                           id="fuel"
                           type="number"
                           step="0.01"
@@ -1092,8 +1108,9 @@ export default function ExpenseForm() {
                       </div>
 
                       <div className="sm:col-span-2">
-                        <Label htmlFor="parkingAndTolls">Parking & Tolls</Label>
+                        <Label htmlFor="parkingAndTolls" className={FIELD_LABEL_CLASS}>Parking & Tolls</Label>
                         <Input
+                          className={FIELD_INPUT_CLASS}
                           id="parkingAndTolls"
                           type="number"
                           step="0.01"
@@ -1110,7 +1127,7 @@ export default function ExpenseForm() {
                       </div>
                     </div>
 
-                    <div className="space-y-2 rounded-md border border-border bg-card px-3 py-3 text-sm">
+                    <div className="space-y-2 rounded-xl bg-muted px-4 py-3 text-sm">
                       <div className="flex items-center justify-between gap-4">
                         <span className="text-muted-foreground">
                           Mileage reimbursement rate
@@ -1128,8 +1145,9 @@ export default function ExpenseForm() {
                     </div>
 
                     <div>
-                      <Label htmlFor="vehicleMileageAmount">Amount</Label>
+                      <Label htmlFor="vehicleMileageAmount" className={FIELD_LABEL_CLASS}>Amount</Label>
                       <Input
+                        className={FIELD_INPUT_CLASS}
                         id="vehicleMileageAmount"
                         type="number"
                         step="0.01"
@@ -1140,8 +1158,9 @@ export default function ExpenseForm() {
                     </div>
 
                     <div className="relative">
-                      <Label htmlFor="vehicleMileageDescription">Description</Label>
+                      <Label htmlFor="vehicleMileageDescription" className={FIELD_LABEL_CLASS}>Description</Label>
                       <Input
+                        className={FIELD_INPUT_CLASS}
                         id="vehicleMileageDescription"
                         type="text"
                         value={form.vehicle.mileage.description}
@@ -1157,12 +1176,12 @@ export default function ExpenseForm() {
                         required
                       />
                       {descriptionSuggestions.length > 0 ? (
-                        <div className="absolute z-10 mt-1 w-full rounded-md border border-border bg-card shadow">
+                        <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-xl border border-border bg-popover py-1 shadow-lg">
                           {descriptionSuggestions.map((description) => (
                             <button
                               key={description}
                               type="button"
-                              className="block w-full px-3 py-1 text-left text-sm hover:bg-muted"
+                              className="block w-full px-3 py-2 text-left text-sm hover:bg-muted"
                               onMouseDown={(event) => {
                                 event.preventDefault()
                                 updateVehicleMileageField("description", description)
@@ -1181,6 +1200,7 @@ export default function ExpenseForm() {
                     <div className="relative">
                       <VendorLabel htmlFor="vehicleDirectVendor" />
                       <Input
+                        className={FIELD_INPUT_CLASS}
                         id="vehicleDirectVendor"
                         type="text"
                         value={form.vehicle.directExpense.vendor}
@@ -1196,12 +1216,12 @@ export default function ExpenseForm() {
                         required
                       />
                       {vendorSuggestions.length > 0 ? (
-                        <div className="absolute z-10 mt-1 w-full rounded-md border border-border bg-card shadow">
+                        <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-xl border border-border bg-popover py-1 shadow-lg">
                           {vendorSuggestions.map((vendor) => (
                             <button
                               key={vendor}
                               type="button"
-                              className="block w-full px-3 py-1 text-left text-sm hover:bg-muted"
+                              className="block w-full px-3 py-2 text-left text-sm hover:bg-muted"
                               onMouseDown={(event) => {
                                 event.preventDefault()
                                 updateVehicleDirectField("vendor", vendor)
@@ -1216,8 +1236,9 @@ export default function ExpenseForm() {
                     </div>
 
                     <div>
-                      <Label htmlFor="vehicleDirectAmount">Amount</Label>
+                      <Label htmlFor="vehicleDirectAmount" className={FIELD_LABEL_CLASS}>Amount</Label>
                       <Input
+                        className={FIELD_INPUT_CLASS}
                         id="vehicleDirectAmount"
                         type="number"
                         step="0.01"
@@ -1230,8 +1251,9 @@ export default function ExpenseForm() {
                     </div>
 
                     <div className="relative">
-                      <Label htmlFor="vehicleDirectDescription">Description</Label>
+                      <Label htmlFor="vehicleDirectDescription" className={FIELD_LABEL_CLASS}>Description</Label>
                       <Input
+                        className={FIELD_INPUT_CLASS}
                         id="vehicleDirectDescription"
                         type="text"
                         value={form.vehicle.directExpense.description}
@@ -1247,12 +1269,12 @@ export default function ExpenseForm() {
                         required
                       />
                       {descriptionSuggestions.length > 0 ? (
-                        <div className="absolute z-10 mt-1 w-full rounded-md border border-border bg-card shadow">
+                        <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-xl border border-border bg-popover py-1 shadow-lg">
                           {descriptionSuggestions.map((description) => (
                             <button
                               key={description}
                               type="button"
-                              className="block w-full px-3 py-1 text-left text-sm hover:bg-muted"
+                              className="block w-full px-3 py-2 text-left text-sm hover:bg-muted"
                               onMouseDown={(event) => {
                                 event.preventDefault()
                                 updateVehicleDirectField("description", description)
@@ -1270,23 +1292,33 @@ export default function ExpenseForm() {
               </div>
             ) : (
               <>
-                <div>
-                  <Label htmlFor="amount">Amount</Label>
-                  <Input
-                    id="amount"
-                    type="number"
-                    step="0.01"
-                    value={form.generic.amount}
-                    onChange={(event) =>
-                      updateGenericField("amount", event.target.value)
-                    }
-                    required
-                  />
+                <div className="flex items-center justify-between gap-3 rounded-2xl bg-muted px-4 py-3">
+                  <Label htmlFor="amount" className="text-base font-medium">
+                    Amount
+                  </Label>
+                  <div className="flex items-baseline gap-0.5">
+                    <span className="text-lg text-muted-foreground">$</span>
+                    <input
+                      id="amount"
+                      type="number"
+                      step="0.01"
+                      inputMode="decimal"
+                      placeholder="0.00"
+                      value={form.generic.amount}
+                      onChange={(event) =>
+                        updateGenericField("amount", event.target.value)
+                      }
+                      required
+                      style={{ width: `${form.generic.amount.length || 4}ch` }}
+                      className="min-w-[1ch] max-w-36 bg-transparent text-right text-2xl font-semibold tabular-nums outline-none placeholder:text-muted-foreground/40"
+                    />
+                  </div>
                 </div>
 
                 <div className="relative">
                   <VendorLabel htmlFor="vendor" />
                   <Input
+                    className={FIELD_INPUT_CLASS}
                     id="vendor"
                     type="text"
                     value={form.generic.vendor}
@@ -1302,12 +1334,12 @@ export default function ExpenseForm() {
                     required
                   />
                   {vendorSuggestions.length > 0 ? (
-                    <div className="absolute z-10 mt-1 w-full rounded-md border border-border bg-card shadow">
+                    <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-xl border border-border bg-popover py-1 shadow-lg">
                       {vendorSuggestions.map((vendor) => (
                         <button
                           key={vendor}
                           type="button"
-                          className="block w-full px-3 py-1 text-left text-sm hover:bg-muted"
+                          className="block w-full px-3 py-2 text-left text-sm hover:bg-muted"
                           onMouseDown={(event) => {
                             event.preventDefault()
                             updateGenericField("vendor", vendor)
@@ -1322,8 +1354,9 @@ export default function ExpenseForm() {
                 </div>
 
                 <div className="relative">
-                  <Label htmlFor="description">Description</Label>
+                  <Label htmlFor="description" className={FIELD_LABEL_CLASS}>Description</Label>
                   <Input
+                    className={FIELD_INPUT_CLASS}
                     id="description"
                     type="text"
                     value={form.generic.description}
@@ -1339,12 +1372,12 @@ export default function ExpenseForm() {
                     required
                   />
                   {descriptionSuggestions.length > 0 ? (
-                    <div className="absolute z-10 mt-1 w-full rounded-md border border-border bg-card shadow">
+                    <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-xl border border-border bg-popover py-1 shadow-lg">
                       {descriptionSuggestions.map((description) => (
                         <button
                           key={description}
                           type="button"
-                          className="block w-full px-3 py-1 text-left text-sm hover:bg-muted"
+                          className="block w-full px-3 py-2 text-left text-sm hover:bg-muted"
                           onMouseDown={(event) => {
                             event.preventDefault()
                             updateGenericField("description", description)
@@ -1373,18 +1406,22 @@ export default function ExpenseForm() {
               />
             ) : null}
 
-            <div className="flex gap-2">
+            <div className="flex gap-2 pt-1">
               <Button
                 type="button"
-                variant="outline"
-                className="flex-1"
+                variant="ghost"
+                className="h-12 rounded-2xl px-5 text-muted-foreground"
                 onClick={handleClearForm}
                 disabled={submitting}
               >
-                Clear Form
+                Clear
               </Button>
-              <Button type="submit" disabled={submitting} className="flex-1">
-                {submitting ? "Saving..." : repeatEnabled ? "Add Recurring Expense" : "Add Expense"}
+              <Button
+                type="submit"
+                disabled={submitting}
+                className="h-12 flex-1 rounded-2xl text-base font-semibold"
+              >
+                {submitting ? "Saving..." : repeatEnabled ? "Save recurring expense" : "Save expense"}
               </Button>
             </div>
           </form>

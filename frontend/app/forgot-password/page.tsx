@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 import { useToast } from "@/hooks/use-toast"
+import StackInMark from "@/components/stackin-mark"
 
 export default function ForgotPasswordPage() {
   const router = useRouter()
@@ -54,7 +55,7 @@ export default function ForgotPasswordPage() {
       // which Firebase can still throw here depending on the project's
       // email-enumeration-protection setting) must never distinguish "no
       // account" from a real failure, or this becomes an oracle for
-      // checking who has a StackIn account by email address.
+      // checking who has a 521 account by email address.
       if (err instanceof FirebaseError && err.code === "auth/invalid-email") {
         toast({
           title: "Email looks off",
@@ -70,21 +71,16 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <div className="min-h-screen bg-secondary/30 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-6 p-4">
+      <StackInMark size={56} />
       <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle className="text-2xl font-bold text-center">
+        <CardHeader className="gap-2 text-center">
+          <CardTitle className="text-2xl font-semibold">
             Reset your password
           </CardTitle>
-          <CardDescription className="text-center text-pretty">
-            Enter your email address below and we'll send you a reset link.
+          <CardDescription className="text-pretty">
+            Enter your email and we'll send you a link to choose a new password.
           </CardDescription>
-
-          <p className="text-xs text-center text-muted-foreground mt-2">
-            If you don't see the email within a few minutes, please check your
-            <span className="font-medium"> spam</span> or{" "}
-            <span className="font-medium">junk</span> folder.
-          </p>
         </CardHeader>
 
         <CardContent>
@@ -97,6 +93,8 @@ export default function ForgotPasswordPage() {
                 placeholder="you@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
+                className="h-11 rounded-xl"
                 required
                 disabled={isSending || redirecting}
               />
@@ -104,24 +102,28 @@ export default function ForgotPasswordPage() {
 
             <Button
               type="submit"
-              className="w-full"
+              className="h-11 w-full rounded-full"
               disabled={isSending || redirecting}
             >
-              {isSending ? "Sending..." : redirecting ? "Sent!" : "Send Reset Link"}
+              {isSending ? "Sending..." : redirecting ? "Sent!" : "Send reset link"}
             </Button>
 
             {redirecting && (
-              <p className="text-center text-sm text-muted-foreground mt-2">
+              <p className="text-center text-sm text-muted-foreground">
                 Redirecting to login...
               </p>
             )}
 
-            <div className="text-sm text-center mt-4">
+            <p className="rounded-xl bg-muted px-4 py-3 text-center text-xs text-muted-foreground text-pretty">
+              Don't see it within a few minutes? Check your spam or junk folder.
+            </p>
+
+            <div className="text-sm text-center text-muted-foreground">
               Remember your password?{" "}
               <button
                 type="button"
                 onClick={() => router.push("/login")}
-                className="text-primary underline underline-offset-2 hover:opacity-80 transition"
+                className="font-medium text-primary hover:opacity-80 transition"
               >
                 Back to login
               </button>

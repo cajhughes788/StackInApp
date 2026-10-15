@@ -24,11 +24,11 @@ function formatHours(value: number): string {
 
 function StatTile({ label, value, accent = false }: { label: string; value: string; accent?: boolean }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50/90 px-3 py-3 dark:border-slate-700 dark:bg-slate-800/60">
-      <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">{label}</div>
+    <div className="rounded-2xl bg-muted px-3 py-3">
+      <div className="text-xs text-muted-foreground">{label}</div>
       <div
         className={`mt-1 text-xl font-semibold tabular-nums ${
-          accent ? "text-emerald-700 dark:text-emerald-400" : "text-slate-900 dark:text-white"
+          accent ? "text-emerald-700 dark:text-emerald-400" : "text-foreground"
         }`}
       >
         {value}
@@ -132,26 +132,26 @@ export default function HoursGoalCard({
   const showForm = isEditing || !goal
 
   return (
-    <div className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-white shadow-sm dark:border-slate-700/80 dark:bg-card">
+    <div className="overflow-hidden rounded-[22px] bg-card border border-card-border">
       <button
         type="button"
         onClick={() => setIsExpanded((current) => !current)}
-        className="flex w-full items-center justify-between gap-4 px-4 py-4 text-left transition hover:bg-slate-50/70 dark:hover:bg-slate-800/70 min-[420px]:px-5 sm:px-6"
+        className="flex w-full items-center justify-between gap-4 px-4 py-4 text-left transition hover:bg-muted/70 min-[420px]:px-5 sm:px-6"
         aria-expanded={isExpanded}
       >
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
             <Target className="h-5 w-5" />
           </div>
           <div>
-            <div className="text-base font-semibold text-slate-900 dark:text-white">Hours Goal</div>
-            <div className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">{subtitle}</div>
+            <div className="text-base font-semibold text-foreground">Hours goal</div>
+            <div className="mt-0.5 text-sm text-muted-foreground">{subtitle}</div>
           </div>
         </div>
         <motion.span
           animate={{ rotate: isExpanded ? 180 : 0 }}
           transition={{ duration: 0.2, ease: "easeOut" }}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground"
         >
           <ChevronDown className="h-4 w-4" />
         </motion.span>
@@ -165,7 +165,7 @@ export default function HoursGoalCard({
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-            className="overflow-hidden border-t border-slate-200/70 dark:border-slate-700/70"
+            className="overflow-hidden border-t border-border/70"
           >
             <div className="space-y-4 px-4 py-5 min-[420px]:px-5 sm:px-6">
               {showForm ? (
@@ -182,7 +182,7 @@ export default function HoursGoalCard({
                       onChange={(event) => setStartDateInput(event.target.value)}
                       required
                     />
-                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    <p className="mt-1 text-xs text-muted-foreground">
                       Defaults to your first logged hours this year.
                     </p>
                   </div>
@@ -237,8 +237,8 @@ export default function HoursGoalCard({
                     <StatTile label="Current Avg / Week" value={formatHours(projection?.currentAvgPerWeek ?? 0)} />
                   </div>
 
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50/90 px-3 py-3 dark:border-slate-700 dark:bg-slate-800/60">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+                  <div className="rounded-2xl bg-muted px-3 py-3">
+                    <div className="text-xs text-muted-foreground">
                       {projection?.isPastEndDate
                         ? `Target was ${formatHours(goal!.targetAvgHoursPerWeek)} hrs/wk from ${goal!.startDate} to ${goal!.endDate}`
                         : `To average ${formatHours(goal!.targetAvgHoursPerWeek)} hrs/wk from ${goal!.startDate} to ${goal!.endDate}`}
@@ -251,7 +251,7 @@ export default function HoursGoalCard({
                         : `${formatHours(projection?.requiredAvgPerWeek ?? 0)} hrs/wk needed`}
                     </div>
                     {!projection?.isPastEndDate ? (
-                      <div className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                      <div className="mt-2 text-sm text-muted-foreground">
                         {formatHours(projection?.weeksRemaining ?? 0)} weeks remaining ·{" "}
                         {formatHours(projection?.hoursRemaining ?? 0)} hrs still needed
                       </div>

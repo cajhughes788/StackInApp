@@ -3,11 +3,10 @@
 import { useEffect, useMemo, useState, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
     ChevronDown,
+    ChevronRight,
     FileSpreadsheet,
     MoreVertical,
     Printer,
@@ -49,29 +48,29 @@ function SimpleMenu({ onPrint, onDownload, onShare }: {
         return () => document.removeEventListener("click", handleClick);
     }, []);
     return (<div ref={ref} className="relative">
-      <Button variant="ghost" size="icon" className="rounded-full text-slate-900 hover:bg-slate-100 hover:text-slate-900" onClick={() => setOpen(!open)}>
+      <Button variant="ghost" size="icon" className="rounded-full text-foreground hover:bg-muted hover:text-foreground" onClick={() => setOpen(!open)}>
         <MoreVertical className="h-5 w-5"/>
       </Button>
 
-      {open && (<div className="absolute right-0 mt-2 w-40 rounded-md border border-slate-200 bg-white text-slate-900 shadow-lg z-[9999]">
+      {open && (<div className="absolute right-0 mt-2 w-40 rounded-md border border-border bg-card text-foreground shadow-lg z-[9999]">
           <button onClick={() => {
                 setOpen(false);
                 onPrint();
-            }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-slate-100">
+            }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-muted">
             <Printer className="h-4 w-4"/>
             Print
           </button>
           <button onClick={() => {
                 setOpen(false);
                 onShare();
-            }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-slate-100">
+            }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-muted">
             <Share2 className="h-4 w-4"/>
             Share
           </button>
           <button onClick={() => {
                 setOpen(false);
                 onDownload();
-            }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-slate-100">
+            }} className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-muted">
             <FileSpreadsheet className="h-4 w-4"/>
             Export CSV
           </button>
@@ -79,44 +78,18 @@ function SimpleMenu({ onPrint, onDownload, onShare }: {
     </div>);
 }
 
-type SummaryStatCardProps = {
+// A label/value pair under the pay period's headline number.
+function SummaryStat({ label, value, tone = "default" }: {
     label: string;
     value: string;
-    tone?: "default" | "accent" | "muted";
-    scale?: "default" | "compact";
-};
-
-function SummaryStatCard({
-    label,
-    value,
-    tone = "default",
-    scale = "default",
-}: SummaryStatCardProps) {
-    const toneClasses = tone === "accent"
-        ? "border-emerald-200 bg-emerald-50 text-emerald-950"
-        : tone === "muted"
-            ? "border-amber-200 bg-amber-50 text-amber-950"
-            : "border-slate-200 bg-white text-slate-950";
-    const labelClasses = scale === "compact"
-        ? "text-[10px] tracking-[0.17em]"
-        : "text-[11px] tracking-[0.2em]";
-    const valueClasses = scale === "compact"
-        ? "text-[clamp(0.95rem,1.45vw,1.55rem)]"
-        : "text-[clamp(1rem,1.7vw,1.75rem)]";
-    const heightClasses = scale === "compact"
-        ? "min-h-[5.35rem] min-[420px]:min-h-[5.85rem]"
-        : "min-h-[5.75rem] min-[420px]:min-h-[6.25rem]";
-
-    return (
-        <div className={`flex min-w-0 flex-col justify-between rounded-3xl border px-4 py-3.5 shadow-sm min-[420px]:px-4 min-[420px]:py-4 ${heightClasses} ${toneClasses}`}>
-            <div className={`uppercase text-slate-500 ${labelClasses}`}>
-                {label}
-            </div>
-            <div className={`mt-2 w-full min-w-0 whitespace-nowrap font-semibold leading-tight tracking-tight tabular-nums ${valueClasses}`}>
-                {value}
-            </div>
-        </div>
-    );
+    tone?: "default" | "muted";
+}) {
+    return (<div className="min-w-0">
+        <dt className="text-xs text-muted-foreground">{label}</dt>
+        <dd className={`mt-0.5 truncate text-base font-semibold tabular-nums ${tone === "muted" ? "text-amber-600 dark:text-amber-400" : "text-foreground"}`}>
+            {value}
+        </dd>
+    </div>);
 }
 
 type MetricCellProps = {
@@ -127,11 +100,11 @@ type MetricCellProps = {
 
 function MetricCell({ label, value, subtle = false }: MetricCellProps) {
     return (
-        <div className="rounded-2xl border border-slate-200 bg-slate-50/90 px-3 py-3">
-            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+        <div className="rounded-2xl bg-muted px-3 py-3">
+            <div className="text-xs text-muted-foreground">
                 {label}
             </div>
-            <div className={`mt-2 text-sm font-semibold tabular-nums ${subtle ? "text-slate-600" : "text-slate-900"}`}>
+            <div className={`mt-1 text-base font-semibold tabular-nums ${subtle ? "text-muted-foreground" : "text-foreground"}`}>
                 {value}
             </div>
         </div>
@@ -643,16 +616,16 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
         return (<>
         <StackInHeader />
         <div className="mx-auto max-w-3xl space-y-4 p-4">
-          <div className="rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="rounded-[22px] bg-card border border-card-border p-6">
             <div className="space-y-2">
-              <h1 className="text-2xl font-bold text-slate-900">Pay period not found</h1>
-              <p className="text-sm text-slate-600">
+              <h1 className="text-xl font-semibold text-foreground">Pay period not found</h1>
+              <p className="text-sm text-muted-foreground">
                 We couldn&apos;t find an earnings detail view for this pay period.
               </p>
             </div>
 
             <Button className="mt-5" variant="outline" onClick={handleBackToList}>
-              Back to Earnings
+              Back to earnings
             </Button>
           </div>
         </div>
@@ -701,18 +674,6 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
             || selected.taxProfile?.residenceState === "Maryland")
             && !(selected.taxProfile?.residenceCounty ?? "").trim();
         const computedNet = Number(selected.grossIncome) - Number(totalDeductions) || Number(selected.netIncome);
-        const summaryCardValues = [
-            Number(selected.grossIncome),
-            ...(taxEnabled ? [totalDeductions, Number(computedNet)] : []),
-            ...(selected.totalUnreported !== undefined && selected.totalUnreported > 0
-                ? [Number(selected.totalUnreported)]
-                : []),
-        ];
-        const largestSummaryWholeDigits = summaryCardValues.reduce((max, value) => {
-            const wholeDigits = Math.trunc(Math.abs(value)).toString().length;
-            return Math.max(max, wholeDigits);
-        }, 0);
-        const summaryCardScale = largestSummaryWholeDigits >= 6 ? "compact" : "default";
         const activitySummary = [
             { label: "Entries", value: String(rows.length) },
             { label: "Reported earnings", value: formatCurrency(totals.gross) },
@@ -731,86 +692,55 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
         };
         return (<>
         <StackInHeader />
-        <div className="mx-auto w-full max-w-6xl px-3 py-4 text-slate-900 md:px-5 xl:max-w-7xl">
-          <div id="earnings-content" className="space-y-5 rounded-[2rem] border border-slate-200/80 bg-white/95 p-4 shadow-sm backdrop-blur md:p-6">
-            <div className="flex items-start justify-between gap-3 no-print">
-              <Button variant="outline" size="sm" onClick={handleBackToList} className="shrink-0 rounded-full border-slate-200 bg-white text-slate-900 hover:bg-slate-100 hover:text-slate-900">
-                ← Back
+        <div className="mx-auto w-full max-w-3xl px-4 pb-10 pt-4 text-foreground">
+          <div id="earnings-content" className="space-y-5">
+            <div className="flex items-center justify-between gap-3 no-print">
+              <Button variant="ghost" size="sm" onClick={handleBackToList} className="-ml-2 rounded-full text-muted-foreground hover:text-foreground">
+                ← All pay periods
               </Button>
               <SimpleMenu onPrint={handlePrint} onDownload={handleDownloadPDF} onShare={handleShare}/>
             </div>
 
-            <div className="rounded-[1.75rem] border border-slate-200 bg-[linear-gradient(135deg,rgba(43,174,138,0.12),rgba(255,255,255,0.98)_42%,rgba(15,23,42,0.04))] p-5">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="space-y-2">
-                  <Badge variant="secondary" className="rounded-full border border-emerald-200 bg-white/80 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-emerald-800">
-                    Pay Period
-                  </Badge>
-                  <h1 className="text-2xl font-bold md:text-3xl">
-                    Estimated Earnings
-                  </h1>
-                  <p className="text-sm text-slate-600">
-                    {formatHeaderDateRange(selected.periodStart, selected.periodEnd)}
-                  </p>
-                </div>
+            <section className="rounded-[22px] bg-card border border-card-border p-5">
+              <h1 className="text-sm text-muted-foreground">
+                Pay period · {formatHeaderDateRange(selected.periodStart, selected.periodEnd)}
+              </h1>
+              <p className="mt-3 text-sm text-muted-foreground">
+                {taxEnabled ? "Estimated take-home" : "Reported earnings"}
+              </p>
+              <div className="text-4xl font-semibold tracking-tight tabular-nums text-foreground sm:text-5xl">
+                {formatCurrency(taxEnabled ? Number(computedNet) : Number(selected.grossIncome))}
               </div>
 
-              <div className={`mt-5 grid gap-3 ${taxEnabled ? "min-[520px]:grid-cols-2" : "min-[520px]:grid-cols-2 xl:grid-cols-3"}`}>
-                <SummaryStatCard
-                  label="Reported Earnings"
-                  value={formatCurrency(Number(selected.grossIncome))}
-                  scale={summaryCardScale}
-                />
-                {taxEnabled ? (
-                  <SummaryStatCard
-                    label="Estimated Deductions"
-                    value={formatCurrency(totalDeductions)}
-                    scale={summaryCardScale}
-                  />
-                ) : null}
-                {taxEnabled ? (
-                  <SummaryStatCard
-                    label="Estimated Take-Home"
-                    value={formatCurrency(Number(computedNet))}
-                    tone="accent"
-                    scale={summaryCardScale}
-                  />
-                ) : null}
-                {selected.totalUnreported !== undefined && selected.totalUnreported > 0 ? (
-                  <SummaryStatCard
-                    label="Personal Cash"
-                    value={formatCurrency(Number(selected.totalUnreported))}
-                    tone="muted"
-                    scale={summaryCardScale}
-                  />
-                ) : null}
-              </div>
+              {taxEnabled || (selected.totalUnreported !== undefined && selected.totalUnreported > 0) ? (<dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border/70 pt-4 sm:grid-cols-3">
+                  {taxEnabled ? (<SummaryStat label="Reported earnings" value={formatCurrency(Number(selected.grossIncome))}/>) : null}
+                  {taxEnabled ? (<SummaryStat label="Estimated deductions" value={formatCurrency(totalDeductions)}/>) : null}
+                  {selected.totalUnreported !== undefined && selected.totalUnreported > 0 ? (<SummaryStat label="Personal cash" value={formatCurrency(Number(selected.totalUnreported))} tone="muted"/>) : null}
+                </dl>) : null}
 
-              <div className="mt-4 text-xs text-slate-500">
+              <div className="mt-4 text-xs text-muted-foreground">
                 <p>Calculated from current pay period entries.</p>
                 {needsMarylandCounty ? (
-                  <p className="mt-1 text-amber-700">
+                  <p className="mt-1 text-amber-600 dark:text-amber-400">
                     Add a Maryland residence county in tax settings to make this withholding estimate more accurate.
                   </p>
                 ) : null}
               </div>
-            </div>
+            </section>
 
             <EarningsPositionBreakdown lines={positionLines}/>
 
-            <section className="rounded-[1.75rem] border border-slate-200 bg-slate-50/70 p-4 md:p-5">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-semibold text-slate-900">
-                    Pay Period Activity
-                  </h2>
-                </div>
-                <Badge variant="outline" className="rounded-full border-slate-300 bg-white px-3 py-1 text-slate-700">
+            <section className="rounded-[22px] bg-card border border-card-border px-4 pb-2 pt-4">
+              <div className="flex items-baseline justify-between gap-3 px-1">
+                <h2 className="text-lg font-semibold text-foreground">
+                  Pay period activity
+                </h2>
+                <span className="text-sm text-muted-foreground">
                   {rows.length} {rows.length === 1 ? "entry" : "entries"}
-                </Badge>
+                </span>
               </div>
 
-              <div className="mt-4 space-y-3">
+              <ul className="mt-1 divide-y divide-border/70">
                 {rows.map((row: Record<string, any>, idx: number) => {
                     const tips = getRowTips(row);
                     const paidHours = getRowPaidHours(row);
@@ -823,49 +753,38 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
                     const isExpanded = expandedActivityKey === rowKey;
                     const detailRows = [
                         ...(tips > 0 ? [{ label: "Tips", value: formatCurrency(tips) }] : []),
-                        ...(paidHours > 0 ? [{ label: "Paid Hours", value: paidHours.toFixed(2) }] : []),
+                        ...(paidHours > 0 ? [{ label: "Paid hours", value: paidHours.toFixed(2) }] : []),
                         ...(showPositions && rate != null ? [{ label: "Position", value: getEntryPositionTitle(row.w2, settings) }] : []),
-                        ...(rate != null ? [{ label: "Hourly Rate", value: formatCurrency(rate) }] : []),
-                        ...(reportedCash > 0 ? [{ label: "Reported Cash", value: formatCurrency(reportedCash) }] : []),
-                        ...(unreportedCash > 0 ? [{ label: "Personal Cash", value: formatCurrency(unreportedCash), subtle: true }] : []),
+                        ...(rate != null ? [{ label: "Hourly rate", value: formatCurrency(rate) }] : []),
+                        ...(reportedCash > 0 ? [{ label: "Reported cash", value: formatCurrency(reportedCash) }] : []),
+                        ...(unreportedCash > 0 ? [{ label: "Personal cash", value: formatCurrency(unreportedCash), subtle: true }] : []),
                     ];
 
                     return (
-                        <motion.article
-                          key={rowKey}
-                          layout
-                          className="overflow-hidden rounded-[1.35rem] border border-slate-200 bg-white shadow-sm"
-                        >
+                        <motion.li key={rowKey} layout>
                           <button
                             type="button"
                             onClick={() => setExpandedActivityKey((current) => current === rowKey ? null : rowKey)}
-                            className="grid w-full grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 px-3.5 py-3 text-left min-[420px]:px-4 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center"
+                            className="flex w-full items-center gap-3 px-1 py-3 text-left"
                             aria-expanded={isExpanded}
                           >
-                            <div className="min-w-0">
-                              <p className="text-base font-semibold leading-tight text-slate-900 sm:text-[1.05rem]">
-                                {entryDateLabel}
-                              </p>
-                            </div>
-
+                            <span className="min-w-0 flex-1">
+                              <span className="block font-medium text-foreground">{entryDateLabel}</span>
+                              {paidHours > 0 ? (<span className="block text-sm text-muted-foreground">{paidHours.toFixed(2)} hrs</span>) : null}
+                            </span>
+                            <span className="shrink-0 text-right">
+                              <span className="block font-semibold tabular-nums text-foreground">{formatGridCurrency(gross)}</span>
+                              {unreportedCash > 0 ? (<span className="block text-xs tabular-nums text-amber-600 dark:text-amber-400">
+                                  + {formatCurrency(unreportedCash)} personal
+                                </span>) : null}
+                            </span>
                             <motion.span
                               animate={{ rotate: isExpanded ? 180 : 0 }}
                               transition={{ duration: 0.2, ease: "easeOut" }}
-                              className="row-span-2 flex h-9 w-9 items-center justify-center self-center rounded-full border border-slate-200 bg-slate-50 text-slate-600 sm:row-span-1"
+                              className="flex shrink-0 items-center text-muted-foreground"
                             >
                               <ChevronDown className="h-4 w-4" />
                             </motion.span>
-
-                            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-                              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-semibold tabular-nums text-emerald-800">
-                                Reported {formatGridCurrency(gross)}
-                              </span>
-                              {unreportedCash > 0 ? (
-                                <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-semibold tabular-nums text-amber-800">
-                                  Personal {formatCurrency(unreportedCash)}
-                                </span>
-                              ) : null}
-                            </div>
                           </button>
 
                           <AnimatePresence initial={false}>
@@ -875,119 +794,101 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
                                 animate={{ height: "auto", opacity: 1 }}
                                 exit={{ height: 0, opacity: 0 }}
                                 transition={{ duration: 0.22, ease: "easeOut" }}
-                                className="overflow-hidden border-t border-slate-100"
+                                className="overflow-hidden"
                               >
-                                <div className="space-y-2 px-4 py-3">
-                                  {detailRows.length > 0 ? (
-                                    detailRows.map((metric) => (
-                                      <div
-                                        key={`${metric.label}-${idx}`}
-                                        className={`flex items-center justify-between gap-3 rounded-2xl border px-3 py-3 ${
-                                          metric.subtle === true
-                                            ? "border-amber-200/70 bg-amber-50/70"
-                                            : "border-slate-200 bg-slate-50/90"
-                                        }`}
-                                      >
-                                        <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                                          {metric.label}
-                                        </div>
-                                        <div className={`text-sm font-semibold tabular-nums ${metric.subtle === true ? "text-amber-900" : "text-slate-900"}`}>
+                                {detailRows.length > 0 ? (
+                                  <dl className="mb-3 divide-y divide-border/70 rounded-xl bg-muted px-3">
+                                    {detailRows.map((metric) => (
+                                      <div key={`${metric.label}-${idx}`} className="flex items-center justify-between gap-3 py-2.5 text-sm">
+                                        <dt className="text-muted-foreground">{metric.label}</dt>
+                                        <dd className={`font-semibold tabular-nums ${metric.subtle === true ? "text-amber-600 dark:text-amber-400" : "text-foreground"}`}>
                                           {metric.value}
-                                        </div>
+                                        </dd>
                                       </div>
-                                    ))
-                                  ) : (
-                                    <p className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-500">
-                                      No additional pay details were recorded for this entry.
-                                    </p>
-                                  )}
-                                </div>
+                                    ))}
+                                  </dl>
+                                ) : (
+                                  <p className="mb-3 rounded-xl bg-muted px-3 py-3 text-sm text-muted-foreground">
+                                    No additional pay details were recorded for this entry.
+                                  </p>
+                                )}
                               </motion.div>
                             ) : null}
                           </AnimatePresence>
-                        </motion.article>
+                        </motion.li>
                     );
                 })}
-              </div>
+              </ul>
 
-              <div className={`mt-4 grid gap-2 rounded-[1.5rem] border border-slate-200 bg-white p-4 ${activitySummary.length >= 5 ? "md:grid-cols-3 xl:grid-cols-6" : "sm:grid-cols-2 xl:grid-cols-4"}`}>
+              <dl className="grid grid-cols-2 gap-2 border-t border-border/70 py-4 sm:grid-cols-3">
                 {activitySummary.map((item) => (
-                  <div key={item.label} className="rounded-2xl bg-slate-50 px-3 py-3">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                  <div key={item.label} className="rounded-2xl bg-muted px-3 py-3">
+                    <dt className="text-xs text-muted-foreground">
                       {item.label}
-                    </div>
-                    <div className="mt-2 text-sm font-semibold tabular-nums text-slate-900">
+                    </dt>
+                    <dd className="mt-1 text-sm font-semibold tabular-nums text-foreground">
                       {item.value}
-                    </div>
+                    </dd>
                   </div>
                 ))}
-              </div>
+              </dl>
             </section>
 
             {taxEnabled ? (
-              <section className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(18rem,0.85fr)]">
-                <div className="overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-sm deduction-box">
-                  <div className="border-b border-slate-200 bg-slate-50 px-4 py-4">
-                    <h2 className="text-lg font-semibold text-slate-900">
-                      Estimated Taxes and Deductions
-                    </h2>
-                  </div>
+              <section className="space-y-5">
+                <div className="rounded-[22px] bg-card border border-card-border px-4 py-4 deduction-box">
+                  <h2 className="px-1 text-lg font-semibold text-foreground">
+                    Estimated taxes and deductions
+                  </h2>
 
-                  <div className="divide-y divide-slate-200">
+                  <div className="mt-1 divide-y divide-border/70">
                     {deductionRows.map((item) => (
-                      <div key={item.label} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
-                        <span className="text-slate-600">{item.label}</span>
-                        <span className="font-semibold tabular-nums text-slate-900">
+                      <div key={item.label} className="flex items-center justify-between gap-3 px-1 py-3 text-sm">
+                        <span className="text-muted-foreground">{item.label}</span>
+                        <span className="font-semibold tabular-nums text-foreground">
                           {formatSummaryCurrency(item.amount)}
                         </span>
                       </div>
                     ))}
                     {dedFica > 0 ? (
-                      <div className="bg-slate-50 px-4 py-3 text-xs text-slate-600">
+                      <div className="px-1 py-2.5 text-xs text-muted-foreground">
                         Includes Medicare {formatSummaryCurrency(dedMedicare)} and Social Security {formatSummaryCurrency(dedSocialSecurity)}.
                       </div>
                     ) : null}
-                    <div className="flex items-center justify-between gap-3 bg-slate-50 px-4 py-3 font-semibold">
-                      <span>Total Deductions</span>
+                    <div className="flex items-center justify-between gap-3 px-1 pt-3 font-semibold">
+                      <span>Total deductions</span>
                       <span className="tabular-nums">{formatCurrency(totalDeductions)}</span>
                     </div>
                   </div>
                 </div>
 
-                <div className="overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-sm">
-                  <div className="border-b border-slate-200 bg-slate-50 px-4 py-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <h2 className="text-lg font-semibold text-slate-900">
-                          Year-to-Date
-                        </h2>
-                      </div>
-                      <button type="button" onClick={() => setShowYTD((prev) => !prev)} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-900">
-                        <motion.span
-                          animate={{ rotate: showYTD ? 180 : 0 }}
-                          transition={{ duration: 0.2, ease: "easeOut" }}
-                          className="flex items-center"
-                        >
-                          <ChevronDown size={16}/>
-                        </motion.span>
-                        {showYTD ? "Hide" : "Expand"}
-                      </button>
-                    </div>
+                <div className="rounded-[22px] bg-card border border-card-border p-4">
+                  <div className="flex items-center justify-between gap-3 px-1">
+                    <h2 className="text-lg font-semibold text-foreground">
+                      Year to date
+                    </h2>
+                    <button type="button" onClick={() => setShowYTD((prev) => !prev)} className="inline-flex items-center gap-1 text-sm font-medium text-primary" aria-expanded={showYTD}>
+                      {showYTD ? "Show less" : "Show more"}
+                      <motion.span
+                        animate={{ rotate: showYTD ? 180 : 0 }}
+                        transition={{ duration: 0.2, ease: "easeOut" }}
+                        className="flex items-center"
+                      >
+                        <ChevronDown size={16}/>
+                      </motion.span>
+                    </button>
                   </div>
 
-                  <div className="grid gap-2 px-4 py-4 sm:grid-cols-2">
-                    <MetricCell label="YTD Gross" value={formatCurrency(ytd.grossIncome)} />
-                    <MetricCell label="YTD Net" value={formatCurrency(ytd.netIncome)} />
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <MetricCell label="Gross" value={formatCurrency(ytd.grossIncome)} />
+                    <MetricCell label="Net" value={formatCurrency(ytd.netIncome)} />
+                    {showYTD ? (<>
+                        <MetricCell label="Deductions" value={formatCurrency(ytd.totalDeductions)} />
+                        <MetricCell label="Tips" value={formatCurrency(ytd.tips)} />
+                        <MetricCell label="Reported cash" value={formatCurrency(ytd.reportedCash)} />
+                        <MetricCell label="Personal cash" value={formatCurrency(ytd.unreportedCash)} subtle />
+                      </>) : null}
                   </div>
-
-                  {showYTD ? (
-                    <div className="grid gap-2 border-t border-slate-200 px-4 py-4 sm:grid-cols-2">
-                      <MetricCell label="YTD Deductions" value={formatCurrency(ytd.totalDeductions)} />
-                      <MetricCell label="YTD Tips" value={formatCurrency(ytd.tips)} />
-                      <MetricCell label="YTD Reported Cash" value={formatCurrency(ytd.reportedCash)} />
-                      <MetricCell label="YTD Personal Cash" value={formatCurrency(ytd.unreportedCash)} subtle />
-                    </div>
-                  ) : null}
                 </div>
               </section>
             ) : null}
@@ -997,7 +898,7 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
     }
     return (<>
     <StackInHeader />
-    <div className="mx-auto max-w-6xl space-y-4 p-4 xl:max-w-7xl">
+    <div className="mx-auto w-full max-w-3xl space-y-5 px-4 pb-10 pt-4">
       <YearlyEarningsGaugeCard year={yearlyGaugeSummary.year} payPeriods={yearlyGaugeSummary.payPeriods} totalGross={yearlyGaugeSummary.totalGross} breakdown={yearlyGaugeSummary.breakdown} cashBreakdown={yearlyGaugeSummary.cashBreakdown} avgPerHour={yearlyGaugeSummary.avgPerHour}/>
 
       <HoursWorkedCard variant="trend" monthlyBuckets={monthlyHoursBuckets} />
@@ -1010,51 +911,35 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
         onClearGoal={() => persistHoursGoal(null)}
       />
 
-      <div>
-        <div>
-          <h1 className="mb-1 text-2xl font-bold">Earnings by Pay Period</h1>
-          <p className="text-sm text-muted-foreground">
-            Review your saved earnings estimates for each pay period.
-          </p>
-        </div>
-      </div>
-
-      {stubs.length === 0 ? (<p>No earnings estimates available yet.</p>) : (stubs.map((stub) => (<Card key={stub.periodId} className="transition shadow-sm hover:shadow-md">
-            <CardHeader>
-              <CardTitle>
-                {formatHeaderDateRange(stub.periodStart, stub.periodEnd)}
-              </CardTitle>
-            </CardHeader>
-
-            <CardContent className="space-y-4">
-              <div className={`grid gap-2 text-sm ${stub.totalUnreported !== undefined && stub.totalUnreported > 0 ? "grid-cols-1 min-[520px]:grid-cols-2 xl:grid-cols-3" : taxEnabled ? "grid-cols-1 min-[520px]:grid-cols-2" : "grid-cols-1"}`}>
-                <div className="rounded-lg border border-border/70 bg-secondary/40 px-3 py-3 min-[420px]:py-3.5">
-                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Gross</div>
-                  <div className="mt-1 text-lg font-semibold tabular-nums text-foreground">
-                    {formatCurrency(Number(stub.grossIncome))}
-                  </div>
-                </div>
-
-                {taxEnabled && (<div className="rounded-lg border border-border/70 bg-secondary/40 px-3 py-3 min-[420px]:py-3.5">
-                    <div className="text-xs uppercase tracking-wide text-muted-foreground">Net</div>
-                    <div className="mt-1 text-lg font-semibold tabular-nums text-foreground">
-                      {formatCurrency(Number(stub.netIncome))}
-                    </div>
-                  </div>)}
-
-                {stub.totalUnreported !== undefined && stub.totalUnreported > 0 && (<div className="rounded-lg border border-border/70 bg-secondary/40 px-3 py-3 min-[420px]:py-3.5">
-                    <div className="text-xs uppercase tracking-wide text-muted-foreground">Personal Cash</div>
-                    <div className="mt-1 text-lg font-semibold tabular-nums text-foreground">
-                      {formatCurrency(Number(stub.totalUnreported))}
-                    </div>
-                  </div>)}
-              </div>
-
-              <Button className="mt-3" onClick={() => router.push(`/app/earnings?periodId=${encodeURIComponent(stub.periodId)}`)}>
-                View Earnings
-              </Button>
-            </CardContent>
-          </Card>)))}
+      <section aria-labelledby="pay-periods-heading">
+        <h1 id="pay-periods-heading" className="mb-2 px-1 text-lg font-semibold text-foreground">Pay periods</h1>
+        {stubs.length === 0 ? (<p className="rounded-[22px] bg-card border border-card-border px-4 py-6 text-center text-sm text-muted-foreground">
+            No earnings estimates available yet.
+          </p>) : (<ul className="divide-y divide-border/70 rounded-[22px] bg-card border border-card-border px-4">
+            {stubs.map((stub) => {
+                const hasPersonalCash = stub.totalUnreported !== undefined && stub.totalUnreported > 0;
+                const details = [
+                    ...(taxEnabled ? [`Take-home ${formatCurrency(Number(stub.netIncome))}`] : []),
+                    ...(hasPersonalCash ? [`Personal cash ${formatCurrency(Number(stub.totalUnreported))}`] : []),
+                ];
+                return (<li key={stub.periodId}>
+                  <button type="button" onClick={() => router.push(`/app/earnings?periodId=${encodeURIComponent(stub.periodId)}`)} className="flex w-full items-center gap-3 py-3.5 text-left">
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-medium text-foreground">
+                        {formatHeaderDateRange(stub.periodStart, stub.periodEnd)}
+                      </span>
+                      {details.length > 0 ? (<span className="block truncate text-sm tabular-nums text-muted-foreground">{details.join(" · ")}</span>) : null}
+                    </span>
+                    <span className="shrink-0 text-right">
+                      <span className="block text-xs text-muted-foreground">Gross</span>
+                      <span className="block font-semibold tabular-nums text-foreground">{formatCurrency(Number(stub.grossIncome))}</span>
+                    </span>
+                    <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true"/>
+                  </button>
+                </li>);
+            })}
+          </ul>)}
+      </section>
     </div>
   </>);
 }

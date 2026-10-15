@@ -33,6 +33,7 @@ import { RECEIPT_REQUIRED_THRESHOLD } from "@shared/receiptRequirements"
 import { normalizePlaidMerchantKey, resolvePlaidDisplayName } from "@shared/plaidClassification"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import { useSettingsStore } from "@/lib/stores/useSettingsStore"
+import { useExpensesStore } from "@/lib/stores/useExpensesStore"
 import {
   confirmPlaidPendingTransaction,
   getPlaidPendingTransactions,
@@ -45,6 +46,8 @@ import {
 import { createRecurringRule } from "@/lib/domain/recurringRulesService"
 import { cadenceLabel } from "@shared/recurringSchedule"
 import { useToast } from "@/hooks/use-toast"
+import { useReviewRequestNonce } from "@/lib/push/deepLinkStore"
+import { useReviewCountsStore } from "@/lib/stores/useReviewCountsStore"
 
 // Remembers, per workspace on this device, whether the last load found
 // anything to review. The loading skeleton only shows for a workspace that
@@ -73,14 +76,10 @@ function writeHadPending(workspaceId: string, hadPending: boolean) {
 // Above this count the review list defaults to collapsed (once, on first
 // load) so a bulk import doesn't bury the manual add-expense form below it —
 // unless the user arrived via a "new transactions to review" push
-// notification tap (registerPush.ts's deep link), in which case staying
-// collapsed would defeat the point of tapping the notification at all.
+// notification tap (deepLinkStore.ts), in which case staying collapsed
+// would defeat the point of tapping the notification at all.
 const AUTO_COLLAPSE_THRESHOLD = 5
 
-function arrivedViaReviewDeepLink(): boolean {
-  if (typeof window === "undefined") return false
-  return new URLSearchParams(window.location.search).get("openReview") === "1"
-}
 
 // Bulk confirm/dismiss reuses the single-transaction endpoint per item
 // (inherits dedup/category-normalization/merchant-memory for free) rather
@@ -128,26 +127,41 @@ function TransactionReviewCard({
   receiptCapture: ReturnType<typeof useReceiptCapture>
 }) {
   const displayName = resolvePlaidDisplayName(transaction.merchantName, transaction.rawName)
+  const isRefund = transaction.isRefund === true
 
   return (
-    <div className="space-y-3 rounded-xl border border-muted bg-card p-4">
+    <div className="space-y-3 rounded-[18px] bg-card border border-card-border p-4">
       <div className="flex items-start justify-between gap-3">
-        <div className="flex items-start gap-2">
+        {/* min-w-0 + break-words: a long unbroken bank descriptor must wrap
+            instead of pushing the amount off-screen and making the page
+            scroll sideways. */}
+        <div className="flex min-w-0 items-start gap-2">
           <Checkbox
             className="mt-1"
             checked={isSelected}
             onCheckedChange={onToggleSelected}
             aria-label={`Select ${displayName}`}
           />
-          <div>
-            <div className="font-medium">{displayName}</div>
+          <div className="min-w-0">
+            <div className="font-medium break-words">{displayName}</div>
             <div className="text-sm text-muted-foreground">{transaction.date}</div>
+            {isRefund ? (
+              <div className="text-xs text-muted-foreground">
+                {transaction.refundOf
+                  ? `Refund of your ${transaction.refundOf.date} purchase (${formatCurrency(transaction.refundOf.amount)}) — reduces that expense category`
+                  : "Refund — reduces your expenses in this category"}
+              </div>
+            ) : null}
           </div>
         </div>
-        <div className="text-right">
-          <div className="font-semibold">{formatCurrency(transaction.amount)}</div>
+        {/* Capped at half the row, with the category badge allowed to wrap —
+            a long custom category would otherwise squeeze the name instead. */}
+        <div className="max-w-[50%] shrink-0 text-right">
+          <div className={`font-semibold tabular-nums ${isRefund ? "text-emerald-600 dark:text-emerald-400" : ""}`}>
+            {isRefund ? `Refund ${formatCurrency(transaction.amount)}` : formatCurrency(transaction.amount)}
+          </div>
           {transaction.suggestedExpenseAccount ? (
-            <Badge variant="secondary" className="mt-1">
+            <Badge variant="secondary" className="mt-1 h-auto whitespace-normal break-words text-right">
               {transaction.suggestedExpenseAccount}
             </Badge>
           ) : null}
@@ -156,7 +170,7 @@ function TransactionReviewCard({
 
       <div>
         <Select value={categoryValue} onValueChange={onCategoryChange}>
-          <SelectTrigger>
+          <SelectTrigger className="w-full rounded-xl border-0 bg-muted shadow-none">
             <SelectValue placeholder="Choose expense category" />
           </SelectTrigger>
           <SelectContent>
@@ -175,34 +189,25 @@ function TransactionReviewCard({
         </div>
       ) : null}
 
-      <div className="flex justify-end gap-1">
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          aria-label="Confirm as business"
-          onClick={onConfirm}
-        >
-          <Check className="h-4 w-4" />
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" size="sm" className="rounded-full px-4 font-semibold" onClick={onConfirm}>
+          <Check className="h-4 w-4" /> {isRefund ? "Apply refund" : "Business"}
         </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          aria-label={isReceiptRowOpen ? "Remove receipt" : "Attach receipt"}
-          onClick={onToggleReceiptRow}
-        >
-          <Paperclip className="h-4 w-4" />
+        <Button type="button" variant="ghost" size="sm" className="rounded-full px-4" onClick={onDismiss}>
+          {isRefund ? "Not a refund" : "Personal"}
         </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          aria-label="Not business"
-          onClick={onDismiss}
-        >
-          <X className="h-4 w-4" />
-        </Button>
+        {isRefund ? null : (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="ml-auto rounded-full text-muted-foreground"
+            aria-label={isReceiptRowOpen ? "Remove receipt" : "Attach receipt"}
+            onClick={onToggleReceiptRow}
+          >
+            <Paperclip className="h-4 w-4" />
+          </Button>
+        )}
       </div>
     </div>
   )
@@ -250,7 +255,13 @@ export default function PlaidPendingTransactionsPanel() {
   const [isSettingUpRecurring, setIsSettingUpRecurring] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
   const [receiptRowId, setReceiptRowId] = useState<string | null>(null)
-  const didAutoCollapseRef = useRef(arrivedViaReviewDeepLink())
+  // Set by a notification tap (see the review-request effect below) so the
+  // list it brought the user to never auto-collapses.
+  const didAutoCollapseRef = useRef(false)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const scrollAfterLoadRef = useRef(false)
+  const handledReviewNonceRef = useRef<number | null>(null)
+  const reviewRequestNonce = useReviewRequestNonce("expenses", activeWorkspaceId)
   // Bumped on every loadTransactions call so a slow, superseded request
   // (e.g. one fired for a workspace ID that turned out to be a stale cache
   // value from useWorkspaceStore's hydrate-then-reconcile flow) can't
@@ -274,7 +285,12 @@ export default function PlaidPendingTransactionsPanel() {
     setExpectsPending(readHadPending(activeWorkspaceId))
     setIsLoading(true)
     try {
-      const results = await getPlaidPendingTransactions(activeWorkspaceId)
+      // Deposits are reviewed on the Income tab — see
+      // plaid-income-review-panel.tsx — except refunds, which reduce an
+      // expense and so belong here.
+      const results = (await getPlaidPendingTransactions(activeWorkspaceId)).filter(
+        (transaction) => transaction.direction !== "income" || transaction.isRefund
+      )
       if (activeRequestIdRef.current !== requestId) return
       loadedWorkspaceIdRef.current = activeWorkspaceId
       setTransactions(results)
@@ -367,17 +383,48 @@ export default function PlaidPendingTransactionsPanel() {
     void loadTransactions()
   }, [loadTransactions])
 
+  // A notification tap for this list (deepLinkStore.ts): re-fetch — the app
+  // may have been open since before the new transactions arrived — expand,
+  // and scroll to it once loaded. Declared after the mount load so, on a
+  // cold start, this request supersedes that one (activeRequestIdRef).
+  useEffect(() => {
+    if (reviewRequestNonce == null || handledReviewNonceRef.current === reviewRequestNonce) return
+    handledReviewNonceRef.current = reviewRequestNonce
+    didAutoCollapseRef.current = true
+    scrollAfterLoadRef.current = true
+    setCollapsed(false)
+    void loadTransactions()
+  }, [reviewRequestNonce, loadTransactions])
+
+  useEffect(() => {
+    if (!scrollAfterLoadRef.current || isLoading) return
+    scrollAfterLoadRef.current = false
+    if (transactions.length > 0) {
+      containerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+    }
+  }, [isLoading, transactions.length])
+
   // Keep the had-pending flag current as rows are confirmed/dismissed, so
   // clearing the last one also stops the skeleton on the next visit.
   useEffect(() => {
     if (activeWorkspaceId && loadedWorkspaceIdRef.current === activeWorkspaceId) {
       writeHadPending(activeWorkspaceId, transactions.length > 0)
+      // Badges the home page's Expenses tab (useReviewCountsStore).
+      useReviewCountsStore.getState().setCount(activeWorkspaceId, "expenses", transactions.length)
     }
   }, [activeWorkspaceId, transactions])
 
   function closeReceiptRow() {
     setReceiptRowId(null)
     receiptCapture.clearAttachedReceipt()
+  }
+
+  // The expense is created server-side, so the local expenses store doesn't
+  // know about it — re-fetch whichever period the Expenses tab is showing.
+  function refreshVisibleExpenses(workspaceId: string) {
+    const store = useExpensesStore.getState()
+    const periodId = store.byWorkspaceId[workspaceId]?.periodId
+    if (periodId) void store.refreshFromBackend(workspaceId, periodId, { force: true }).catch(() => {})
   }
 
   async function handleSetUpRecurring(suggestion: PlaidRecurringSuggestion) {
@@ -409,6 +456,11 @@ export default function PlaidPendingTransactionsPanel() {
   }
 
   function handleConfirmClick(transaction: PlaidPendingTransaction) {
+    // Refunds skip the fuel and receipt checks — both are about money spent.
+    if (transaction.isRefund) {
+      void handleDecision(transaction, true)
+      return
+    }
     const account = selectedAccount[transaction.id] ?? transaction.suggestedExpenseAccount ?? undefined
     if (
       transaction.isLikelyFuelPurchase &&
@@ -461,6 +513,7 @@ export default function PlaidPendingTransactionsPanel() {
         alwaysPersonal: false,
         receiptAssetId,
       })
+      if (isBusiness) refreshVisibleExpenses(activeWorkspaceId)
       if (result.recurringSuggestion) setRecurringPrompt(result.recurringSuggestion)
       if (result.personalSuggestion) setPersonalPrompt(result.personalSuggestion)
     } catch {
@@ -510,6 +563,7 @@ export default function PlaidPendingTransactionsPanel() {
     })
 
     setIsBulkWorking(false)
+    if (isBusiness && failed.length < targets.length) refreshVisibleExpenses(activeWorkspaceId)
     if (failed.length > 0) {
       const failedIds = new Set(failed.map((t) => t.id))
       setTransactions((prev) => [...prev, ...failed.filter((t) => !prev.some((p) => p.id === t.id))])
@@ -532,22 +586,21 @@ export default function PlaidPendingTransactionsPanel() {
   if (transactions.length === 0 && !(isLoading && expectsPending)) return null
 
   return (
-    <div className="space-y-3">
+    <div ref={containerRef} className="space-y-3 scroll-mt-4">
       <button
         type="button"
         onClick={() => setCollapsed((current) => !current)}
-        className="flex w-full items-center justify-between rounded-lg border border-muted bg-card px-3 py-2 text-sm font-medium"
+        className="flex w-full items-center justify-between px-1 text-sm font-medium text-muted-foreground"
+        aria-expanded={!collapsed}
       >
-        <span>
-          Bank transactions to review{transactions.length ? ` (${transactions.length})` : ""}
-        </span>
+        <span>Charges{transactions.length ? ` · ${transactions.length}` : ""}</span>
         {collapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
       </button>
 
       {!collapsed && isLoading && transactions.length === 0 ? (
         <div className="space-y-3" aria-hidden="true">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="space-y-3 rounded-xl border border-muted bg-card p-4">
+            <div key={i} className="space-y-3 rounded-[18px] bg-card border border-card-border p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="space-y-2">
                   <Skeleton className="h-4 w-32" />
@@ -597,10 +650,10 @@ export default function PlaidPendingTransactionsPanel() {
       ) : null}
 
       {selectedIds.size > 0 ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-muted bg-muted/40 p-3">
+        <div className="flex flex-wrap items-center gap-2 rounded-[18px] bg-card border border-card-border p-3">
           <span className="text-sm font-medium">{selectedIds.size} selected</span>
           <Select value={bulkCategory} onValueChange={setBulkCategory}>
-            <SelectTrigger className="w-[200px]">
+            <SelectTrigger className="w-[200px] rounded-xl border-0 bg-muted shadow-none">
               <SelectValue placeholder="Choose expense category" />
             </SelectTrigger>
             <SelectContent>
@@ -663,8 +716,8 @@ export default function PlaidPendingTransactionsPanel() {
             <AlertDialogDescription>
               Future transactions from this merchant won&apos;t notify you or show up here
               anymore — they&apos;ll still be recorded quietly, in case a purchase from them is
-              ever actually a business expense. You can undo this later from Account Settings
-              &rarr; Learned Merchants.
+              ever actually a business expense. You can undo this later from Bank connections
+              &rarr; Learned merchants.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -695,7 +748,7 @@ export default function PlaidPendingTransactionsPanel() {
               Future transactions from the merchants in this batch won&apos;t notify you or show up
               here anymore if you choose &quot;Always&quot; — they&apos;ll still be recorded quietly,
               in case a purchase from one of them is ever actually a business expense. You can edit
-              or undo this later from Account Settings &rarr; Learned Merchants.
+              or undo this later from Bank connections &rarr; Learned merchants.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -759,13 +812,31 @@ export default function PlaidPendingTransactionsPanel() {
       <AlertDialog open={recurringPrompt != null} onOpenChange={(open) => !open && setRecurringPrompt(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>This looks recurring</AlertDialogTitle>
+            <AlertDialogTitle>Track {recurringPrompt?.vendor} automatically?</AlertDialogTitle>
             <AlertDialogDescription>
-              {recurringPrompt?.vendor} has come up {cadenceLabel(recurringPrompt?.cadence ?? { freq: "monthly" }).toLowerCase()} at
-              a similar amount. Set up a recurring rule and it&apos;ll be added to {recurringPrompt?.account} automatically from
-              now on — future bank transactions from this merchant won&apos;t need to be reviewed here anymore.
+              This charge has been added to your expenses. {recurringPrompt?.vendor} has come up{" "}
+              {cadenceLabel(recurringPrompt?.cadence ?? { freq: "monthly" }).toLowerCase()} at a similar amount, so you can
+              turn it into a recurring expense.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {recurringPrompt ? (
+            <ul className="list-disc space-y-1.5 pl-5 text-sm text-muted-foreground">
+              <li>
+                We&apos;ll add {formatCurrency(recurringPrompt.amount)} to {recurringPrompt.account}{" "}
+                {cadenceLabel(recurringPrompt.cadence).toLowerCase()} for you, starting{" "}
+                {new Date(`${recurringPrompt.anchorDate}T00:00:00`).toLocaleDateString(undefined, {
+                  month: "short",
+                  day: "numeric",
+                })}
+                .
+              </li>
+              <li>
+                Bank charges from {recurringPrompt.vendor} will stop showing up here for review, so they aren&apos;t
+                counted twice.
+              </li>
+              <li>If the amount changes, edit or delete the rule anytime under Recurring.</li>
+            </ul>
+          ) : null}
           <AlertDialogFooter>
             <AlertDialogCancel>Not now</AlertDialogCancel>
             <AlertDialogAction

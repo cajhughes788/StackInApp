@@ -2,7 +2,7 @@ import type { TaxProfileInput } from "./types"
 
 type TaxProfileInputOverrides = Pick<
   TaxProfileInput,
-  "grossIncome" | "payFrequency" | "customDeductions"
+  "grossIncome" | "payFrequency" | "customDeductions" | "payDate"
 >
 type TaxProfilePassthrough = Omit<TaxProfileInput, "grossIncome" | "payFrequency">
 type TaxProfileLike = Partial<TaxProfilePassthrough>
@@ -160,6 +160,7 @@ export function buildTaxProfileInput(
     payFrequency: overrides.payFrequency,
     filingStatus: profile.filingStatus ?? "single",
     customDeductions: overrides.customDeductions ?? 0,
+    ...(overrides.payDate ? { payDate: overrides.payDate } : {}),
   }
 
   for (const key of TAX_PROFILE_INPUT_KEYS) {

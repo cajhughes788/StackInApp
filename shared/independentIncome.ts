@@ -112,3 +112,29 @@ export function getIndependentCashSalesTotal(
     getIncomeBreakdownTotalForPaymentMethodAndCategory(independent, "cash", "other")
   )
 }
+
+// "Other" income that isn't custom income. The entry form and recurring rules
+// mirror every customIncome item into an "other" breakdown line (so totals
+// include it); whatever "other" money is left over came from somewhere else —
+// mainly bank deposits confirmed with "Paid via: Other". Clamped at 0.
+export function getCustomIncomeMirrors(
+  independent: EntryType["independent"] | undefined
+): IncomeBreakdownLike[] {
+  return (independent?.customIncome ?? [])
+    .filter((item) => Number(item.amount ?? 0) > 0)
+    .map((item) => ({ paymentMethod: "other" as PaymentMethod, [item.category ?? "other"]: Number(item.amount) }))
+}
+
+export function getNonCustomOtherIncome(
+  independent: EntryType["independent"] | undefined
+): CategorizedIncomeTotals {
+  const other = aggregateIncomeBreakdowns(
+    (independent?.incomeBreakdowns ?? []).filter((item) => item.paymentMethod === "other")
+  )
+  const mirrored = aggregateIncomeBreakdowns(getCustomIncomeMirrors(independent))
+  const services = Math.max(0, other.services - mirrored.services)
+  const tips = Math.max(0, other.tips - mirrored.tips)
+  const products = Math.max(0, other.products - mirrored.products)
+  const otherCategory = Math.max(0, other.other - mirrored.other)
+  return { services, tips, products, other: otherCategory, total: services + tips + products + otherCategory }
+}

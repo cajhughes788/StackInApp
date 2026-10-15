@@ -247,16 +247,24 @@ export const useExpensesStore = create<ExpensesStoreState>((set, get) => ({
 
     await get().hydrateFromCache(workspaceId, periodId);
 
-    set((state) => ({
-      byWorkspaceId: {
-        ...state.byWorkspaceId,
-        [workspaceId]: {
-          ...getWorkspaceEntry(state.byWorkspaceId, workspaceId),
-          hasHydrated: true,
-          periodId,
+    set((state) => {
+      // A load for another period started while this one was in flight (e.g.
+      // home mounting on one month, then switching to another) — leave the
+      // newer one's period in place instead of overwriting it with ours.
+      if (getWorkspaceEntry(state.byWorkspaceId, workspaceId).periodId !== periodId) {
+        return state;
+      }
+      return {
+        byWorkspaceId: {
+          ...state.byWorkspaceId,
+          [workspaceId]: {
+            ...getWorkspaceEntry(state.byWorkspaceId, workspaceId),
+            hasHydrated: true,
+            periodId,
+          },
         },
-      },
-    }));
+      };
+    });
   },
 
   async hydrateFromCache(workspaceId, periodId) {

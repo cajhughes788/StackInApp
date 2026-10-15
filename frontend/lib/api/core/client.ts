@@ -11,11 +11,6 @@ import {
     shouldQueueOfflineMutation,
 } from "@/lib/api/core/errors";
 import { debugError, debugLog } from "@/lib/debugLoop";
-const TOKEN_TTL_MS = 45 * 60 * 1000; // 45 minutes
-let cachedToken: {
-    value: string;
-    ts: number;
-} | null = null;
 
 function isAndroidPlatform(): boolean {
     return typeof window !== "undefined" &&
@@ -57,7 +52,10 @@ export type ApiProfileContext = {
     step?: string;
     metadata?: Record<string, string | number | boolean | null | undefined>;
 };
-async function getAuthToken(profile?: ApiProfileContext): Promise<string> {
+// No token cache of our own: Firebase already caches the ID token and
+// refreshes it shortly before it expires. A second cache keyed on when *we*
+// fetched it (rather than when Firebase issued it) handed out expired tokens.
+async function getAuthToken(profile?: ApiProfileContext, forceRefresh = false): Promise<string> {
     const auth = getAuthSafe();
     const user = auth?.currentUser;
     if (!user) {
@@ -68,38 +66,22 @@ async function getAuthToken(profile?: ApiProfileContext): Promise<string> {
         }
         throw new Error("Not authenticated");
     }
-    const now = Date.now();
     const trace = profile?.traceId && profile?.flow
         ? createProfileTrace(profile.flow, profile.metadata ?? {}, profile.traceId)
         : null;
-    if (!cachedToken || now - cachedToken.ts > TOKEN_TTL_MS) {
-        trace?.start(profile?.step ?? "token_fetch");
-        const token = await user.getIdToken();
-        cachedToken = { value: token, ts: now };
-        if (isAndroidPlatform()) {
-            debugLog("android-settings-save", "auth_token_fetched", {
-                profileStep: profile?.step ?? null,
-                uid: user.uid,
-                refreshed: true,
-            });
-        }
-        trace?.end(profile?.step ?? "token_fetch", {
-            refreshed: true,
-            forcedRefresh: false,
-        });
-        return cachedToken.value;
-    }
-    trace?.mark(profile?.step ?? "token_fetch", {
-        refreshed: false,
-        cacheHit: true,
-    });
+    trace?.start(profile?.step ?? "token_fetch");
+    const token = await user.getIdToken(forceRefresh);
     if (isAndroidPlatform()) {
-        debugLog("android-settings-save", "auth_token_cache_hit", {
+        debugLog("android-settings-save", "auth_token_fetched", {
             profileStep: profile?.step ?? null,
             uid: user.uid,
+            forcedRefresh: forceRefresh,
         });
     }
-    return cachedToken.value;
+    trace?.end(profile?.step ?? "token_fetch", {
+        forcedRefresh: forceRefresh,
+    });
+    return token;
 }
 export async function apiFetch<T = any>(endpoint: string, opts: RequestInit & {
     timeout?: number;
@@ -175,13 +157,30 @@ export async function apiFetch<T = any>(endpoint: string, opts: RequestInit & {
                 hasAuthorization: !!headers.Authorization,
             });
         }
-        const res = await withRetry(() => fetch(endpoint, {
+        const send = () => withRetry(() => fetch(endpoint, {
             ...fetchOpts,
             headers,
             signal: controller.signal,
             mode: "cors",
             credentials: "omit",
         }));
+        let res = await send();
+        // A 401 usually means the token went stale (e.g. the app sat in the
+        // background past its expiry). Force a fresh one and retry once
+        // before surfacing "session expired". The Idempotency-Key is reused,
+        // so a retried write can't double-apply.
+        if (res.status === 401 && auth) {
+            const freshToken = await getAuthToken({
+                traceId: profile?.traceId,
+                flow: profile?.flow,
+                step: `${requestStep}.token_refresh`,
+                metadata: profile?.metadata,
+            }, true).catch(() => null);
+            if (freshToken) {
+                headers.Authorization = `Bearer ${freshToken}`;
+                res = await send();
+            }
+        }
         const data = (await res.json().catch(() => ({}))) as any;
         if (!res.ok || data?.ok === false) {
             if (isAndroidPlatform() && endpoint.includes("savesettings")) {
@@ -264,7 +263,4 @@ export async function tryWrite<T>(endpoint: string, method: "POST" | "PATCH" | "
         });
         throw err;
     }
-}
-export function clearApiCaches() {
-    cachedToken = null;
 }

@@ -142,6 +142,14 @@ export const IndependentSettings = z.object({
   trackBusinessMileage: z.boolean().optional(),
   incomeTargetPerMonth: z.number().optional(),
   expenseTargetPerMonth: z.number().optional(),
+  // Share of profit (income − expenses) to set aside for taxes, 0–100.
+  // Unset means the default (TAX_SET_ASIDE_DEFAULT_PERCENT in taxSetAside.ts).
+  taxSetAsidePercent: z.number().min(0).max(100).optional(),
+  // Weekly summary push (sendWeeklyDigest.ts). Unset means on.
+  weeklyDigest: z.boolean().optional(),
+  // Missing receipts as a "Needs you" item (and in the weekly summary's
+  // count). Unset means on; the item's hide button sets false.
+  missingReceiptsInNeedsYou: z.boolean().optional(),
   customExpenseCategories: z.array(z.string().trim().min(1)).optional(),
   // Sparse — no defaults!
   customIncomeFields: z

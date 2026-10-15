@@ -1,11 +1,20 @@
 import type { Request, Response } from "express"
 import { z } from "zod"
-import { updateMerchantMemory } from "../services/plaidService"
+import { updateIncomeMemory, updateMerchantMemory } from "../services/plaidService"
+import { IncomeCategorySchema } from "@shared/schemas/entry"
 import { BadRequestError, UnauthorizedError, sendHttpError } from "../lib/httpErrors"
 
 const QuerySchema = z.object({
   workspaceId: z.string().min(1),
   merchantKey: z.string().min(1),
+  // "income" manages a payer in plaidIncomeMemory instead (merchantKey is
+  // then the payer key) — see PlaidIncomeMemorySchema.
+  kind: z.enum(["expense", "income"]).default("expense"),
+})
+
+const IncomeBodySchema = z.object({
+  mode: z.enum(["ask_every_time", "always_not_income"]).optional(),
+  incomeCategory: IncomeCategorySchema.nullable().optional(),
 })
 
 const BodySchema = z.object({
@@ -27,6 +36,7 @@ export async function updatePlaidMerchantMemoryHandler(req: Request, res: Respon
     const parsedQuery = QuerySchema.safeParse({
       workspaceId: req.query.workspaceId,
       merchantKey: req.query.merchantKey,
+      kind: req.query.kind,
     })
     if (!parsedQuery.success) {
       sendHttpError(
@@ -36,12 +46,22 @@ export async function updatePlaidMerchantMemoryHandler(req: Request, res: Respon
       )
       return
     }
+    const { workspaceId, merchantKey, kind } = parsedQuery.data
+    if (kind === "income") {
+      const parsedIncomeBody = IncomeBodySchema.safeParse(req.body)
+      if (!parsedIncomeBody.success) {
+        sendHttpError(res, new BadRequestError("Invalid payload", parsedIncomeBody.error.format()), "updatePlaidMerchantMemory")
+        return
+      }
+      const payer = await updateIncomeMemory(workspaceId, uid, merchantKey, parsedIncomeBody.data)
+      res.status(200).json({ ok: true, payer })
+      return
+    }
     const parsedBody = BodySchema.safeParse(req.body)
     if (!parsedBody.success) {
       sendHttpError(res, new BadRequestError("Invalid payload", parsedBody.error.format()), "updatePlaidMerchantMemory")
       return
     }
-    const { workspaceId, merchantKey } = parsedQuery.data
     const merchant = await updateMerchantMemory(workspaceId, uid, merchantKey, parsedBody.data)
     res.status(200).json({ ok: true, merchant })
   } catch (err: any) {

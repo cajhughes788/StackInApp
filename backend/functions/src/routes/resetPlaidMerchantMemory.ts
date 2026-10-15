@@ -1,11 +1,13 @@
 import type { Request, Response } from "express"
 import { z } from "zod"
-import { resetMerchantMemory } from "../services/plaidService"
+import { resetIncomeMemory, resetMerchantMemory } from "../services/plaidService"
 import { BadRequestError, UnauthorizedError, sendHttpError } from "../lib/httpErrors"
 
 const QuerySchema = z.object({
   workspaceId: z.string().min(1),
   merchantKey: z.string().min(1),
+  // "income" forgets a payer in plaidIncomeMemory instead.
+  kind: z.enum(["expense", "income"]).default("expense"),
 })
 
 export async function resetPlaidMerchantMemoryHandler(req: Request, res: Response): Promise<void> {
@@ -22,6 +24,7 @@ export async function resetPlaidMerchantMemoryHandler(req: Request, res: Respons
     const parsedQuery = QuerySchema.safeParse({
       workspaceId: req.query.workspaceId,
       merchantKey: req.query.merchantKey,
+      kind: req.query.kind,
     })
     if (!parsedQuery.success) {
       sendHttpError(
@@ -31,8 +34,9 @@ export async function resetPlaidMerchantMemoryHandler(req: Request, res: Respons
       )
       return
     }
-    const { workspaceId, merchantKey } = parsedQuery.data
-    await resetMerchantMemory(workspaceId, uid, merchantKey)
+    const { workspaceId, merchantKey, kind } = parsedQuery.data
+    if (kind === "income") await resetIncomeMemory(workspaceId, uid, merchantKey)
+    else await resetMerchantMemory(workspaceId, uid, merchantKey)
     res.status(200).json({ ok: true })
   } catch (err: any) {
     sendHttpError(res, err, "resetPlaidMerchantMemory")

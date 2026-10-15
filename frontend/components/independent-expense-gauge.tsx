@@ -71,7 +71,8 @@ export default function IndependentExpenseGauge() {
       ? settings.independent.expenseTargetPerMonth
       : null
   const gaugeScale = targetExpenses ?? maxAmount
-  const fillPercentage = Math.min((totalExpenses / gaugeScale) * 100, 100)
+  // Refunds are negative expenses, so a refund-heavy month can total below 0.
+  const fillPercentage = Math.max(0, Math.min((totalExpenses / gaugeScale) * 100, 100))
 
   if (
     workspaceState.status !== "ready" ||
@@ -80,7 +81,7 @@ export default function IndependentExpenseGauge() {
     (expensesHydrating && !hasRenderableExpenses) ||
     (settingsHydrating && !hasRenderableSettings)
   ) {
-    return <div className="p-4 text-gray-400 text-sm">Loading monthly expenses…</div>
+    return <div className="p-4 text-muted-foreground text-sm">Loading monthly expenses…</div>
   }
 
   return (
@@ -99,10 +100,10 @@ export default function IndependentExpenseGauge() {
 
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="px-3 text-center">
-            <div className="text-2xl font-bold tabular-nums text-black sm:text-3xl">
+            <div className="text-2xl font-bold tabular-nums text-foreground sm:text-3xl">
               {formatCurrency(totalExpenses)}
             </div>
-            <div className="text-xs text-slate-600 sm:text-sm">
+            <div className="text-xs text-muted-foreground sm:text-sm">
               Gross Expenses
               {targetExpenses ? ` of ${formatCurrency(targetExpenses)}` : ""}
             </div>

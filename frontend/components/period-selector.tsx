@@ -16,7 +16,7 @@ import { listPeriodsBack } from "@shared/payPeriods"
 
 function CurrentBadge() {
   return (
-    <span className="ml-2 inline-flex items-center rounded-full bg-emerald-500 px-2 py-0.5 text-[11px] font-semibold leading-none text-white">
+    <span className="ml-2 inline-flex items-center rounded-full bg-primary px-2 py-0.5 text-[11px] font-semibold leading-none text-primary-foreground">
       Current
     </span>
   )

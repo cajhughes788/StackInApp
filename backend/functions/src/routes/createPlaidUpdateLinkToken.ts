@@ -6,6 +6,8 @@ import { BadRequestError, UnauthorizedError, sendHttpError } from "../lib/httpEr
 const BodySchema = z.object({
   workspaceId: z.string().min(1),
   itemId: z.string().min(1),
+  // See redirectUriFor in plaidService.ts.
+  client: z.enum(["ios-native", "browser"]).optional(),
 })
 
 export async function createPlaidUpdateLinkTokenHandler(req: Request, res: Response): Promise<void> {
@@ -24,7 +26,12 @@ export async function createPlaidUpdateLinkTokenHandler(req: Request, res: Respo
       sendHttpError(res, new BadRequestError("Missing workspaceId or itemId", parsed.error.format()), "createPlaidUpdateLinkToken")
       return
     }
-    const { link_token } = await createUpdateLinkToken(parsed.data.workspaceId, uid, parsed.data.itemId)
+    const { link_token } = await createUpdateLinkToken(
+      parsed.data.workspaceId,
+      uid,
+      parsed.data.itemId,
+      parsed.data.client ?? "browser"
+    )
     res.status(200).json({ ok: true, linkToken: link_token })
   } catch (err: any) {
     sendHttpError(res, err, "createPlaidUpdateLinkToken")

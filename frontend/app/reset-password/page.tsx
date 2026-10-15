@@ -1,5 +1,3 @@
-//resetpassword
-
 "use client"
 export const dynamic = "force-dynamic"
 export const fetchCache = "force-no-store"
@@ -23,6 +21,7 @@ import {
 } from "@/components/ui/card"
 import { useToast } from "@/hooks/use-toast"
 import { Eye, EyeOff } from "lucide-react"
+import StackInMark from "@/components/stackin-mark"
 
 export default function ResetPasswordPage() {
   const router = useRouter()
@@ -114,43 +113,52 @@ useEffect(() => {
 
   if (isVerifying)
     return (
-      <div className="min-h-screen flex items-center justify-center bg-secondary/30">
-        <p className="text-muted-foreground">
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-background p-4">
+        <StackInMark size={56} />
+        <p className="text-sm text-muted-foreground">
           Verifying your reset link...
         </p>
       </div>
     )
 
   return (
-    <div className="min-h-screen bg-secondary/30 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-6 p-4">
+      <StackInMark size={56} />
       <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle className="text-2xl font-bold text-center">
-            Reset Password
+        <CardHeader className="gap-2 text-center">
+          <CardTitle className="text-2xl font-semibold">
+            Choose a new password
           </CardTitle>
-          <CardDescription className="text-center">
-            {email
-              ? `Reset password for ${email}`
-              : "Enter your new password below"}
+          <CardDescription className="text-pretty">
+            {email ? (
+              <>
+                For <span className="font-medium text-foreground">{email}</span>
+              </>
+            ) : (
+              "Enter your new password below"
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* New Password */}
             <div className="space-y-2">
-              <Label htmlFor="newPassword">New Password</Label>
+              <Label htmlFor="newPassword">New password</Label>
               <div className="relative">
                 <Input
                   id="newPassword"
                   type={showPassword ? "text" : "password"}
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
+                  autoComplete="new-password"
+                  className="h-11 rounded-xl pr-11"
                   required
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-2.5 text-muted-foreground"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-muted-foreground"
                 >
                   {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
@@ -159,27 +167,30 @@ useEffect(() => {
 
             {/* Confirm Password */}
             <div className="space-y-2">
-              <Label htmlFor="confirmPassword">Confirm New Password</Label>
+              <Label htmlFor="confirmPassword">Confirm new password</Label>
               <div className="relative">
                 <Input
                   id="confirmPassword"
                   type={showConfirmPassword ? "text" : "password"}
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
+                  autoComplete="new-password"
+                  className="h-11 rounded-xl pr-11"
                   required
                 />
                 <button
                   type="button"
                   onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute right-3 top-2.5 text-muted-foreground"
+                  aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                  className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-muted-foreground"
                 >
                   {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </div>
             </div>
 
-            <Button type="submit" className="w-full" disabled={isSubmitting}>
-              {isSubmitting ? "Updating..." : "Reset Password"}
+            <Button type="submit" className="h-11 w-full rounded-full" disabled={isSubmitting}>
+              {isSubmitting ? "Saving..." : "Save new password"}
             </Button>
           </form>
         </CardContent>

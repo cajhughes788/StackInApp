@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Capacitor } from "@capacitor/core"
 import { Minus, Plus, RotateCcw } from "lucide-react"
 
@@ -31,6 +31,9 @@ type ReceiptViewerTriggerProps = {
   // expense grid's notes popover) close that wrapper too, instead of leaving
   // it open with a stale "View Receipt" button after the viewer is done.
   onClose?: () => void
+  // Optional content under the image — e.g. the Receipts page's linked
+  // expense summary. Gets a way to close the viewer (before navigating).
+  details?: (close: () => void) => ReactNode
 }
 
 type TransformState = {
@@ -71,6 +74,7 @@ export default function ReceiptViewerTrigger({
   variant = "outline",
   className,
   onClose,
+  details,
 }: ReceiptViewerTriggerProps) {
   const isNativeApp = Capacitor.isNativePlatform()
   const [open, setOpen] = useState(false)
@@ -425,6 +429,9 @@ export default function ReceiptViewerTrigger({
     )
   }
 
+  // Leave room under the image for the details card when there is one.
+  const imageMaxHeightClass = details ? "max-h-[calc(95vh-12rem)]" : "max-h-[calc(95vh-4.5rem)]"
+
   return (
     <>
       <Button
@@ -483,7 +490,7 @@ export default function ReceiptViewerTrigger({
                   alt=""
                   aria-hidden="true"
                   draggable={false}
-                  className="max-h-[calc(95vh-4.5rem)] w-auto max-w-full select-none object-contain blur-[2px]"
+                  className={`${imageMaxHeightClass} w-auto max-w-full select-none object-contain blur-[2px]`}
                 />
               ) : null}
               {loading ? (
@@ -495,7 +502,7 @@ export default function ReceiptViewerTrigger({
                   src={src}
                   alt={title}
                   draggable={false}
-                  className={`max-h-[calc(95vh-4.5rem)] w-auto max-w-full select-none object-contain${
+                  className={`${imageMaxHeightClass} w-auto max-w-full select-none object-contain${
                     previewLoaded || !placeholderSrc ? "" : " pointer-events-none absolute opacity-0"
                   }`}
                   onLoad={(event) => {
@@ -518,6 +525,8 @@ export default function ReceiptViewerTrigger({
                 </p>
               )}
             </div>
+
+            {details ? details(() => void handleOpenChange(false)) : null}
 
             <Button type="button" variant="outline" onClick={() => void handleOpenChange(false)}>
               Close
