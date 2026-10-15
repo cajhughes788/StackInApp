@@ -5,7 +5,6 @@ import { useEffect, useState } from "react"
 import {
   AlertDialog,
   AlertDialogAction,
-  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -14,11 +13,13 @@ import {
 } from "@/components/ui/alert-dialog"
 import {
   acceptNativePermissionGuide,
-  dismissNativePermissionGuide,
   getNativePermissionGuideState,
   subscribeNativePermissionGuide,
 } from "@/lib/mobile/nativePermissionGuide"
 
+// App Review (5.1.1(iv)) requires that a pre-permission message always
+// proceeds to the system prompt, so there is no "Not now" path here and any
+// way of closing the dialog continues to the permission request.
 export function NativePermissionGuideDialog() {
   const [guideState, setGuideState] = useState(getNativePermissionGuideState())
 
@@ -35,7 +36,7 @@ export function NativePermissionGuideDialog() {
       open={guideState.open}
       onOpenChange={(nextOpen) => {
         if (!nextOpen) {
-          dismissNativePermissionGuide()
+          acceptNativePermissionGuide()
         }
       }}
     >
@@ -49,10 +50,9 @@ export function NativePermissionGuideDialog() {
                 for location-based reminders.
                 <br />
                 <br />
-                1. Allow <strong>location while using the app</strong>.
-                <br />
-                2. If Android shows a second location step, choose{" "}
-                <strong>Allow all the time</strong>.
+                Reminders that trigger when you arrive at a saved place work
+                best with location set to <strong>Allow all the time</strong>.
+                You can change this anytime in Settings.
               </>
             ) : (
               <>
@@ -60,22 +60,14 @@ export function NativePermissionGuideDialog() {
                 for location-based reminders.
                 <br />
                 <br />
-                1. Tap <strong>Allow While Using App</strong> for location.
-                <br />
-                2. Tap <strong>Change to Always Allow</strong> on the follow-up
-                location prompt.
-                <br />
-                <br />
-                Do not tap <strong>Allow Once</strong>, or location reminders
-                will stay limited.
+                Reminders that trigger when you arrive at a saved place work
+                best with location set to <strong>Always</strong>. You can
+                change this anytime in Settings.
               </>
             )}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel onClick={dismissNativePermissionGuide}>
-            Not now
-          </AlertDialogCancel>
           <AlertDialogAction onClick={acceptNativePermissionGuide}>
             Continue
           </AlertDialogAction>
