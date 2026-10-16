@@ -230,6 +230,9 @@ export async function updateInvoiceStatus(
     if (action.action === "send" && current.status !== "draft") {
       throw new ConflictError(`A ${current.status} invoice can't be sent.`)
     }
+    if (action.action === "void" && current.pendingPaymentAt) {
+      throw new ConflictError("A bank payment for this invoice is still clearing — void it if that payment fails.")
+    }
     if (action.action === "void" && current.status === "paid") {
       throw new ConflictError("A paid invoice can't be voided — delete its income entry first, which reopens it.")
     }
@@ -267,6 +270,9 @@ async function markInvoicePaidManually(
     const current = InvoiceSchema.parse(snap.data())
     if (current.status === "paid") return { alreadyPaid: true as const, invoice: current, previousStatus: current.status }
     if (current.status === "void") throw new ConflictError("A void invoice can't be marked paid.")
+    if (current.pendingPaymentAt) {
+      throw new ConflictError("A bank payment for this invoice is still clearing — it's marked paid when it lands.")
+    }
     if (paidDate < current.issueDate) throw new BadRequestError("The payment date can't be before the issue date.")
     const next = InvoiceSchema.parse({
       ...current,

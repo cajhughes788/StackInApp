@@ -158,8 +158,8 @@ function StreamDayEntry({
   const content = isRefund ? (
     <>
       <span className="min-w-0">
-        <span className="text-foreground">{label}</span>
-        <span className="ml-1.5 inline-flex rounded-full bg-red-100 px-1.5 py-px align-[1px] text-[11px] font-semibold text-red-800 dark:bg-red-950 dark:text-red-300">
+        {label ? <span className="mr-1.5 text-foreground">{label}</span> : null}
+        <span className="inline-flex rounded-full bg-red-100 px-1.5 py-px align-[1px] text-[11px] font-semibold text-red-800 dark:bg-red-950 dark:text-red-300">
           {entry.refund?.reason === "dispute" ? "Disputed" : entry.refund?.reason === "dispute_reversed" ? "Dispute won" : "Refund"}
         </span>
         {entry.refund?.clientName ? (
@@ -194,7 +194,7 @@ function StreamDayEntry({
           type="button"
           onClick={() => setDetailsOpen((current) => !current)}
           aria-expanded={detailsOpen}
-          aria-label={`More for ${label}`}
+          aria-label={`More for ${label || (isRefund ? "refund" : "entry")}`}
           className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
         >
           <MoreHorizontal className="size-4" aria-hidden="true" />
@@ -328,7 +328,8 @@ function StreamRow({ stream, ctx }: { stream: IncomeStream; ctx: StreamEditConte
                           streamKey={stream.key}
                           entry={entry}
                           amount={amount}
-                          label={entry.notes?.trim().split("\n")[0] || `Entry ${index + 1}`}
+                          // A refund's note repeats what its badge and client line show.
+                          label={entry.kind === "refund" ? "" : entry.notes?.trim().split("\n")[0] || `Entry ${index + 1}`}
                           ctx={ctx}
                         />
                       ))}

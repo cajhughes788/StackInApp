@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { Suspense, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Plus, X } from "lucide-react"
 
@@ -13,7 +13,7 @@ import {
   cardClass,
   fieldLabelClass,
   localToday,
-  readQueryParam,
+  useQueryParam,
   softInputClass,
   useInvoicesWorkspace,
 } from "@/components/invoices/invoice-ui"
@@ -52,12 +52,20 @@ function newLine(category: IncomeCategory = "services"): DraftLine {
   return { key: ++lineKey, description: "", amount: "", category }
 }
 
-export default function InvoiceFormPage() {
+export default function InvoiceFormPageRoute() {
+  return (
+    <Suspense fallback={null}>
+      <InvoiceFormPage />
+    </Suspense>
+  )
+}
+
+function InvoiceFormPage() {
   const router = useRouter()
   const { toast } = useToast()
   const { ready, workspaceId, invoices, settings, loadStatus } = useInvoicesWorkspace()
   const upsertInvoice = useInvoicesStore((state) => state.upsertInvoice)
-  const [invoiceId] = useState(() => readQueryParam("id"))
+  const invoiceId = useQueryParam("id")
   const existing = invoiceId ? invoices.find((invoice) => invoice.id === invoiceId) ?? null : null
   // One id per form, so a retried create can't make a second invoice.
   const clientMutationId = useRef(

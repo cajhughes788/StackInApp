@@ -2,7 +2,7 @@
 
 import { useEffect, type ReactNode } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { ChevronLeft } from "lucide-react"
 
 import AppLoader from "@/components/app-loader"
@@ -44,9 +44,12 @@ export function localToday(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
 }
 
-export function readQueryParam(name: string): string | null {
-  if (typeof window === "undefined") return null
-  return new URLSearchParams(window.location.search).get(name)
+// Query params through Next's router, which keeps them current across
+// in-app navigation (a one-time window.location read on mount sees the
+// previous page's URL when the page is reached by router.push / <Link>).
+// Pages using it render inside <Suspense> (static export requirement).
+export function useQueryParam(name: string): string | null {
+  return useSearchParams().get(name)
 }
 
 // Sign-in and workspace guard plus the invoices load, shared by every invoice

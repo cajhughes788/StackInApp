@@ -7,7 +7,7 @@ import { CreditCard, ExternalLink, ShieldCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/hooks/use-toast"
-import { cardClass, readQueryParam } from "@/components/invoices/invoice-ui"
+import { cardClass, useQueryParam } from "@/components/invoices/invoice-ui"
 import { updatePaymentAccount } from "@/lib/api/invoicesApi"
 import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
 import { cn } from "@/lib/utils"
@@ -43,6 +43,7 @@ export default function OnlinePaymentsCard({ workspaceId }: { workspaceId: strin
   const setPaymentAccount = useInvoicesStore((state) => state.setPaymentAccount)
   const [busy, setBusy] = useState<Busy>(null)
   const handledReturn = useRef(false)
+  const stripeReturn = useQueryParam("stripe")
 
   function fail(title: string, error: unknown) {
     toast({
@@ -121,14 +122,14 @@ export default function OnlinePaymentsCard({ workspaceId }: { workspaceId: strin
   // Back from Stripe on the web (app/stripe-return → ?stripe=done|refresh).
   useEffect(() => {
     if (handledReturn.current) return
-    const back = readQueryParam("stripe")
+    const back = stripeReturn
     if (!back) return
     handledReturn.current = true
     window.history.replaceState(null, "", window.location.pathname)
     if (back === "refresh") void onboard()
     else void refresh()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [stripeReturn])
 
   return (
     <section className={cn(cardClass, "space-y-3")} aria-labelledby="online-payments-heading">

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { Suspense, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Check, FileText, Landmark, Link2, MoreHorizontal } from "lucide-react"
@@ -24,6 +24,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { useToast } from "@/hooks/use-toast"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import MarkPaidSheet from "@/components/invoices/mark-paid-sheet"
 import RefundSheet from "@/components/invoices/refund-sheet"
 import {
@@ -39,7 +40,7 @@ import {
   PAID_METHOD_LABELS,
   cardClass,
   localToday,
-  readQueryParam,
+  useQueryParam,
   useInvoicesWorkspace,
 } from "@/components/invoices/invoice-ui"
 import { deleteInvoice, updateInvoiceStatus } from "@/lib/api/invoicesApi"
@@ -91,7 +92,15 @@ function metaLine(invoice: InvoiceType): string {
   }
 }
 
-export default function InvoiceDetailPage() {
+export default function InvoiceDetailPageRoute() {
+  return (
+    <Suspense fallback={null}>
+      <InvoiceDetailPage />
+    </Suspense>
+  )
+}
+
+function InvoiceDetailPage() {
   const router = useRouter()
   const { toast } = useToast()
   const { ready, workspaceId, invoices, settings, loadStatus } = useInvoicesWorkspace()
@@ -99,12 +108,14 @@ export default function InvoiceDetailPage() {
   const payableOnline = !!paymentAccount?.chargesEnabled && !!paymentAccount.acceptOnline
   const upsertInvoice = useInvoicesStore((state) => state.upsertInvoice)
   const removeInvoice = useInvoicesStore((state) => state.removeInvoice)
-  const [invoiceId] = useState(() => readQueryParam("id"))
-  const [justCreated] = useState(() => readQueryParam("share") === "1")
+  const invoiceId = useQueryParam("id")
+  const justCreated = useQueryParam("share") === "1"
   const invoice = invoices.find((i) => i.id === invoiceId) ?? null
   const [busy, setBusy] = useState<null | "link" | "pdf" | "void" | "delete">(null)
   const [markPaidOpen, setMarkPaidOpen] = useState(false)
   const [refundOpen, setRefundOpen] = useState(false)
+  // The link, when neither a share sheet nor the clipboard was available.
+  const [manualLink, setManualLink] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<null | "void" | "delete">(null)
   const today = localToday()
 
@@ -130,6 +141,7 @@ export default function InvoiceDetailPage() {
         `Invoice #${invoice.number} from ${business}: ${formatInvoiceMoney(invoiceBalanceDue(invoice))}`
       )
       if (outcome === "copied") toast({ title: "Link copied", description: "Paste it into a text or email to your client." })
+      if (outcome === "unavailable") setManualLink(url)
     } catch (error) {
       toast({
         title: "Couldn't share the link",
@@ -397,6 +409,46 @@ export default function InvoiceDetailPage() {
           {workspaceId && invoice.status === "paid" ? (
             <RefundSheet open={refundOpen} onOpenChange={setRefundOpen} invoice={invoice} workspaceId={workspaceId} />
           ) : null}
+
+          <Dialog open={manualLink !== null} onOpenChange={(open) => !open && setManualLink(null)}>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Invoice link</DialogTitle>
+                <DialogDescription>Send this to {invoice.clientName} in a text or email.</DialogDescription>
+              </DialogHeader>
+              <input
+                readOnly
+                value={manualLink ?? ""}
+                onFocus={(event) => event.currentTarget.select()}
+                className="h-11 w-full rounded-xl border-0 bg-muted px-3 text-sm text-foreground"
+                aria-label="Invoice link"
+              />
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  className="h-11 flex-1 rounded-full font-semibold"
+                  onClick={() => {
+                    if (!manualLink) return
+                    // A fresh tap, so the clipboard is allowed now.
+                    navigator.clipboard
+                      .writeText(manualLink)
+                      .then(() => {
+                        toast({ title: "Link copied" })
+                        setManualLink(null)
+                      })
+                      .catch(() => toast({ title: "Select the link above and copy it", variant: "destructive" }))
+                  }}
+                >
+                  Copy link
+                </Button>
+                <Button asChild type="button" variant="outline" className="h-11 flex-1 rounded-full font-semibold">
+                  <a href={manualLink ?? "#"} target="_blank" rel="noopener noreferrer">
+                    Open
+                  </a>
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
 
           <AlertDialog open={confirm !== null} onOpenChange={(open) => !open && setConfirm(null)}>
             <AlertDialogContent>

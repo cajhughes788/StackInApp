@@ -1882,6 +1882,9 @@ async function confirmInvoicePayment(
         if (!snap.exists) throw new NotFoundError(`Invoice #${group[index].number} no longer exists.`)
         const invoice = InvoiceSchema.parse(snap.data())
         if (invoice.status !== "sent") throw new ConflictError(`Invoice #${invoice.number} is no longer open.`)
+        if (invoice.pendingPaymentAt) {
+          throw new ConflictError(`Invoice #${invoice.number} already has a bank payment clearing through Stripe.`)
+        }
         if (Math.round(invoice.total * 100) !== Math.round(group[index].amount * 100)) {
           throw new ConflictError(`Invoice #${invoice.number} changed since this deposit was matched.`)
         }

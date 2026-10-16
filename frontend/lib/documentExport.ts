@@ -184,8 +184,10 @@ export async function sharePdfBlob(blob: Blob, filename: string, title?: string)
 }
 
 // Native share sheet on iOS; the Web Share API where the browser has it;
-// otherwise copies the link. Returns "copied" so the caller can say so.
-export async function shareLink(url: string, title: string, text?: string): Promise<"shared" | "copied"> {
+// otherwise copies the link. "unavailable" when the browser refuses the
+// clipboard too (common after an await, which ends the tap's permission) —
+// the caller then shows the link itself.
+export async function shareLink(url: string, title: string, text?: string): Promise<"shared" | "copied" | "unavailable"> {
   try {
     if (Capacitor.isNativePlatform()) {
       const { Share } = await import("@capacitor/share")
@@ -203,6 +205,10 @@ export async function shareLink(url: string, title: string, text?: string): Prom
     // Browsers refuse navigator.share outside a fresh tap; copy instead.
     if (!(error instanceof Error && error.name === "NotAllowedError")) throw error
   }
-  await navigator.clipboard.writeText(url)
-  return "copied"
+  try {
+    await navigator.clipboard.writeText(url)
+    return "copied"
+  } catch {
+    return "unavailable"
+  }
 }

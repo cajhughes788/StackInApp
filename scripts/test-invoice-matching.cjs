@@ -167,6 +167,14 @@ run("open candidates: only sent invoices inside the date window", () => {
   assert.deepEqual(picked.map((i) => i.number), ["sent"]);
 });
 
+run("open candidates: never an invoice with a bank transfer clearing", () => {
+  const picked = selectOpenInvoiceCandidates(
+    [invoice({ number: "a", total: 1 }), invoice({ number: "b", total: 1, pendingPaymentAt: "2026-10-09T12:00:00.000Z" })],
+    "2026-10-10"
+  );
+  assert.deepEqual(picked.map((i) => i.number), ["a"]);
+});
+
 run("open candidates: capped at the oldest-due invoices", () => {
   const many = Array.from({ length: 20 }, (_, i) =>
     invoice({ number: String(i).padStart(4, "0"), total: 10, dueDate: `2026-09-${String(30 - i).padStart(2, "0")}` })

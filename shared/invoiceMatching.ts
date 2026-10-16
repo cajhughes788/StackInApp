@@ -73,14 +73,15 @@ function byOldestDue(a: InvoiceMatchCandidate, b: InvoiceMatchCandidate): number
 }
 
 // Open invoices a deposit on `depositDate` could be paying.
-export function selectOpenInvoiceCandidates<T extends InvoiceMatchCandidate & Pick<InvoiceType, "status">>(
-  invoices: T[],
-  depositDate: string
-): T[] {
+export function selectOpenInvoiceCandidates<
+  T extends InvoiceMatchCandidate & Pick<InvoiceType, "status"> & Partial<Pick<InvoiceType, "pendingPaymentAt">>,
+>(invoices: T[], depositDate: string): T[] {
   return invoices
     .filter(
       (invoice) =>
         invoice.status === "sent" &&
+        // A bank transfer through Stripe is already clearing for it.
+        !invoice.pendingPaymentAt &&
         dayDiff(depositDate, invoice.issueDate) >= 0 &&
         dayDiff(depositDate, invoice.dueDate) <= INVOICE_MATCH_MAX_DAYS_PAST_DUE
     )

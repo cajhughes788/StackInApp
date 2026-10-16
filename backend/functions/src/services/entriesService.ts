@@ -409,6 +409,18 @@ export async function deleteEntry(workspaceId: string, uid: string, entryId: str
             id: snap.id,
             ...snap.data(),
         });
+        // Money that moved through Stripe stays on the books: a Stripe
+        // refund or dispute entry, or the income of an invoice paid online.
+        // Refund the invoice instead (refundsService.ts).
+        if (deletedEntry.kind === "refund" && (deletedEntry.refund?.stripeRefundId || deletedEntry.refund?.stripeDisputeId)) {
+            throw new ConflictError("This refund went through Stripe, so it can't be deleted.");
+        }
+        if (deletedEntry.workspace === "independent") {
+            const paidInvoices = await tx.get(db.collection(`workspaces/${workspaceId}/invoices`).where("paidEntryId", "==", entryId).limit(1));
+            if (paidInvoices.docs.some((doc) => doc.data()?.paidVia === "online")) {
+                throw new ConflictError("This payment came through Stripe — refund it from the invoice instead of deleting it.");
+            }
+        }
         // Perform deletion
         tx.delete(ref);
         deleted = true;

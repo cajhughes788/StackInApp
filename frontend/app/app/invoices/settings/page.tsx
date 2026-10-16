@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { Suspense, useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Check } from "lucide-react"
 
@@ -13,7 +13,7 @@ import {
   InvoicesPage,
   cardClass,
   fieldLabelClass,
-  readQueryParam,
+  useQueryParam,
   softInputClass,
   useInvoicesWorkspace,
 } from "@/components/invoices/invoice-ui"
@@ -49,7 +49,15 @@ function toDraft(settings: InvoiceSettings | null): Draft {
   return rest
 }
 
-export default function InvoiceSettingsPage() {
+export default function InvoiceSettingsPageRoute() {
+  return (
+    <Suspense fallback={null}>
+      <InvoiceSettingsPage />
+    </Suspense>
+  )
+}
+
+function InvoiceSettingsPage() {
   const router = useRouter()
   const { toast } = useToast()
   const { ready, workspaceId, settings, loadStatus } = useInvoicesWorkspace()
@@ -59,8 +67,9 @@ export default function InvoiceSettingsPage() {
   const [saving, setSaving] = useState(false)
   const [logoBusy, setLogoBusy] = useState(false)
   const initialized = useRef(false)
+  const stripeParam = useQueryParam("stripe")
   // Arrived from Stripe's sign-up redirect: "back" would return to Stripe.
-  const [fromStripe] = useState(() => readQueryParam("stripe") !== null)
+  const [fromStripe] = useState(() => stripeParam !== null)
   const fileInput = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
