@@ -1,12 +1,13 @@
 import type { Response } from "express";
 import { ZodError } from "zod";
-type HttpErrorCode = "bad-request" | "unauthorized" | "forbidden" | "not-found" | "conflict";
+type HttpErrorCode = "bad-request" | "unauthorized" | "forbidden" | "not-found" | "conflict" | "too-many-requests";
 const HTTP_STATUS_BY_CODE: Record<HttpErrorCode, number> = {
     "bad-request": 400,
     unauthorized: 401,
     forbidden: 403,
     "not-found": 404,
     conflict: 409,
+    "too-many-requests": 429,
 };
 export class HttpError extends Error {
     readonly code: HttpErrorCode;
@@ -43,6 +44,12 @@ export class NotFoundError extends HttpError {
     constructor(message: string, details?: unknown) {
         super("not-found", message, details);
         this.name = "NotFoundError";
+    }
+}
+export class TooManyRequestsError extends HttpError {
+    constructor(message: string, details?: unknown) {
+        super("too-many-requests", message, details);
+        this.name = "TooManyRequestsError";
     }
 }
 export class ConflictError extends HttpError {

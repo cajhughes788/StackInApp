@@ -3,7 +3,7 @@
 import { Suspense, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Check, FileText, Landmark, Link2, MoreHorizontal } from "lucide-react"
+import { Check, FileText, Landmark, Link2, Mail, MoreHorizontal } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -27,6 +27,7 @@ import { useToast } from "@/hooks/use-toast"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import MarkPaidSheet from "@/components/invoices/mark-paid-sheet"
 import RefundSheet from "@/components/invoices/refund-sheet"
+import SendInvoiceSheet from "@/components/invoices/send-invoice-sheet"
 import {
   InvoiceDisputeCard,
   InvoiceMoneyBreakdown,
@@ -114,6 +115,7 @@ function InvoiceDetailPage() {
   const [busy, setBusy] = useState<null | "link" | "pdf" | "void" | "delete">(null)
   const [markPaidOpen, setMarkPaidOpen] = useState(false)
   const [refundOpen, setRefundOpen] = useState(false)
+  const [sendOpen, setSendOpen] = useState(false)
   // The link, when neither a share sheet nor the clipboard was available.
   const [manualLink, setManualLink] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<null | "void" | "delete">(null)
@@ -265,7 +267,7 @@ function InvoiceDetailPage() {
         <>
           {justCreated && invoice.status === "draft" ? (
             <div className="rounded-[14px] bg-accent px-3.5 py-3 text-sm text-foreground">
-              Saved as #{invoice.number}. Share it with {invoice.clientName} as a link or a PDF.
+              Saved as #{invoice.number}. Send it to {invoice.clientName} by email or text, or share a link or PDF.
             </div>
           ) : null}
 
@@ -287,11 +289,24 @@ function InvoiceDetailPage() {
             <div className="text-sm text-muted-foreground">{metaLine(invoice)}</div>
           </section>
 
+          {invoice.status === "draft" || invoice.status === "sent" ? (
+            <Button
+              type="button"
+              className="h-[52px] w-full rounded-full text-base font-semibold"
+              disabled={busy !== null || !workspaceId}
+              onClick={() => setSendOpen(true)}
+            >
+              <Mail className="size-[18px]" aria-hidden="true" />
+              {invoice.lastEmailedAt ? "Send again" : "Send invoice"}
+            </Button>
+          ) : null}
+
           {invoice.status !== "void" ? (
             <div className="grid grid-cols-2 gap-2.5">
               <Button
                 type="button"
-                className="h-[52px] rounded-full font-semibold"
+                variant="outline"
+                className="h-[52px] rounded-full border-card-border bg-card font-semibold"
                 disabled={busy !== null}
                 onClick={() => void onShareLink()}
               >
@@ -391,9 +406,20 @@ function InvoiceDetailPage() {
                   : ""}
               </div>
             ) : null}
-            {invoice.sharedAt ? (
+            {invoice.lastEmailedAt ? (
               <div className="flex items-center gap-2.5">
                 <span className={cn("size-2 rounded-full", invoice.paidAt ? "bg-input" : "bg-primary")} aria-hidden="true" />
+                <span className="min-w-0 truncate">
+                  Emailed to {invoice.lastEmailedTo} · {formatMoment(invoice.lastEmailedAt)}
+                </span>
+              </div>
+            ) : null}
+            {invoice.sharedAt ? (
+              <div className="flex items-center gap-2.5">
+                <span
+                  className={cn("size-2 rounded-full", invoice.paidAt || invoice.lastEmailedAt ? "bg-input" : "bg-primary")}
+                  aria-hidden="true"
+                />
                 Link shared · {formatMoment(invoice.sharedAt)}
               </div>
             ) : null}
@@ -405,6 +431,15 @@ function InvoiceDetailPage() {
 
           {workspaceId ? (
             <MarkPaidSheet open={markPaidOpen} onOpenChange={setMarkPaidOpen} invoice={invoice} workspaceId={workspaceId} />
+          ) : null}
+          {workspaceId && (invoice.status === "draft" || invoice.status === "sent") ? (
+            <SendInvoiceSheet
+              open={sendOpen}
+              onOpenChange={setSendOpen}
+              invoice={invoice}
+              settings={settings}
+              workspaceId={workspaceId}
+            />
           ) : null}
           {workspaceId && invoice.status === "paid" ? (
             <RefundSheet open={refundOpen} onOpenChange={setRefundOpen} invoice={invoice} workspaceId={workspaceId} />

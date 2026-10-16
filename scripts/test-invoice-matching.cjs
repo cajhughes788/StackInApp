@@ -575,4 +575,43 @@ run("payment streams: a refund nets its stream and keeps shares at 100%", () => 
   }
 });
 
+run("invoice email: subject, CTA and escaping", () => {
+  const { buildInvoiceEmail } = require("../shared/invoiceEmail.ts");
+  const invoice = {
+    id: "i", workspaceId: "w", number: "0007", clientName: "Acme", clientEmail: "a@b.co",
+    lines: [{ description: "Work", amount: 250, category: "services" }],
+    total: 250, issueDate: "2026-10-01", dueDate: "2026-10-31", note: "Zelle <me>", shareToken: "t",
+    status: "sent", paidAt: null, paidVia: null, paidEntryId: null, paidPlaidTransactionId: null, paidFeeAmount: 0,
+    createdAt: "x", updatedAt: "x",
+  };
+  const settings = InvoiceSettingsSchema.parse({ businessName: "Bob's <Cuts>", businessEmail: "bob@example.com" });
+  const evil = "<script>alert(1)</script>";
+  const email = buildInvoiceEmail({ invoice, settings, link: "https://x.test/i/t", message: evil, payableOnline: true });
+  assert.equal(email.subject, "Invoice #0007 from Bob's <Cuts> — $250.00 due Oct 31");
+  assert.equal(email.html.includes("<script>"), false);
+  assert.ok(email.html.includes("&lt;script&gt;"));
+  assert.ok(email.html.includes("Bob&#39;s &lt;Cuts&gt;"));
+  assert.ok(email.html.includes("View and pay invoice"));
+  assert.ok(email.html.includes("Other ways to pay"));
+  assert.ok(email.text.includes("View and pay invoice: https://x.test/i/t"));
+  assert.ok(email.text.includes("Reply to this email"));
+
+  const plain = buildInvoiceEmail({
+    invoice: { ...invoice, note: "" },
+    settings: InvoiceSettingsSchema.parse({}),
+    link: "https://x.test/i/t",
+    payableOnline: false,
+  });
+  assert.ok(plain.html.includes("View invoice"));
+  assert.equal(plain.html.includes("How to pay"), false);
+  assert.equal(plain.text.includes("Reply to this email"), false);
+  assert.equal(plain.text.includes("\n\n\n"), false);
+});
+
+run("email status action validates the address", () => {
+  assert.equal(InvoiceStatusActionSchema.safeParse({ action: "email", to: "a@b.co" }).success, true);
+  assert.equal(InvoiceStatusActionSchema.safeParse({ action: "email", to: "nope" }).success, false);
+  assert.equal(InvoiceStatusActionSchema.safeParse({ action: "email", to: "a@b.co", message: "x".repeat(1001) }).success, false);
+});
+
 process.stdout.write("invoice matching checks passed\n");

@@ -66,6 +66,13 @@ export const InvoiceSchema = z
     number: z.string(),
     clientName: z.string().min(1),
     clientEmail: z.string().nullable().default(null),
+    // For "Text it" (a pre-filled Messages draft). Stored as typed.
+    clientPhone: z.string().nullable().default(null),
+    // Emails 521 sent for this invoice: the latest, and the recent send
+    // times that cap resends (invoiceEmailService.ts).
+    lastEmailedAt: z.string().nullable().default(null),
+    lastEmailedTo: z.string().nullable().default(null),
+    recentEmailSends: z.array(z.string()).default([]),
     lines: z.array(InvoiceLineSchema).min(1),
     // Derived from lines, stored so open invoices can be matched by amount
     // without reading every line.
@@ -161,7 +168,8 @@ export const InvoiceLineInputSchema = z.object({
 
 const InvoiceFieldsSchema = z.object({
   clientName: z.string().trim().min(1).max(80),
-  clientEmail: z.string().trim().email().max(254).nullable().optional(),
+  clientEmail: z.union([z.string().trim().email().max(254), z.literal("")]).nullable().optional(),
+  clientPhone: z.string().trim().max(40).nullable().optional(),
   lines: z.array(InvoiceLineInputSchema).min(1).max(50),
   issueDate: DateSchema,
   dueDate: DateSchema,
@@ -190,6 +198,12 @@ export const InvoiceStatusActionSchema = z.discriminatedUnion("action", [
   // Returns the public link (creating it the first time). Sharing a draft
   // sends it — the client is about to see it.
   z.object({ action: z.literal("share") }),
+  // 521 emails the client the invoice link (and shares it first).
+  z.object({
+    action: z.literal("email"),
+    to: z.string().trim().email().max(254),
+    message: z.string().trim().max(1000).optional(),
+  }),
   // Money back on a paid invoice: through Stripe for an online payment,
   // otherwise just recorded (the user sent it themselves).
   z.object({

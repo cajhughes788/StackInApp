@@ -75,6 +75,8 @@ function InvoiceFormPage() {
   )
 
   const [clientName, setClientName] = useState("")
+  const [clientEmail, setClientEmail] = useState("")
+  const [clientPhone, setClientPhone] = useState("")
   const [lines, setLines] = useState<DraftLine[]>(() => [newLine()])
   const [issueDate, setIssueDate] = useState(localToday())
   const [dueDate, setDueDate] = useState(() => dueDateForTerms(localToday(), "net_30"))
@@ -90,6 +92,8 @@ function InvoiceFormPage() {
     initialized.current = true
     if (existing) {
       setClientName(existing.clientName)
+      setClientEmail(existing.clientEmail ?? "")
+      setClientPhone(existing.clientPhone ?? "")
       setLines(existing.lines.map((line) => ({ ...newLine(line.category), description: line.description, amount: line.amount.toFixed(2) })))
       setIssueDate(existing.issueDate)
       setDueDate(existing.dueDate)
@@ -129,8 +133,10 @@ function InvoiceFormPage() {
           ? "Each line needs a description and an amount."
           : null,
     dates: dueDate < issueDate ? "The due date can't be before the invoice date." : null,
+    email:
+      clientEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail.trim()) ? "That email doesn't look right." : null,
   }
-  const valid = !errors.client && !errors.lines && !errors.dates
+  const valid = !errors.client && !errors.lines && !errors.dates && !errors.email
 
   function updateLine(key: number, patch: Partial<DraftLine>) {
     setLines((current) => current.map((line) => (line.key === key ? { ...line, ...patch } : line)))
@@ -144,6 +150,8 @@ function InvoiceFormPage() {
     }
     const body = {
       clientName: clientName.trim(),
+      clientEmail: clientEmail.trim() || null,
+      clientPhone: clientPhone.trim() || null,
       lines: filledLines.map((line) => ({
         description: line.description.trim(),
         amount: line.value as number,
@@ -237,7 +245,13 @@ function InvoiceFormPage() {
                   <button
                     key={name}
                     type="button"
-                    onClick={() => setClientName(name)}
+                    onClick={() => {
+                      setClientName(name)
+                      // Their contact details from the latest invoice to them.
+                      const last = invoices.find((invoice) => invoice.clientName === name)
+                      if (last?.clientEmail && !clientEmail) setClientEmail(last.clientEmail)
+                      if (last?.clientPhone && !clientPhone) setClientPhone(last.clientPhone)
+                    }}
                     className="h-8 rounded-full border border-card-border bg-card px-3 text-sm text-foreground hover:bg-muted"
                   >
                     {name}
@@ -246,6 +260,34 @@ function InvoiceFormPage() {
               </div>
             ) : null}
             {showErrors && errors.client ? <p className="text-sm text-destructive">{errors.client}</p> : null}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className={fieldLabelClass}>
+                Client email
+                <input
+                  type="email"
+                  className={softInputClass}
+                  value={clientEmail}
+                  onChange={(event) => setClientEmail(event.target.value)}
+                  placeholder="For sending the invoice"
+                  maxLength={254}
+                  autoComplete="off"
+                  inputMode="email"
+                />
+              </label>
+              <label className={fieldLabelClass}>
+                Client phone
+                <input
+                  type="tel"
+                  className={softInputClass}
+                  value={clientPhone}
+                  onChange={(event) => setClientPhone(event.target.value)}
+                  placeholder="Optional, for texting it"
+                  maxLength={40}
+                  autoComplete="off"
+                />
+              </label>
+            </div>
+            {showErrors && errors.email ? <p className="text-sm text-destructive">{errors.email}</p> : null}
           </section>
 
           <section className={cn(cardClass, "space-y-3.5")}>

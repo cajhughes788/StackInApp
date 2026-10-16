@@ -126,7 +126,8 @@ export async function createInvoice(workspaceId: string, uid: string, raw: unkno
       workspaceId,
       number: formatInvoiceNumber(lastNumber + 1),
       clientName: input.clientName,
-      clientEmail: input.clientEmail ?? null,
+      clientEmail: input.clientEmail || null,
+      clientPhone: input.clientPhone || null,
       lines: input.lines,
       total: invoiceTotalFromLines(input.lines),
       issueDate: input.issueDate,
@@ -163,7 +164,8 @@ export async function updateInvoice(workspaceId: string, uid: string, invoiceId:
     const next = {
       ...current,
       ...patch,
-      clientEmail: patch.clientEmail === undefined ? current.clientEmail : patch.clientEmail,
+      clientEmail: patch.clientEmail === undefined ? current.clientEmail : patch.clientEmail || null,
+      clientPhone: patch.clientPhone === undefined ? current.clientPhone : patch.clientPhone || null,
       lines,
       total: invoiceTotalFromLines(lines),
       updatedAt: new Date().toISOString(),
@@ -212,6 +214,10 @@ export async function updateInvoiceStatus(
   }
   if (action.action === "share") {
     return shareInvoice(workspaceId, ref)
+  }
+  if (action.action === "email") {
+    const { emailInvoice } = await import("./invoiceEmailService.js")
+    return emailInvoice(workspaceId, ref, { to: action.to, message: action.message })
   }
   if (action.action === "refund") {
     const { refundInvoice } = await import("./refundsService.js")
@@ -423,7 +429,7 @@ function invoiceSharesCol() {
   return db.collection("invoiceShares")
 }
 
-async function shareInvoice(
+export async function shareInvoice(
   workspaceId: string,
   ref: FirebaseFirestore.DocumentReference
 ): Promise<{ invoice: InvoiceType; shareUrl: string }> {

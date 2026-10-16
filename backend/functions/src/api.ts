@@ -188,14 +188,15 @@ export const deleteInvoice = withCorsAuth(async (req, res) => {
   await deleteInvoiceHandler(req, res)
 })
 
-// Stripe key: changing the total or voiding closes the client's open Checkout.
+// Stripe key: void/refund/total changes touch Stripe. SendGrid: "email" sends
+// the client the invoice.
 export const updateInvoiceStatus = withCorsAuth(
   async (req, res) => {
     const { updateInvoiceStatusHandler } = await import("./routes/updateInvoiceStatus.js")
     await updateInvoiceStatusHandler(req, res)
   },
   true,
-  { secrets: [SECRETS.STRIPE_SECRET_KEY] }
+  { secrets: [SECRETS.STRIPE_SECRET_KEY, SECRETS.SENDGRID_API_KEY] }
 )
 
 export const saveInvoiceSettings = withCorsAuth(async (req, res) => {
