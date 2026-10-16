@@ -63,6 +63,14 @@
         ]
       },
       {
+        // Clean URLs (/app/invoices — no extension) are matched by the
+        // requested path, not the .html file behind them.
+        "regex": "^/[^.]*$",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache" }
+        ]
+      },
+      {
         // Apple requires JSON for this extensionless file.
         "source": "/.well-known/apple-app-site-association",
         "headers": [
