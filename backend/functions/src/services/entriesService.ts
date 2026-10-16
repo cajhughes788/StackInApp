@@ -2,12 +2,12 @@
 // /functions/src/services/entriesService.ts
 import { db } from "../admin";
 import { FieldValue } from "firebase-admin/firestore";
-import { EntrySchema, type EntryType } from "@shared/schemas/entry";
+import { EntrySchema, type EntryType, type RefundInfo } from "@shared/schemas/entry";
 import { getCurrentEntryPeriod, getCurrentPayPeriod } from "@shared/payPeriods";
 import { computeEntry } from "@shared/computeEntry";
 import { SettingsDocSchema, SettingsType } from "@shared/schemas/settings";
 import { settingsCache, SETTINGS_TTL_MS } from "./settingsCache";
-import { ForbiddenError, NotFoundError, BadRequestError } from "../lib/httpErrors";
+import { ForbiddenError, NotFoundError, BadRequestError, ConflictError } from "../lib/httpErrors";
 import type { BackendProfileTrace } from "../lib/profileTrace";
 import { withBackendProfileStep } from "../lib/profileTrace";
 import { syncProfitLossForFinancialDates } from "./profitLossService";
@@ -156,7 +156,16 @@ export async function listEntries(workspaceId: string, uid: string, opts?: {
 /**
  * Create a new entry (transactional, idempotent-safe).
  */
-export async function createEntry(workspaceId: string, uid: string, input: unknown, trace?: BackendProfileTrace) {
+// serverOnly.refund: a refund entry (EntrySchema kind "refund"), booked only
+// by the server — refundsService.ts. The createEntry route never passes it,
+// so clients can't create negative income.
+export async function createEntry(
+    workspaceId: string,
+    uid: string,
+    input: unknown,
+    trace?: BackendProfileTrace,
+    serverOnly?: { refund: RefundInfo }
+) {
     const activeTrace = trace ?? noopTrace;
     await withBackendProfileStep(activeTrace, "entry_create.membership_check", () => assertWorkspaceMembership(workspaceId, uid), { workspaceId, uid });
     // ----------------------------
@@ -213,6 +222,7 @@ export async function createEntry(workspaceId: string, uid: string, input: unkno
         createdAtLocal,
         updatedAtLocal: createdAtLocal,
         clientMutationId,
+        ...(serverOnly?.refund ? { kind: "refund" as const, refund: serverOnly.refund } : {}),
     };
     const canonical: EntryType = EntrySchema.parse(entryToWrite);
     // ----------------------------
@@ -282,6 +292,13 @@ export async function updateEntry(workspaceId: string, uid: string, entryId: str
             ...snap.data(),
         });
         previousEntry = existing;
+        // Refunds are booked by the server against an invoice or payment;
+        // change one by deleting it and recording it again.
+        if (existing.kind === "refund") {
+            throw new ConflictError("A refund can't be edited — delete it and record the refund again.");
+        }
+        delete patchData.kind;
+        delete patchData.refund;
         // ---------------------------
         // 2. Merge existing + patch (deep merge for nested blocks)
         //    FRONTEND sends partial patches for w2/independent.
@@ -413,6 +430,13 @@ export async function deleteEntry(workspaceId: string, uid: string, entryId: str
         await import("./invoicesService.js")
             .then(({ reopenInvoicesForDeletedEntry }) => reopenInvoicesForDeletedEntry(workspaceId, entryId))
             .catch((error) => console.error("entriesService.deleteEntry: failed to reopen invoice", error));
+        // A refund deleted by hand comes off its invoice's refund list.
+        const refundInvoiceId = removedEntry.kind === "refund" ? removedEntry.refund?.invoiceId ?? null : null;
+        if (refundInvoiceId && removedEntry.refund?.reason !== "dispute" && removedEntry.refund?.reason !== "dispute_reversed") {
+            await import("./refundsService.js")
+                .then(({ forgetRefundForDeletedEntry }) => forgetRefundForDeletedEntry(workspaceId, entryId, refundInvoiceId))
+                .catch((error) => console.error("entriesService.deleteEntry: failed to update invoice refunds", error));
+        }
     }
     else if (removedEntry?.workspace === "w2") {
         payStubs = await syncW2PayStubDates(workspaceId, uid, [removedEntry.date]);

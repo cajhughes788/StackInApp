@@ -79,6 +79,19 @@ export function computeIncomeStreams(
     const otherLinesTotal = (independent.incomeBreakdowns ?? [])
       .filter((item) => item.paymentMethod === "other")
       .reduce((sum, item) => sum + getIncomeBreakdownTotal(item), 0)
+    // A refund entry's "other" money is negative and so is its named custom
+    // income (refundsService.ts): kept signed so the client's stream nets out.
+    if (entry.kind === "refund") {
+      let namedTotal = 0
+      for (const item of independent.customIncome ?? []) {
+        const name = item.label?.trim() || "Other income"
+        const amount = Number(item.amount ?? 0)
+        namedTotal += amount
+        add(`named:${name.toLowerCase()}`, entryId, entry.date, amount, { [item.category ?? "other"]: amount }, name)
+      }
+      add("other", entryId, entry.date, otherLinesTotal - namedTotal)
+      continue
+    }
     const customTotal = (independent.customIncome ?? []).reduce((sum, item) => sum + Math.max(0, Number(item.amount ?? 0)), 0)
     const namedScale = customTotal > otherLinesTotal && customTotal > 0 ? otherLinesTotal / customTotal : 1
     for (const item of independent.customIncome ?? []) {

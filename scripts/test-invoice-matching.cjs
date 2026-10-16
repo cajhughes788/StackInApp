@@ -470,4 +470,101 @@ run("public page: Pay button only when payable, and not after returning paid", (
   assert.equal(paid.includes("<form"), false);
 });
 
+// ------------------------------------------------------------
+// Phase 4: refunds as their own entries
+// ------------------------------------------------------------
+const { EntrySchema } = require("../shared/schemas/entry.ts");
+const { computeEntry } = require("../shared/computeEntry.ts");
+const { computeIncomeGaugeForEntries } = require("../shared/computeIncomeGauge.ts");
+const { invoiceRefundableAmount, invoiceRefundedTotal } = require("../shared/schemas/invoice.ts");
+
+function indEntry(over) {
+  return {
+    id: over.id ?? "e", workspace: "independent", date: "2026-10-22", notes: "",
+    independent: { hours: 0, incomeBreakdowns: [], unreportedCash: 0, unreportedCashTips: 0, customIncome: [], ...over.independent },
+    ...over.top,
+  };
+}
+const refundInfo = (reason) => ({ reason, invoiceId: "i16", invoiceNumber: "0016", clientName: "Acme", stripeRefundId: null, stripeDisputeId: null });
+
+run("refund entries: negative only on refunds, positive only on won disputes", () => {
+  const refund = indEntry({ top: { kind: "refund", refund: refundInfo("requested_by_client") }, independent: { incomeBreakdowns: [{ paymentMethod: "pos", services: -200 }] } });
+  assert.equal(EntrySchema.safeParse(refund).success, true);
+  assert.equal(EntrySchema.safeParse({ ...refund, independent: { ...refund.independent, incomeBreakdowns: [{ paymentMethod: "pos", services: 200 }] } }).success, false);
+  const won = indEntry({ top: { kind: "refund", refund: refundInfo("dispute_reversed") }, independent: { incomeBreakdowns: [{ paymentMethod: "pos", services: 450 }] } });
+  assert.equal(EntrySchema.safeParse(won).success, true);
+  assert.equal(EntrySchema.safeParse({ ...won, independent: { ...won.independent, incomeBreakdowns: [{ paymentMethod: "pos", services: -450 }] } }).success, false);
+  // Ordinary entries can't go negative or carry refund details.
+  assert.equal(EntrySchema.safeParse(indEntry({ independent: { incomeBreakdowns: [{ paymentMethod: "pos", services: -5 }] } })).success, false);
+  assert.equal(EntrySchema.safeParse(indEntry({ top: { refund: refundInfo("other") }, independent: { incomeBreakdowns: [{ paymentMethod: "pos", services: 5 }] } })).success, false);
+  assert.equal(EntrySchema.safeParse(indEntry({ top: { kind: "refund" }, independent: { incomeBreakdowns: [{ paymentMethod: "pos", services: -5 }] } })).success, false);
+  // Existing entries without kind still parse.
+  assert.equal(EntrySchema.safeParse(indEntry({ independent: { incomeBreakdowns: [{ paymentMethod: "zelle", services: 100 }] } })).success, true);
+});
+
+run("refunds net out of income totals but aren't days worked", () => {
+  const settings = { independent: {} };
+  const paid = indEntry({ id: "p", top: { date: "2026-10-18" }, independent: { incomeBreakdowns: [{ paymentMethod: "pos", services: 1042.5 }] } });
+  paid.date = "2026-10-18";
+  const refund = indEntry({ id: "r", top: { kind: "refund", refund: refundInfo("requested_by_client") }, independent: { incomeBreakdowns: [{ paymentMethod: "pos", services: -200 }] } });
+  for (const e of [paid, refund]) e.totals = computeEntry(e, settings);
+  assert.equal(refund.totals.dayTotal, -200);
+  const gauge = computeIncomeGaugeForEntries([paid, refund], { includeUnreportedInUI: false });
+  assert.equal(Math.round(gauge.incomeGauge * 100), 84250);
+  assert.equal(gauge.daysWorked, 1);
+});
+
+run("named-payer refunds net their own custom income", () => {
+  const { getNonCustomOtherIncome } = require("../shared/independentIncome.ts");
+  const independent = {
+    incomeBreakdowns: [{ paymentMethod: "other", services: -40 }],
+    customIncome: [{ label: "Acme", amount: -40, category: "services" }],
+  };
+  assert.equal(getNonCustomOtherIncome(independent).total, 0);
+});
+
+run("refundable amount: total less refunds and disputed money", () => {
+  const base = { status: "paid", total: 1042.5, refunds: [{ amount: 200 }], dispute: null };
+  assert.equal(invoiceRefundedTotal(base), 200);
+  assert.equal(invoiceRefundableAmount(base), 842.5);
+  assert.equal(invoiceRefundableAmount({ ...base, dispute: { fundsWithdrawn: true, status: "open", amount: 842.5 } }), 0);
+  assert.equal(invoiceRefundableAmount({ ...base, dispute: { fundsWithdrawn: true, status: "won", amount: 842.5 } }), 842.5);
+  assert.equal(invoiceRefundableAmount({ ...base, status: "sent" }), 0);
+});
+
+run("display status: partly refunded, refunded, disputed", () => {
+  const paid = { status: "paid", dueDate: "2026-11-14", paidAt: "2026-10-18T12:00:00.000Z", total: 100, refunds: [], dispute: null };
+  assert.equal(invoiceDisplayStatus({ ...paid, refunds: [{ amount: 40 }] }, "2026-10-22").label, "Paid · partly refunded");
+  assert.equal(invoiceDisplayStatus({ ...paid, refunds: [{ amount: 100 }] }, "2026-10-22").label, "Refunded");
+  assert.equal(invoiceDisplayStatus({ ...paid, dispute: { status: "open" } }, "2026-10-22").label, "Disputed");
+  assert.equal(invoiceDisplayStatus({ ...paid, dispute: { status: "won" } }, "2026-10-22").label, "Paid Oct 18, 2026");
+});
+
+run("payment streams: a refund nets its stream and keeps shares at 100%", () => {
+  const Module = require("node:module");
+  const path = require("node:path");
+  const original = Module._resolveFilename;
+  Module._resolveFilename = function (request, ...rest) {
+    if (request.startsWith("@shared/")) request = path.join(__dirname, "..", "shared", request.slice(8));
+    return original.call(this, request, ...rest);
+  };
+  try {
+    const { computeIncomeStreams } = require("../frontend/lib/incomeStreams.ts");
+    const paid = indEntry({ id: "p", independent: { incomeBreakdowns: [{ paymentMethod: "pos", services: 1042.5 }] } });
+    const zelle = indEntry({ id: "z", independent: { incomeBreakdowns: [{ paymentMethod: "other", services: 480 }], customIncome: [{ label: "Maple Dental", amount: 480, category: "services" }] } });
+    const cardRefund = indEntry({ id: "r1", top: { kind: "refund", refund: refundInfo("requested_by_client") }, independent: { incomeBreakdowns: [{ paymentMethod: "pos", services: -200 }] } });
+    const namedRefund = indEntry({ id: "r2", top: { kind: "refund", refund: refundInfo("other") }, independent: { incomeBreakdowns: [{ paymentMethod: "other", services: -80 }], customIncome: [{ label: "Maple Dental", amount: -80, category: "services" }] } });
+    const { total, streams } = computeIncomeStreams([paid, zelle, cardRefund, namedRefund], { includePersonalCash: false });
+    assert.equal(Math.round(total * 100), 124250);
+    const pos = streams.find((s) => s.key === "pos");
+    assert.equal(pos.amount, 842.5);
+    assert.ok(pos.days.some((d) => d.amount === -200) || pos.days.some((d) => d.entries.some((e) => e.amount === -200)));
+    assert.equal(streams.find((s) => s.key === "named:maple dental").amount, 400);
+    assert.equal(streams.find((s) => s.key === "other"), undefined);
+    assert.equal(Math.round(streams.reduce((sum, s) => sum + s.share, 0) * 1000), 1000);
+  } finally {
+    Module._resolveFilename = original;
+  }
+});
+
 process.stdout.write("invoice matching checks passed\n");

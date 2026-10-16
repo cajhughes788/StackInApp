@@ -1,4 +1,4 @@
-import type { InvoiceTerms, InvoiceType } from "./schemas/invoice"
+import { invoiceRefundedTotal, type InvoiceTerms, type InvoiceType } from "./schemas/invoice"
 
 // ---------------------------------------------------------------------------
 // Invoice display helpers
@@ -54,9 +54,17 @@ export type InvoiceDisplayStatus = {
 
 // `today` is a YYYY-MM-DD in the business's local time; the caller decides.
 export function invoiceDisplayStatus(
-  invoice: Pick<InvoiceType, "status" | "dueDate" | "paidAt">,
+  invoice: Pick<InvoiceType, "status" | "dueDate" | "paidAt"> & Partial<Pick<InvoiceType, "total" | "refunds" | "dispute">>,
   today: string
 ): InvoiceDisplayStatus {
+  if (invoice.status === "paid" && (invoice.dispute?.status === "open" || invoice.dispute?.status === "inquiry")) {
+    return { label: "Disputed", tone: "overdue" }
+  }
+  const refunded = invoiceRefundedTotal(invoice)
+  if (invoice.status === "paid" && refunded > 0) {
+    const fully = Math.round(refunded * 100) >= Math.round((invoice.total ?? 0) * 100)
+    return { label: fully ? "Refunded" : "Paid · partly refunded", tone: "paid" }
+  }
   switch (invoice.status) {
     case "paid":
       return { label: invoice.paidAt ? `Paid ${formatInvoiceDate(invoice.paidAt.slice(0, 10))}` : "Paid", tone: "paid" }

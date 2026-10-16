@@ -25,6 +25,13 @@ import {
 } from "@/components/ui/alert-dialog"
 import { useToast } from "@/hooks/use-toast"
 import MarkPaidSheet from "@/components/invoices/mark-paid-sheet"
+import RefundSheet from "@/components/invoices/refund-sheet"
+import {
+  InvoiceDisputeCard,
+  InvoiceMoneyBreakdown,
+  hasMoneyHistory,
+  invoiceKeptAmount,
+} from "@/components/invoices/invoice-money"
 import {
   InvoicePreview,
   InvoicesPage,
@@ -48,7 +55,7 @@ import {
   invoiceBalanceDue,
   publicInvoiceUrl,
 } from "@shared/invoiceDisplay"
-import type { InvoiceTerms, InvoiceType } from "@shared/schemas/invoice"
+import { invoiceRefundableAmount, type InvoiceTerms, type InvoiceType } from "@shared/schemas/invoice"
 
 function formatMoment(iso: string): string {
   return new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
@@ -97,6 +104,7 @@ export default function InvoiceDetailPage() {
   const invoice = invoices.find((i) => i.id === invoiceId) ?? null
   const [busy, setBusy] = useState<null | "link" | "pdf" | "void" | "delete">(null)
   const [markPaidOpen, setMarkPaidOpen] = useState(false)
+  const [refundOpen, setRefundOpen] = useState(false)
   const [confirm, setConfirm] = useState<null | "void" | "delete">(null)
   const today = localToday()
 
@@ -213,6 +221,11 @@ export default function InvoiceDetailPage() {
                   Delete draft
                 </DropdownMenuItem>
               ) : null}
+              {invoice.status === "paid" && invoiceRefundableAmount(invoice) > 0 ? (
+                <DropdownMenuItem onSelect={() => setRefundOpen(true)}>
+                  {invoice.paidVia === "online" ? "Refund" : "Record a refund"}
+                </DropdownMenuItem>
+              ) : null}
               {invoice.status === "paid" ? (
                 <DropdownMenuItem disabled>To undo a payment, delete its income entry</DropdownMenuItem>
               ) : null}
@@ -250,7 +263,14 @@ export default function InvoiceDetailPage() {
               <InvoiceStatusPill invoice={invoice} today={today} short />
             </div>
             <div className="text-[34px] font-bold leading-tight tracking-tight tabular-nums text-foreground">
-              {formatInvoiceMoney(invoice.total)}
+              {hasMoneyHistory(invoice) ? (
+                <>
+                  {formatInvoiceMoney(invoiceKeptAmount(invoice))}{" "}
+                  <span className="text-[15px] font-medium text-muted-foreground">kept</span>
+                </>
+              ) : (
+                formatInvoiceMoney(invoice.total)
+              )}
             </div>
             <div className="text-sm text-muted-foreground">{metaLine(invoice)}</div>
           </section>
@@ -277,6 +297,23 @@ export default function InvoiceDetailPage() {
                 {busy === "pdf" ? "Preparing..." : "Share PDF"}
               </Button>
             </div>
+          ) : null}
+
+          {workspaceId && invoice.dispute ? (
+            <InvoiceDisputeCard invoice={invoice} workspaceId={workspaceId} onSharePdf={() => void onSharePdf()} />
+          ) : null}
+
+          {hasMoneyHistory(invoice) ? <InvoiceMoneyBreakdown invoice={invoice} /> : null}
+
+          {invoice.refunds.length > 0 && invoiceRefundableAmount(invoice) > 0 ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-12 w-full rounded-full border-card-border bg-transparent font-semibold"
+              onClick={() => setRefundOpen(true)}
+            >
+              Refund more
+            </Button>
           ) : null}
 
           {invoice.status === "sent" && invoice.paymentFailedAt && !invoice.pendingPaymentAt ? (
@@ -320,6 +357,19 @@ export default function InvoiceDetailPage() {
           <InvoicePreview invoice={invoice} settings={settings} />
 
           <section aria-label="History" className="space-y-2 px-1 pb-2 text-sm text-muted-foreground">
+            {[...invoice.refunds].reverse().map((refund) => (
+              <div key={refund.id} className="flex items-center gap-2.5">
+                <span className="size-2 rounded-full bg-red-600" aria-hidden="true" />
+                Refunded {formatInvoiceMoney(refund.amount)} · {formatInvoiceDate(refund.date)}
+              </div>
+            ))}
+            {invoice.dispute ? (
+              <div className="flex items-center gap-2.5">
+                <span className="size-2 rounded-full bg-red-600" aria-hidden="true" />
+                Dispute {invoice.dispute.status === "won" ? "won" : invoice.dispute.status === "lost" ? "lost" : "opened"} ·{" "}
+                {formatInvoiceDate(invoice.dispute.updatedAt.slice(0, 10))}
+              </div>
+            ) : null}
             {invoice.paidAt ? (
               <div className="flex items-center gap-2.5">
                 <span className="size-2 rounded-full bg-primary" aria-hidden="true" />
@@ -343,6 +393,9 @@ export default function InvoiceDetailPage() {
 
           {workspaceId ? (
             <MarkPaidSheet open={markPaidOpen} onOpenChange={setMarkPaidOpen} invoice={invoice} workspaceId={workspaceId} />
+          ) : null}
+          {workspaceId && invoice.status === "paid" ? (
+            <RefundSheet open={refundOpen} onOpenChange={setRefundOpen} invoice={invoice} workspaceId={workspaceId} />
           ) : null}
 
           <AlertDialog open={confirm !== null} onOpenChange={(open) => !open && setConfirm(null)}>

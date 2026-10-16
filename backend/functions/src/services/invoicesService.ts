@@ -213,6 +213,10 @@ export async function updateInvoiceStatus(
   if (action.action === "share") {
     return shareInvoice(workspaceId, ref)
   }
+  if (action.action === "refund") {
+    const { refundInvoice } = await import("./refundsService.js")
+    return { invoice: await refundInvoice(workspaceId, uid, invoiceId, action) }
+  }
 
   let voidedSessionId: string | null = null
   const invoice = await db.runTransaction(async (txn) => {

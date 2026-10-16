@@ -9,6 +9,7 @@ import type { ProfitLossDetailItem, ProfitLossHours } from "@shared/schemas/prof
 import { ProfitLossStatementSchema, ProfitLossStatementListSchema, type ProfitLossPeriodType, type ProfitLossStatement, } from "@shared/schemas/profitLoss";
 import { ProfitLossInsightsSchema, type ProfitLossInsights } from "@shared/schemas/profitLossInsights";
 import { listCompleteMonths } from "@shared/incomeInsights";
+import { getIndependentCategorizedIncomeTotals } from "@shared/independentIncome";
 const DEFAULT_TIME_ZONE = "America/Los_Angeles";
 const INCOME_CATEGORY_CONFIG: Array<{
     key: IncomeCategory;
@@ -75,10 +76,35 @@ function compareByDateThenLabel(a: {
 }) {
     return a.date.localeCompare(b.date) || a.label.localeCompare(b.label);
 }
+// Refund entries (kind "refund") are returns and allowances: a separate line,
+// not a cut to a category — see ProfitLossIncomeSchema.
+function buildRefunds(entries: EntryType[]): { total: number; items: ProfitLossDetailItem[] } {
+    const items: ProfitLossDetailItem[] = [];
+    for (const entry of entries) {
+        if (entry.workspace !== "independent" || entry.kind !== "refund")
+            continue;
+        // Money given back is positive here; a won dispute's return negative.
+        const amount = roundCurrency(-getIndependentCategorizedIncomeTotals(entry.independent).total);
+        if (amount === 0)
+            continue;
+        const refund = entry.refund;
+        items.push({
+            id: entry.id ?? `${entry.date}-refund`,
+            date: entry.date,
+            label: refund?.clientName ?? (entry.notes.trim() || "Refund"),
+            description: refund?.invoiceNumber
+                ? `${refund.reason === "dispute" ? "Dispute" : refund.reason === "dispute_reversed" ? "Dispute won" : "Refund"} · Invoice #${refund.invoiceNumber}`
+                : null,
+            amount,
+        });
+    }
+    items.sort(compareByDateThenLabel);
+    return { total: roundCurrency(items.reduce((sum, item) => sum + item.amount, 0)), items };
+}
 function buildIncomeCategories(entries: EntryType[]) {
     const grouped = new Map(INCOME_CATEGORY_CONFIG.map(({ key }) => [key, [] as ProfitLossDetailItem[]]));
     for (const entry of entries) {
-        if (entry.workspace !== "independent")
+        if (entry.workspace !== "independent" || entry.kind === "refund")
             continue;
         const note = entry.notes.trim();
         for (const [breakdownIndex, breakdown] of (entry.independent?.incomeBreakdowns ?? []).entries()) {
@@ -322,7 +348,9 @@ function buildStatement(workspaceId: string, descriptor: PeriodDescriptor, entri
     // builds the category line items, eliminating the redundant aggregateIndependentPnL pass.
     const incomeCategories = buildIncomeCategories(entries);
     const incomeTotals = new Map(incomeCategories.map((c) => [c.category, c.amount]));
-    const incomeTotal = roundCurrency(incomeCategories.reduce((sum, c) => sum + c.amount, 0));
+    const grossReceipts = roundCurrency(incomeCategories.reduce((sum, c) => sum + c.amount, 0));
+    const refunds = buildRefunds(entries);
+    const incomeTotal = roundCurrency(grossReceipts - refunds.total);
 
     const byCategory = buildExpenseCategories(expenses);
     const totalExpenses = roundCurrency(byCategory.reduce((sum, item) => sum + item.amount, 0));
@@ -349,6 +377,9 @@ function buildStatement(workspaceId: string, descriptor: PeriodDescriptor, entri
             other: incomeTotals.get("other") ?? 0,
             total: incomeTotal,
             categories: incomeCategories,
+            grossReceipts,
+            refunds: refunds.total,
+            refundItems: refunds.items,
         },
         expenses: {
             byCategory,

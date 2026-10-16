@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { CheckCircle2, ChevronRight, EyeOff, ReceiptText } from "lucide-react"
+import { AlertTriangle, CheckCircle2, ChevronRight, EyeOff, ReceiptText } from "lucide-react"
 
 import { getPlaidItems } from "@/lib/api/plaidApi"
 
@@ -17,6 +17,7 @@ import { useSettingsData, useSettingsStore } from "@/lib/stores/useSettingsStore
 import * as settingsService from "@/lib/domain/settingsService"
 import { useToast } from "@/hooks/use-toast"
 import { computeReceiptCoverage } from "@shared/receiptRequirements"
+import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
 
 // One review list for everything the bank sent over: deposits (income) and
 // charges and refunds (expenses). Shown on both the Income and Expenses tabs
@@ -48,7 +49,17 @@ export default function NeedsYouPanel() {
   const monthLabel = isCurrentMonth
     ? "this month"
     : `in ${new Date(`${expensesMonth}-15T12:00:00`).toLocaleDateString("en-US", { month: "long" })}`
-  const total = (incomeCount ?? 0) + (expensesCount ?? 0) + missingReceipts
+  // Open chargebacks have a deadline, so they sit here too (refundsService.ts
+  // sets invoice.dispute from Stripe's events).
+  const invoices = useInvoicesStore((s) => (activeWorkspaceId ? s.byWorkspaceId[activeWorkspaceId]?.invoices : undefined))
+  useEffect(() => {
+    if (activeWorkspaceId) void useInvoicesStore.getState().load(activeWorkspaceId).catch(() => {})
+  }, [activeWorkspaceId])
+  const openDisputes = useMemo(
+    () => (invoices ?? []).filter((invoice) => invoice.dispute && (invoice.dispute.status === "open" || invoice.dispute.status === "inquiry")),
+    [invoices]
+  )
+  const total = (incomeCount ?? 0) + (expensesCount ?? 0) + missingReceipts + openDisputes.length
 
   async function hideMissingReceipts() {
     if (!activeWorkspaceId || !settings) return
@@ -114,6 +125,28 @@ export default function NeedsYouPanel() {
           Manage banks
         </Link>
       </div>
+
+      {openDisputes.map((invoice) => (
+        <Link
+          key={invoice.id}
+          href={`/app/invoices/view?id=${encodeURIComponent(invoice.id)}`}
+          className="flex items-center gap-3 rounded-[18px] border border-card-border bg-card p-4 hover:bg-muted/40"
+        >
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400">
+            <AlertTriangle className="size-5" aria-hidden="true" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-medium text-foreground">{invoice.clientName} disputed a payment</span>
+            <span className="block text-sm text-muted-foreground">
+              Invoice #{invoice.number}
+              {invoice.dispute?.evidenceDueBy
+                ? ` · respond by ${new Date(invoice.dispute.evidenceDueBy).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
+                : ""}
+            </span>
+          </span>
+          <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        </Link>
+      ))}
 
       <PlaidIncomeReviewPanel />
       <PlaidPendingTransactionsPanel />

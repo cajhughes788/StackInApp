@@ -70,7 +70,8 @@ export function computeIncomeGaugeForEntries(
     // W-2 paidHours OR independent hours
     hours += e.totals?.paidHours ?? e.independent?.hours ?? 0
 
-    if (e.date) days.add(e.date)
+    // A refund lowers income but isn't a day worked.
+    if (e.date && e.kind !== "refund") days.add(e.date)
   }
 
   const daysWorked = days.size

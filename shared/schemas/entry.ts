@@ -40,6 +40,37 @@ export const IncomeBreakdownSchema = z
     }
   })
 
+// A refund or dispute on an earlier payment, booked as its own entry on the
+// day the money went back (see RefundInfoSchema below). Its amounts are
+// negative, so every income total nets it out; the original entry is never
+// touched. A won dispute (reason "dispute_reversed") gives the money back
+// with positive amounts.
+export const RefundBreakdownSchema = z.object({
+  paymentMethod: PaymentMethodSchema,
+  services: z.coerce.number().optional(),
+  tips: z.coerce.number().optional(),
+  products: z.coerce.number().optional(),
+  other: z.coerce.number().optional(),
+})
+
+export const RefundReasonSchema = z.enum([
+  "requested_by_client",
+  "duplicate",
+  "other",
+  // Stripe pulled the money for a chargeback, and gave it back if won.
+  "dispute",
+  "dispute_reversed",
+])
+
+export const RefundInfoSchema = z.object({
+  reason: RefundReasonSchema,
+  invoiceId: z.string().nullable().default(null),
+  invoiceNumber: z.string().nullable().default(null),
+  clientName: z.string().nullable().default(null),
+  stripeRefundId: z.string().nullable().default(null),
+  stripeDisputeId: z.string().nullable().default(null),
+})
+
 /* --------------------------------------------------------
  * BLOCK A — UNIVERSAL FIELDS
  * Applies to ALL entries regardless of workspace
@@ -57,6 +88,10 @@ const all = z.object({
 
   date: z.string(),
   notes: z.string().default(""),
+  // Absent = ordinary income. "refund": money returned on an earlier
+  // payment — see RefundBreakdownSchema.
+  kind: z.enum(["income", "refund"]).optional(),
+  refund: RefundInfoSchema.optional(),
 
   createdAtLocal: z.string().optional(),
   updatedAtLocal: z.string().optional(),
@@ -103,7 +138,9 @@ const W2Entry = z.object({
 
 const IndependentEntry = z.object({
   hours: z.coerce.number().default(0),
-  incomeBreakdowns: z.array(IncomeBreakdownSchema).default([]),
+  // Refund entries hold RefundBreakdownSchema lines (signed); the sign rules
+  // are enforced on EntrySchema.
+  incomeBreakdowns: z.array(z.union([IncomeBreakdownSchema, RefundBreakdownSchema])).default([]),
   unreportedCash: z.coerce.number().default(0),
   unreportedCashTips: z.coerce.number().default(0),
   customIncome: z
@@ -154,6 +191,39 @@ totals: DerivedTotals.default({
   taxableTotal: 0,
 }),
 
+}).superRefine((entry, ctx) => {
+  // Only refund entries may carry negative income, and they must: amounts
+  // that go back are negative, a won dispute's are positive. Everything else
+  // keeps the ordinary rules (IncomeBreakdownSchema).
+  const breakdowns = entry.independent?.incomeBreakdowns ?? []
+  if (entry.kind !== "refund") {
+    if (entry.refund) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["refund"], message: "Only refund entries carry refund details." })
+    }
+    breakdowns.forEach((breakdown, index) => {
+      if (!IncomeBreakdownSchema.safeParse(breakdown).success) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["independent", "incomeBreakdowns", index], message: "Income amounts must be positive." })
+      }
+    })
+    return
+  }
+  if (!entry.refund) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["refund"], message: "A refund entry needs its refund details." })
+    return
+  }
+  const positive = entry.refund.reason === "dispute_reversed"
+  breakdowns.forEach((breakdown, index) => {
+    const values = [breakdown.services, breakdown.tips, breakdown.products, breakdown.other].map((v) => Number(v ?? 0))
+    const wrongSign = values.some((v) => (positive ? v < 0 : v > 0))
+    const total = values.reduce((sum, v) => sum + v, 0)
+    if (wrongSign || total === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["independent", "incomeBreakdowns", index],
+        message: positive ? "A reversed dispute returns positive amounts." : "Refund amounts must be negative.",
+      })
+    }
+  })
 })
 
 export type EntryType = z.infer<typeof EntrySchema>
@@ -196,3 +266,5 @@ export const FieldSchemas = {
 export type IncomeCategory = z.infer<typeof IncomeCategorySchema>
 export type PaymentMethod = z.infer<typeof PaymentMethodSchema>
 export type IncomeBreakdown = z.infer<typeof IncomeBreakdownSchema>
+export type RefundInfo = z.infer<typeof RefundInfoSchema>
+export type RefundReason = z.infer<typeof RefundReasonSchema>

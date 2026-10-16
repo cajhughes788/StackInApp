@@ -284,7 +284,19 @@ function StatementSection({
   emptyLabel,
   totalLabel,
   total,
+  subtotal,
+  trailingRows = [],
 }: {
+  // Revenue with refunds: Gross receipts after the categories, then the
+  // Refunds row, then the net total.
+  subtotal?: { label: string; value: number }
+  trailingRows?: Array<{
+    rowKey: string
+    label: string
+    amount: number
+    items: ProfitLossDetailItem[]
+    countLabel: string
+  }>
   title: string
   rows: Array<{
     rowKey: string
@@ -308,6 +320,17 @@ function StatementSection({
       ) : (
         <Accordion type="multiple" className="w-full">
           {rows.map((row) => (
+            <StatementCategoryRow key={row.rowKey} {...row} />
+          ))}
+          {subtotal ? (
+            <div className="flex items-center justify-between gap-3 border-b border-border/70 py-3 text-sm font-semibold text-foreground">
+              <span>{subtotal.label}</span>
+              <span className="tabular-nums">
+                <StatementValue value={subtotal.value} />
+              </span>
+            </div>
+          ) : null}
+          {trailingRows.map((row) => (
             <StatementCategoryRow key={row.rowKey} {...row} />
           ))}
         </Accordion>
@@ -540,7 +563,13 @@ export default function ProfitLossPage() {
     return [
       `${statement.label} Profit & Loss Statement`,
       `${statement.periodStart} to ${statement.periodEnd}`,
-      `Gross Income: ${formatCurrency(statement.income.total)}`,
+      ...(statement.income.refunds
+        ? [
+            `Gross Receipts: ${formatCurrency(statement.income.grossReceipts ?? statement.income.total + statement.income.refunds)}`,
+            `Refunds: ${formatCurrency(-statement.income.refunds)}`,
+          ]
+        : []),
+      `${statement.income.refunds ? "Net Revenue" : "Gross Income"}: ${formatCurrency(statement.income.total)}`,
       `Gross Expenses: ${formatCurrency(statement.expenses.total)}`,
       `Net Income: ${formatCurrency(statement.netProfit)}`,
     ].join("\n")
@@ -550,7 +579,13 @@ export default function ProfitLossPage() {
     const expenseRows = buildExpenseDisplayRows(statement.expenses.byCategory)
     const rows = [
       ["Section", "Label", "Amount", "Count", "Transaction Date", "Transaction Label", "Transaction Description"],
-      ["Summary", "Gross Income", statement.income.total, "", "", "", ""],
+      ...(statement.income.refunds
+        ? [
+            ["Summary", "Gross Receipts", statement.income.grossReceipts ?? statement.income.total + statement.income.refunds, "", "", "", ""],
+            ["Summary", "Refunds", -statement.income.refunds, "", "", "", ""],
+          ]
+        : []),
+      ["Summary", statement.income.refunds ? "Net Revenue" : "Gross Income", statement.income.total, "", "", "", ""],
       ["Summary", "Gross Expenses", statement.expenses.total, "", "", "", ""],
       ["Summary", "Net Income", statement.netProfit, "", "", "", ""],
       ...statement.income.categories.filter((item) => item.amount > 0).flatMap((item) => [
@@ -565,6 +600,20 @@ export default function ProfitLossPage() {
           detail.description ?? "",
         ]),
       ]),
+      ...(statement.income.refunds
+        ? [
+            ["Refunds", "Returns and allowances", -statement.income.refunds, statement.income.refundItems.length, "", "", ""],
+            ...statement.income.refundItems.map((detail) => [
+              "Refund Detail",
+              "Returns and allowances",
+              -detail.amount,
+              "",
+              detail.date,
+              detail.label,
+              detail.description ?? "",
+            ]),
+          ]
+        : []),
       ...expenseRows.flatMap((item) => [
         ["Operating Expenses", item.label, item.amount, item.items.length, "", "", ""],
         ...(item.subcategories && item.subcategories.length > 0
@@ -812,8 +861,21 @@ export default function ProfitLossPage() {
               <tbody>
                 <tr class="section-title"><td colspan="3">Revenue</td></tr>
                 ${revenueRows}
+                ${
+                  statement.income.refunds
+                    ? `<tr class="total-row">
+                  <td colspan="2">Gross Receipts</td>
+                  <td class="amount">${formatCurrency(statement.income.grossReceipts ?? statement.income.total + statement.income.refunds)}</td>
+                </tr>
+                <tr class="summary-row">
+                  <td colspan="2">Refunds (returns and allowances)</td>
+                  <td class="amount">${formatCurrency(-statement.income.refunds)}</td>
+                </tr>
+                ${renderDetailRows(statement.income.refundItems.map((item) => ({ ...item, amount: -item.amount })), "")}`
+                    : ""
+                }
                 <tr class="total-row">
-                  <td colspan="2">Gross Profit</td>
+                  <td colspan="2">${statement.income.refunds ? "Net Revenue" : "Gross Profit"}</td>
                   <td class="amount">${formatCurrency(statement.income.total)}</td>
                 </tr>
 
@@ -916,8 +978,29 @@ export default function ProfitLossPage() {
                 countLabel: `${item.count} ${item.count === 1 ? "transaction" : "transactions"}`,
               }))}
               emptyLabel="No revenue recorded in this period."
-              totalLabel="Gross profit"
+              totalLabel={selected.income.refunds ? "Net revenue" : "Gross profit"}
               total={selected.income.total}
+              subtotal={
+                selected.income.refunds
+                  ? { label: "Gross receipts", value: selected.income.grossReceipts ?? selected.income.total + selected.income.refunds }
+                  : undefined
+              }
+              trailingRows={
+                selected.income.refunds
+                  ? [
+                      {
+                        rowKey: "income-refunds",
+                        label: "Refunds",
+                        amount: -selected.income.refunds,
+                        // Shown as money out of revenue (negative).
+                        items: selected.income.refundItems.map((item) => ({ ...item, amount: -item.amount })),
+                        countLabel: `Returns and allowances · ${selected.income.refundItems.length} ${
+                          selected.income.refundItems.length === 1 ? "item" : "items"
+                        }`,
+                      },
+                    ]
+                  : []
+              }
             />
 
             <StatementSection

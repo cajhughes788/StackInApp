@@ -20,6 +20,34 @@ export const InvoiceLineSchema = z.object({
 
 export const InvoiceStatusSchema = z.enum(["draft", "sent", "paid", "void"])
 
+// Money returned on a paid invoice. Each one is also a refund Entry (kind
+// "refund", negative amounts) dated when it went back; this list is what the
+// invoice shows and what caps further refunds.
+export const InvoiceRefundSchema = z.object({
+  // Stable key: the Stripe refund id, or the client mutation id for one
+  // recorded by hand.
+  id: z.string(),
+  entryId: z.string().nullable().default(null),
+  amount: z.number().positive(),
+  date: z.string(),
+  reason: z.enum(["requested_by_client", "duplicate", "other"]),
+  stripeRefundId: z.string().nullable().default(null),
+})
+
+// A chargeback on an online payment (Stripe dispute).
+export const InvoiceDisputeSchema = z.object({
+  stripeDisputeId: z.string(),
+  // inquiry: the bank is asking, no money moved yet. open: Stripe took the
+  // money while it's decided. won / lost: decided.
+  status: z.enum(["inquiry", "open", "won", "lost"]),
+  amount: z.number(),
+  reason: z.string().nullable().default(null),
+  evidenceDueBy: z.string().nullable().default(null),
+  fundsWithdrawn: z.boolean().default(false),
+  feeAmount: z.number().default(0),
+  updatedAt: z.string(),
+})
+
 // The Entry payment methods plus "check". A check has no Entry payment
 // method of its own (no grid column or income-stream bucket), so it's booked
 // as named "Other" income under the client — which every income total
@@ -65,6 +93,8 @@ export const InvoiceSchema = z
     // A bank transfer (ACH) the client started in Checkout, still clearing —
     // the invoice stays "sent" and isn't payable again until it settles.
     pendingPaymentAt: z.string().nullable().default(null),
+    refunds: z.array(InvoiceRefundSchema).default([]),
+    dispute: InvoiceDisputeSchema.nullable().default(null),
     // The last bank transfer that bounced (insufficient funds, closed
     // account); cleared when the invoice is paid.
     paymentFailedAt: z.string().nullable().default(null),
@@ -92,6 +122,26 @@ export type InvoiceType = z.infer<typeof InvoiceSchema>
 export type InvoiceLine = z.infer<typeof InvoiceLineSchema>
 export type InvoiceStatus = z.infer<typeof InvoiceStatusSchema>
 export type InvoicePaidMethod = z.infer<typeof InvoicePaidMethodSchema>
+export type InvoiceRefund = z.infer<typeof InvoiceRefundSchema>
+export type InvoiceDispute = z.infer<typeof InvoiceDisputeSchema>
+
+// What's been given back, and what can still be: refunds plus any money a
+// dispute is holding.
+export function invoiceRefundedTotal(invoice: { refunds?: Array<{ amount: number }> }): number {
+  return (invoice.refunds ?? []).reduce((sum, refund) => sum + Math.round(refund.amount * 100), 0) / 100
+}
+
+export function invoiceRefundableAmount(invoice: {
+  status: string
+  total: number
+  refunds?: Array<{ amount: number }>
+  dispute?: { fundsWithdrawn: boolean; status: string; amount: number } | null
+}): number {
+  if (invoice.status !== "paid") return 0
+  const held = invoice.dispute && invoice.dispute.fundsWithdrawn && invoice.dispute.status !== "won" ? invoice.dispute.amount : 0
+  const cents = Math.round(invoice.total * 100) - Math.round(invoiceRefundedTotal(invoice) * 100) - Math.round(held * 100)
+  return Math.max(0, cents) / 100
+}
 
 /* --------------------------------------------------------
  * REQUEST SCHEMAS — what the invoice routes accept
@@ -140,6 +190,17 @@ export const InvoiceStatusActionSchema = z.discriminatedUnion("action", [
   // Returns the public link (creating it the first time). Sharing a draft
   // sends it — the client is about to see it.
   z.object({ action: z.literal("share") }),
+  // Money back on a paid invoice: through Stripe for an online payment,
+  // otherwise just recorded (the user sent it themselves).
+  z.object({
+    action: z.literal("refund"),
+    amount: z
+      .number()
+      .positive()
+      .refine((amount) => Math.abs(amount * 100 - Math.round(amount * 100)) < 1e-6, "Amounts are in whole cents"),
+    reason: z.enum(["requested_by_client", "duplicate", "other"]),
+    clientMutationId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),
+  }),
   // Paid outside the bank feed (cash, check, Venmo): books the Entry now.
   z.object({
     action: z.literal("mark_paid"),

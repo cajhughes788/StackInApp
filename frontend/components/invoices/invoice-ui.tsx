@@ -143,6 +143,9 @@ const TONE_CLASSES: Record<InvoiceDisplayStatus["tone"], string> = {
 export function shortStatusLabel(invoice: InvoiceType, today: string): string {
   if (invoice.status === "sent" && invoice.pendingPaymentAt) return "Processing"
   const status = invoiceDisplayStatus(invoice, today)
+  // Refund and dispute states are already short.
+  if (status.label === "Disputed" || status.label === "Refunded") return status.label
+  if (status.label === "Paid · partly refunded") return "Partly refunded"
   if (status.tone === "overdue") {
     const days = Math.round(
       (Date.parse(`${today}T12:00:00Z`) - Date.parse(`${invoice.dueDate}T12:00:00Z`)) / 86400000

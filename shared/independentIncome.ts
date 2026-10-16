@@ -121,7 +121,9 @@ export function getCustomIncomeMirrors(
   independent: EntryType["independent"] | undefined
 ): IncomeBreakdownLike[] {
   return (independent?.customIncome ?? [])
-    .filter((item) => Number(item.amount ?? 0) > 0)
+    // Non-zero, not positive: a refund entry's negative custom income nets
+    // out its own negative "other" line the same way.
+    .filter((item) => Number(item.amount ?? 0) !== 0)
     .map((item) => ({ paymentMethod: "other" as PaymentMethod, [item.category ?? "other"]: Number(item.amount) }))
 }
 

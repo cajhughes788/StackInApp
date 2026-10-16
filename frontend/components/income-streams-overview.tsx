@@ -151,8 +151,29 @@ function StreamDayEntry({
     ctx.workspaceId,
     "rounded-lg bg-card px-3 py-1 tabular-nums text-foreground hover:text-primary"
   )
-  const field = STREAM_GRID_FIELD[streamKey]
-  const content = (
+  // Refunds are booked against an invoice by the server: shown, not edited
+  // (delete it from "⋯" and refund again to change one).
+  const isRefund = entry.kind === "refund"
+  const field = isRefund ? undefined : STREAM_GRID_FIELD[streamKey]
+  const content = isRefund ? (
+    <>
+      <span className="min-w-0">
+        <span className="text-foreground">{label}</span>
+        <span className="ml-1.5 inline-flex rounded-full bg-red-100 px-1.5 py-px align-[1px] text-[11px] font-semibold text-red-800 dark:bg-red-950 dark:text-red-300">
+          {entry.refund?.reason === "dispute" ? "Disputed" : entry.refund?.reason === "dispute_reversed" ? "Dispute won" : "Refund"}
+        </span>
+        {entry.refund?.clientName ? (
+          <span className="block truncate text-xs text-muted-foreground">
+            {entry.refund.clientName}
+            {entry.refund.invoiceNumber ? ` · Invoice #${entry.refund.invoiceNumber}` : ""}
+          </span>
+        ) : null}
+      </span>
+      <span className={`shrink-0 tabular-nums ${amount < 0 ? "text-red-700 dark:text-red-400" : "text-foreground"}`}>
+        {amount < 0 ? `−${formatCurrency(-amount)}` : formatCurrency(amount)}
+      </span>
+    </>
+  ) : (
     <>
       <span className="truncate text-foreground">{label}</span>
       <span className="shrink-0 tabular-nums text-foreground">{formatCurrency(amount)}</span>
@@ -164,7 +185,7 @@ function StreamDayEntry({
       <div className="flex items-center gap-1">
         {field ? (
           <BreakdownCellEditor entry={entry} field={field} tipsEnabled={ctx.tipsEnabled} {...amountControl} trigger={content} />
-        ) : streamKey === "personal_cash" ? (
+        ) : streamKey === "personal_cash" && !isRefund ? (
           <NumericCellEditor entry={entry} field="independent.unreportedCash" prefix="$" {...amountControl} trigger={content} />
         ) : (
           <div className="flex min-w-0 flex-1 items-center justify-between gap-3 py-2">{content}</div>

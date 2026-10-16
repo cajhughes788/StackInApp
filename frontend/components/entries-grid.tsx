@@ -284,18 +284,30 @@ export default function EntriesGrid() {
         field: string;
         prefix?: string;
         decimals?: number;
-    }) => (<NumericCellEditor entry={entry} field={field} prefix={prefix} decimals={decimals} {...cellControl(entry.id ?? `${entry.date ?? "entry"}-${field}`, field)}/>);
+    }) => entry.kind === "refund"
+        ? <span className="block px-2 py-1 text-muted-foreground">—</span>
+        : (<NumericCellEditor entry={entry} field={field} prefix={prefix} decimals={decimals} {...cellControl(entry.id ?? `${entry.date ?? "entry"}-${field}`, field)}/>);
     const BreakdownCell = ({ entry, field, }: {
         entry: EntryType;
         field: PaymentField;
     }) => {
         const cellField = `breakdown.${field}`;
+        // Refunds are booked by the server against an invoice: shown, not
+        // edited here (the row's Delete still works).
+        if (entry.kind === "refund") {
+            const value = getIndependentColumnTotal(entry, field);
+            return (<span className={`block px-2 py-1 tabular-nums ${value < 0 ? "text-red-700 dark:text-red-400" : "text-muted-foreground"}`} title="Refund">
+            {value ? (value < 0 ? `−$${(-value).toFixed(2)}` : `$${value.toFixed(2)}`) : "—"}
+          </span>);
+        }
         return (<BreakdownCellEditor entry={entry} field={field} tipsEnabled={tipsEnabled} {...cellControl(entry.id ?? `${entry.date ?? "entry"}-${cellField}`, cellField)}/>);
     };
     /** Hours cell — fully corrected for W2 + Independent modes */
     const HoursCell = ({ entry }: {
         entry: EntryType;
     }) => {
+        if (entry.kind === "refund")
+            return <span className="block px-2 py-1 text-muted-foreground">Refund</span>;
         const cellField = entry.workspace === "w2" ? "w2.hours" : "independent.hours";
         return (<HoursCellEditor entry={entry} breakMinutesDefault={settings.w2?.breakMinutesDefault} {...cellControl(entry.id ?? `${entry.date ?? "entry"}-${cellField}`, cellField)}/>);
     };

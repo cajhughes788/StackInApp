@@ -24,8 +24,16 @@ export const ProfitLossIncomeSchema = z.object({
   tips: z.number(),
   products: z.number(),
   other: z.number(),
+  // Net: gross receipts minus refunds (and disputed money not won back).
   total: z.number(),
   categories: z.array(ProfitLossIncomeCategoryDetailSchema),
+  // Returns and allowances (Schedule C line 2): refund entries, kept out of
+  // the categories so gross receipts still match what was received (and a
+  // processor's 1099-K). Positive = money given back. Absent on statements
+  // generated before refunds existed.
+  grossReceipts: z.number().optional(),
+  refunds: z.number().default(0),
+  refundItems: z.array(ProfitLossDetailItemSchema).default([]),
 })
 
 export const ProfitLossExpenseCategorySchema = z.object({
