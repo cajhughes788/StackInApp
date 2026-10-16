@@ -46,9 +46,20 @@
     ],
     "headers": [
       {
-        "source": "**/*.@(js|css|html)",
+        // Hashed build output only: the file name changes whenever the
+        // content does, so it can be cached forever.
+        "source": "/_next/static/**",
         "headers": [
           { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+        ]
+      },
+      {
+        // Pages and their route payloads keep their names across deploys,
+        // so browsers must revalidate them — otherwise they keep running the
+        // previous build (old pages point at old chunks) after a deploy.
+        "source": "**/*.@(html|txt)",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache" }
         ]
       },
       {

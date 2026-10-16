@@ -13,6 +13,12 @@ import type { PaymentAccount, PaymentAccountAction } from "@shared/schemas/payme
 // apiFetch, not tryWrite — like recurring rules, invoice changes need a
 // connection: numbering and the paid/void transitions are decided by the
 // server, and a queued replay could act on an invoice that changed since.
+//
+// A longer timeout than apiFetch's 12s default: invoice functions are used
+// rarely, so they often cold-start, and a cold start alone measured ~12s.
+// Writes are idempotent (client mutation ids / server-side state checks),
+// so waiting longer never double-books.
+const INVOICE_TIMEOUT_MS = 30_000
 
 function query(workspaceId: string, invoiceId?: string): string {
   const base = `workspaceId=${encodeURIComponent(workspaceId)}`
@@ -25,7 +31,7 @@ export async function getInvoices(
 ): Promise<{ invoices: InvoiceType[]; settings: InvoiceSettings; paymentAccount: PaymentAccount | null }> {
   const res = await apiFetch<{ invoices: InvoiceType[]; settings: InvoiceSettings; paymentAccount: PaymentAccount | null }>(
     `${API_ENDPOINTS.invoices.get}?${query(workspaceId)}`,
-    { method: "GET" }
+    { timeout: INVOICE_TIMEOUT_MS, method: "GET" }
   )
   return { invoices: res.invoices ?? [], settings: res.settings, paymentAccount: res.paymentAccount ?? null }
 }
@@ -40,7 +46,7 @@ export async function updatePaymentAccount(
 ): Promise<{ paymentAccount: PaymentAccount | null; url: string | null }> {
   const res = await apiFetch<{ paymentAccount: PaymentAccount | null; url: string | null }>(
     `${API_ENDPOINTS.invoices.paymentAccount}?${query(workspaceId)}`,
-    { method: "POST", body: JSON.stringify(action) }
+    { timeout: INVOICE_TIMEOUT_MS, method: "POST", body: JSON.stringify(action) }
   )
   return { paymentAccount: res.paymentAccount ?? null, url: res.url ?? null }
 }
@@ -48,6 +54,7 @@ export async function updatePaymentAccount(
 /** Omitted fields keep their saved value; logoDataUrl null removes the logo. */
 export async function saveInvoiceSettings(workspaceId: string, patch: InvoiceSettingsPatch): Promise<InvoiceSettings> {
   const res = await apiFetch<{ settings: InvoiceSettings }>(`${API_ENDPOINTS.invoices.saveSettings}?${query(workspaceId)}`, {
+    timeout: INVOICE_TIMEOUT_MS,
     method: "POST",
     body: JSON.stringify(patch),
   })
@@ -56,6 +63,7 @@ export async function saveInvoiceSettings(workspaceId: string, patch: InvoiceSet
 
 export async function createInvoice(workspaceId: string, input: InvoiceCreateInput): Promise<InvoiceType> {
   const res = await apiFetch<{ invoice: InvoiceType }>(`${API_ENDPOINTS.invoices.post}?${query(workspaceId)}`, {
+    timeout: INVOICE_TIMEOUT_MS,
     method: "POST",
     body: JSON.stringify(input),
   })
@@ -64,6 +72,7 @@ export async function createInvoice(workspaceId: string, input: InvoiceCreateInp
 
 export async function editInvoice(workspaceId: string, invoiceId: string, patch: InvoicePatch): Promise<InvoiceType> {
   const res = await apiFetch<{ invoice: InvoiceType }>(`${API_ENDPOINTS.invoices.patch}?${query(workspaceId, invoiceId)}`, {
+    timeout: INVOICE_TIMEOUT_MS,
     method: "PATCH",
     body: JSON.stringify(patch),
   })
@@ -73,6 +82,7 @@ export async function editInvoice(workspaceId: string, invoiceId: string, patch:
 /** Drafts only — a sent invoice is voided instead. */
 export async function deleteInvoice(workspaceId: string, invoiceId: string): Promise<void> {
   await apiFetch(`${API_ENDPOINTS.invoices.delete}?${query(workspaceId, invoiceId)}`, {
+    timeout: INVOICE_TIMEOUT_MS,
     method: "DELETE",
     body: JSON.stringify({}),
   })
@@ -89,7 +99,7 @@ export async function updateInvoiceStatus(
 ): Promise<{ invoice: InvoiceType; entryId: string | null; shareUrl: string | null }> {
   const res = await apiFetch<{ invoice: InvoiceType; entryId: string | null; shareUrl: string | null }>(
     `${API_ENDPOINTS.invoices.status}?${query(workspaceId, invoiceId)}`,
-    { method: "POST", body: JSON.stringify(action) }
+    { timeout: INVOICE_TIMEOUT_MS, method: "POST", body: JSON.stringify(action) }
   )
   return { invoice: res.invoice, entryId: res.entryId ?? null, shareUrl: res.shareUrl ?? null }
 }
