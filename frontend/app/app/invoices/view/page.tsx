@@ -70,6 +70,7 @@ function metaLine(invoice: InvoiceType): string {
     case "paid": {
       const parts = [invoice.paidAt ? `Paid ${formatInvoiceDate(invoice.paidAt.slice(0, 10))}` : "Paid"]
       if (invoice.paidVia === "bank_match") parts.push("matched from your bank")
+      else if (invoice.paidVia === "online") parts.push("paid online")
       else if (invoice.paidMethod) parts.push(PAID_METHOD_LABELS[invoice.paidMethod])
       return parts.join(" · ")
     }
@@ -84,6 +85,8 @@ export default function InvoiceDetailPage() {
   const router = useRouter()
   const { toast } = useToast()
   const { ready, workspaceId, invoices, settings, loadStatus } = useInvoicesWorkspace()
+  const paymentAccount = useInvoicesStore((state) => (workspaceId ? state.byWorkspaceId[workspaceId]?.paymentAccount ?? null : null))
+  const payableOnline = !!paymentAccount?.chargesEnabled && !!paymentAccount.acceptOnline
   const upsertInvoice = useInvoicesStore((state) => state.upsertInvoice)
   const removeInvoice = useInvoicesStore((state) => state.removeInvoice)
   const [invoiceId] = useState(() => readQueryParam("id"))
@@ -289,8 +292,9 @@ export default function InvoiceDetailPage() {
             <div className="flex items-start gap-2.5 rounded-[14px] bg-accent px-3.5 py-3 text-sm leading-relaxed text-foreground">
               <Landmark className="mt-0.5 size-[18px] shrink-0 text-emerald-700 dark:text-emerald-400" aria-hidden="true" />
               <span>
-                When a matching deposit lands in your connected bank, we&apos;ll ask you to confirm it as this payment
-                — no need to mark it paid yourself.
+                {payableOnline
+                  ? "Your client can pay by card from the link — it's marked paid here automatically. Paid another way? A matching bank deposit shows up for you to confirm."
+                  : "When a matching deposit lands in your connected bank, we'll ask you to confirm it as this payment — no need to mark it paid yourself."}
               </span>
             </div>
           ) : null}
@@ -302,7 +306,9 @@ export default function InvoiceDetailPage() {
               <div className="flex items-center gap-2.5">
                 <span className="size-2 rounded-full bg-primary" aria-hidden="true" />
                 Paid · {formatInvoiceDate(invoice.paidAt.slice(0, 10))}
-                {invoice.paidFeeAmount > 0 ? ` · ${formatInvoiceMoney(invoice.paidFeeAmount)} processing fee` : ""}
+                {invoice.paidFeeAmount > 0
+                  ? ` · ${invoice.paidVia === "online" ? "Stripe kept" : "processing fee"} ${formatInvoiceMoney(invoice.paidFeeAmount)}`
+                  : ""}
               </div>
             ) : null}
             {invoice.sharedAt ? (

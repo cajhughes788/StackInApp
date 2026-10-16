@@ -1,16 +1,20 @@
 import type { Request, Response } from "express"
 import { findSharedInvoice } from "../services/invoicesService"
+import { isInvoicePayableOnline, startInvoiceCheckout } from "../services/invoicePaymentsService"
 import { renderPublicInvoiceNotFound, renderPublicInvoicePage } from "@shared/invoicePublicPage"
 
 // Public, unauthenticated: the page behind a shared invoice link. Hosting
 // rewrites /i/** here, so the token is the last path segment; ?t= also
 // works when the function is hit directly.
 //
-// The CSP allows nothing but inline styles, data: images (the logo) and
-// the one inline print handler.
+// POST /i/{token}/pay starts Stripe Checkout for the client (303 to
+// Stripe); the amount always comes from the stored invoice, never the form.
+//
+// The CSP allows nothing but inline styles, data: images (the logo), the one
+// inline print handler, and the Pay form posting here and on to Stripe.
 const SECURITY_HEADERS: Record<string, string> = {
   "Content-Security-Policy":
-    "default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'unsafe-inline'; base-uri 'none'; form-action 'self' https://checkout.stripe.com; frame-ancestors 'none'",
   "Referrer-Policy": "no-referrer",
   "X-Content-Type-Options": "nosniff",
   "X-Robots-Tag": "noindex, nofollow",
@@ -18,28 +22,46 @@ const SECURITY_HEADERS: Record<string, string> = {
   "Cache-Control": "private, no-store",
 }
 
-function tokenFrom(req: Request): string {
-  const fromQuery = typeof req.query.t === "string" ? req.query.t : ""
-  if (fromQuery) return fromQuery
+function parsePath(req: Request): { token: string; pay: boolean } {
   const segments = req.path.split("/").filter(Boolean)
-  return segments[segments.length - 1] ?? ""
+  const pay = segments[segments.length - 1] === "pay"
+  const fromQuery = typeof req.query.t === "string" ? req.query.t : ""
+  const token = fromQuery || (pay ? segments[segments.length - 2] : segments[segments.length - 1]) || ""
+  return { token, pay }
 }
 
 export async function publicInvoiceHandler(req: Request, res: Response): Promise<void> {
   for (const [key, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(key, value)
   res.setHeader("Content-Type", "text/html; charset=utf-8")
-  if (req.method !== "GET" && req.method !== "HEAD") {
+  const { token, pay } = parsePath(req)
+  if (pay ? req.method !== "POST" : req.method !== "GET" && req.method !== "HEAD") {
     res.status(405).send("Method not allowed")
     return
   }
   try {
-    const shared = await findSharedInvoice(tokenFrom(req))
+    if (pay) {
+      const result = await startInvoiceCheckout(token)
+      if (result.kind === "not_found") {
+        res.status(404).send(renderPublicInvoiceNotFound())
+        return
+      }
+      // Not payable (already paid, voided, payments off): back to the page.
+      res.redirect(303, result.kind === "redirect" ? result.url : `/i/${encodeURIComponent(token)}`)
+      return
+    }
+    const shared = await findSharedInvoice(token)
     if (!shared) {
       res.status(404).send(renderPublicInvoiceNotFound())
       return
     }
     const today = new Date().toISOString().slice(0, 10)
-    res.status(200).send(renderPublicInvoicePage(shared.invoice, shared.settings, today))
+    const payable = await isInvoicePayableOnline(shared.workspaceId, shared.invoice).catch(() => false)
+    res.status(200).send(
+      renderPublicInvoicePage(shared.invoice, shared.settings, today, {
+        payPath: payable ? `/i/${encodeURIComponent(token)}/pay` : null,
+        justPaid: req.query.paid === "1",
+      })
+    )
   } catch (error) {
     console.error("publicInvoice: failed to render", error)
     res.status(500).send(renderPublicInvoiceNotFound())

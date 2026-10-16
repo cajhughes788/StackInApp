@@ -30,6 +30,9 @@ function hiddenReason(
   pair: PlaidPendingTransaction | undefined,
   pairAccount: PlaidLinkedAccount | undefined
 ): string {
+  if (transaction.dismissReason === "stripe_payout") {
+    return "Payout from your Stripe account — the invoice payments in it were already added to income"
+  }
   if (transaction.isVenmoCashout) {
     return "Venmo cash-out — your Venmo payments are added from your Venmo statement import instead"
   }

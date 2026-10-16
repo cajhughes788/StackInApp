@@ -37,6 +37,8 @@ import type { IncomeCategory, PaymentMethod } from "@shared/schemas/entry"
 import * as expensesSvc from "./expensesService"
 import * as entriesSvc from "./entriesService"
 import { findInvoiceMatchForDeposit, invoicesCol } from "./invoicesService"
+import { findMatchingStripePayout, markStripePayoutMatched } from "./stripePayoutsStore"
+import { matchStripePayout, type StripePayout } from "@shared/stripePayouts"
 import { InvoiceSchema, type InvoiceType } from "@shared/schemas/invoice"
 import {
   allocateInvoiceFee,
@@ -732,7 +734,17 @@ async function upsertPendingTransactionFromPlaid(
     isVenmoCashout && !existing?.transferOverride && (await workspaceImportsVenmoStatements(workspaceId))
   const isTransfer =
     !existing?.transferOverride && (transferSignal === "transfer" || transferPairId !== null || venmoCashoutIsTransfer)
-  const autoDismiss = memoryDismiss || isTransfer
+  // A payout from the workspace's own Stripe account: the invoices it covers
+  // were booked when the clients paid, so it's dismissed like a transfer
+  // (shared/stripePayouts.ts). Restoring it sets transferOverride.
+  const stripePayout =
+    direction === "income" && !isRefund && !isTransfer && !existing?.transferOverride
+      ? await findMatchingStripePayout(workspaceId, { date: transaction.date, amount, merchantName, rawName }).catch((error) => {
+          console.error("plaidService.upsertPendingTransactionFromPlaid: Stripe payout lookup failed", error)
+          return null
+        })
+      : null
+  const autoDismiss = memoryDismiss || isTransfer || stripePayout !== null
 
   // Recomputed on every sync of a still-pending deposit, so an invoice
   // paid or voided in the meantime drops out of the suggestion. Best-effort:
@@ -785,13 +797,22 @@ async function upsertPendingTransactionFromPlaid(
     confidence: classification.confidence,
     isLikelyFuelPurchase: direction === "expense" && isLikelyFuelPurchase(merchantName ?? rawName),
     status: autoDismiss ? "dismissed" : "pending",
-    ...(isTransfer ? { dismissReason: "transfer" as const } : {}),
+    ...(isTransfer
+      ? { dismissReason: "transfer" as const }
+      : stripePayout
+        ? { dismissReason: "stripe_payout" as const, stripePayoutId: stripePayout.id }
+        : {}),
     ...(transferPairId ? { transferPairId } : {}),
     createdAt: existing?.createdAt ?? nowIso,
     updatedAt: nowIso,
   }
   const parsed = PlaidPendingTransactionSchema.parse(pending)
   await pendingTransactionsCol(workspaceId).doc(parsed.id).set(stripUndefinedDeep(parsed), { merge: true })
+  if (stripePayout) {
+    await markStripePayoutMatched(workspaceId, stripePayout.id, parsed.id).catch((error) => {
+      console.error("plaidService.upsertPendingTransactionFromPlaid: couldn't mark payout matched", error)
+    })
+  }
   // Only Plaid's enriched merchant name goes to the AI fallback — a raw
   // descriptor can carry a person's name or a reference number, and
   // payment-app charges are usually payments to people.
@@ -2194,7 +2215,7 @@ export async function listHiddenTransfers(workspaceId: string, uid: string): Pro
   // Equality-only query (no orderBy) so no composite index is needed;
   // sorted in memory instead.
   const snap = await pendingTransactionsCol(workspaceId)
-    .where("dismissReason", "==", "transfer")
+    .where("dismissReason", "in", ["transfer", "stripe_payout"])
     .limit(HIDDEN_TRANSFERS_LIMIT)
     .get()
   return snap.docs
@@ -2225,7 +2246,7 @@ export async function restoreHiddenTransfer(
       // A retry of a restore that already went through.
       return { restoredIds: [target.id] }
     }
-    if (target.status !== "dismissed" || target.dismissReason !== "transfer") {
+    if (target.status !== "dismissed" || (target.dismissReason !== "transfer" && target.dismissReason !== "stripe_payout")) {
       throw new BadRequestError("This transaction isn't a hidden transfer.")
     }
 
@@ -2239,10 +2260,19 @@ export async function restoreHiddenTransfer(
       status: "pending",
       dismissReason: FieldValue.delete(),
       transferPairId: FieldValue.delete(),
+      stripePayoutId: FieldValue.delete(),
       transferOverride: true,
       updatedAt: nowIso,
     }
     txn.set(ref, restorePatch, { merge: true })
+    // "Not a payout": free the payout to match the deposit it really is.
+    if (target.stripePayoutId) {
+      txn.set(
+        db.collection("workspaces").doc(workspaceId).collection("stripePayouts").doc(target.stripePayoutId),
+        { matchedPendingTransactionId: null, updatedAt: nowIso },
+        { merge: true }
+      )
+    }
     const restoredIds = [target.id]
 
     if (counterpartRef && counterpart && counterpart.transferPairId === target.id) {
@@ -2257,4 +2287,28 @@ export async function restoreHiddenTransfer(
     }
     return { restoredIds }
   })
+}
+
+// A Stripe payout recorded after its bank deposit was already ingested (the
+// bank posted before Stripe's event arrived): dismiss that still-pending
+// deposit now. Same amount-equality query shape as transfer pairing.
+export async function dismissDepositMatchingStripePayout(workspaceId: string, payout: StripePayout): Promise<void> {
+  const snap = await pendingTransactionsCol(workspaceId).where("amount", "==", payout.amount).limit(25).get()
+  const candidates = snap.docs
+    .map((doc) => PlaidPendingTransactionSchema.parse(doc.data()))
+    .filter((t) => t.status === "pending" && t.direction === "income" && !t.isRefund && !t.transferOverride)
+  const match = candidates.find((t) => matchStripePayout(t, [payout]) !== null)
+  if (!match) return
+  const ref = pendingTransactionsCol(workspaceId).doc(match.id)
+  const dismissed = await db.runTransaction(async (txn) => {
+    const fresh = await txn.get(ref)
+    if (!fresh.exists || fresh.data()?.status !== "pending") return false
+    txn.set(
+      ref,
+      { status: "dismissed", dismissReason: "stripe_payout", stripePayoutId: payout.id, updatedAt: new Date().toISOString() },
+      { merge: true }
+    )
+    return true
+  })
+  if (dismissed) await markStripePayoutMatched(workspaceId, payout.id, match.id)
 }

@@ -22,7 +22,7 @@ import {
 const APP_HOSTING_URL = "https://stackin.web.app"
 
 let stripeClient: Stripe | null = null
-function getStripe(): Stripe {
+export function getStripe(): Stripe {
   if (stripeClient) return stripeClient
   const key = STRIPE_SECRET_KEY.value()
   if (!key) throw new Error("Missing STRIPE_SECRET_KEY")

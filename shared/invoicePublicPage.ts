@@ -79,12 +79,15 @@ function shell(title: string, body: string, accent: string): string {
   .actions { text-align: center; margin-top: 20px; }
   .btn { display: inline-block; border: 0; border-radius: 999px; padding: 12px 22px; font: inherit; font-weight: 600; cursor: pointer;
     background: var(--accent); color: ${textColorOnAccent(accent)}; }
+  .btn.secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+  .btn.pay { width: 100%; padding: 15px 22px; font-size: 17px; }
+  .pay-note { text-align: center; color: var(--muted); font-size: 12px; margin-top: 8px; }
   .foot { text-align: center; color: var(--muted); font-size: 12px; margin-top: 24px; }
   @media print {
     body { background: #fff; }
     .wrap { padding: 0; max-width: none; }
     .card { box-shadow: none; border-radius: 0; }
-    .actions, .foot { display: none; }
+    .actions, .foot, form { display: none; }
     .bar, .pill, .note, .banner { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   }
 </style>
@@ -97,7 +100,20 @@ ${body}
 </html>`
 }
 
-export function renderPublicInvoicePage(invoice: InvoiceType, settings: InvoiceSettings, today: string): string {
+export type PublicInvoicePageOptions = {
+  // Show "Pay $X" (online payments on, invoice open). payPath is where the
+  // button posts: /i/{token}/pay.
+  payPath?: string | null
+  // Back from Stripe Checkout (?paid=1) before the webhook has marked it paid.
+  justPaid?: boolean
+}
+
+export function renderPublicInvoicePage(
+  invoice: InvoiceType,
+  settings: InvoiceSettings,
+  today: string,
+  options: PublicInvoicePageOptions = {}
+): string {
   const accent = settings.accentColor || DEFAULT_INVOICE_ACCENT_COLOR
   const status = invoiceDisplayStatus(invoice, today)
   const tone = TONE_COLORS[status.tone]
@@ -115,8 +131,11 @@ export function renderPublicInvoicePage(invoice: InvoiceType, settings: InvoiceS
     .filter(Boolean)
     .join(" · ")
 
+  const showPay = !!options.payPath && invoice.status === "sent"
   const banner =
-    invoice.status === "void"
+    options.justPaid && invoice.status === "sent"
+      ? `<div class="banner" style="background:${TONE_COLORS.paid.bg};color:${TONE_COLORS.paid.fg}">Payment received — thank you! It can take a minute to show as paid.</div>`
+      : invoice.status === "void"
       ? `<div class="banner" style="background:${tone.bg};color:${tone.fg}">This invoice was voided — nothing is owed.</div>`
       : invoice.status === "paid"
         ? `<div class="banner" style="background:${tone.bg};color:${tone.fg}">${escapeHtml(status.label)} — thank you!</div>`
@@ -159,14 +178,22 @@ export function renderPublicInvoicePage(invoice: InvoiceType, settings: InvoiceS
   <section class="section">
     <div class="label">Balance due</div>
     <div class="due">${escapeHtml(formatInvoiceMoney(balance))}</div>
+    ${
+      showPay && !options.justPaid
+        ? `<form method="post" action="${escapeHtml(options.payPath!)}" style="margin-top:16px">
+      <button class="btn pay" type="submit">Pay ${escapeHtml(formatInvoiceMoney(balance))}</button>
+      <div class="pay-note">Card, Apple Pay or Google Pay · secure checkout by Stripe</div>
+    </form>`
+        : ""
+    }
   </section>
   ${
     invoice.note && invoice.status !== "void"
-      ? `<section class="section"><div class="label" style="margin-bottom:8px">${invoice.status === "paid" ? "Note" : "How to pay"}</div><div class="note">${escapeHtml(invoice.note)}</div></section>`
+      ? `<section class="section"><div class="label" style="margin-bottom:8px">${invoice.status === "paid" ? "Note" : showPay ? "Other ways to pay" : "How to pay"}</div><div class="note">${escapeHtml(invoice.note)}</div></section>`
       : ""
   }
 </article>
-<div class="actions"><button class="btn" type="button" onclick="window.print()">Save as PDF</button></div>
+<div class="actions"><button class="btn secondary" type="button" onclick="window.print()">Save as PDF</button></div>
 <p class="foot">Sent with 521</p>`
 
   return shell(`Invoice #${invoice.number} from ${businessName}`, body, accent)

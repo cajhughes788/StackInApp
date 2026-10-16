@@ -149,7 +149,8 @@ export async function updateInvoice(workspaceId: string, uid: string, invoiceId:
   const patch = parsed.data
   const ref = invoicesCol(workspaceId).doc(invoiceId)
 
-  return db.runTransaction(async (txn) => {
+  let staleSessionId: string | null = null
+  const updated = await db.runTransaction(async (txn) => {
     const snap = await txn.get(ref)
     if (!snap.exists) throw new NotFoundError("Invoice not found")
     const current = InvoiceSchema.parse(snap.data())
@@ -165,10 +166,15 @@ export async function updateInvoice(workspaceId: string, uid: string, invoiceId:
       updatedAt: new Date().toISOString(),
     }
     if (next.dueDate < next.issueDate) throw new BadRequestError("Due date can't be before the issue date.")
-    const invoice = InvoiceSchema.parse(next)
+    // A client's open Checkout would charge the old total.
+    const totalChanged = Math.round(next.total * 100) !== Math.round(current.total * 100)
+    staleSessionId = totalChanged ? current.checkoutSessionId : null
+    const invoice = InvoiceSchema.parse(totalChanged ? { ...next, checkoutSessionId: null } : next)
     txn.set(ref, invoice)
     return invoice
   })
+  if (staleSessionId) await expireCheckoutSession(workspaceId, staleSessionId)
+  return updated
 }
 
 // Drafts only — anything that was sent is kept and voided instead, so the
@@ -205,11 +211,13 @@ export async function updateInvoiceStatus(
     return shareInvoice(workspaceId, ref)
   }
 
+  let voidedSessionId: string | null = null
   const invoice = await db.runTransaction(async (txn) => {
     const snap = await txn.get(ref)
     if (!snap.exists) throw new NotFoundError("Invoice not found")
     const current = InvoiceSchema.parse(snap.data())
     const target = action.action === "send" ? "sent" : "void"
+    voidedSessionId = current.checkoutSessionId
     // Repeating the same action (a client retry) is a no-op, not an error.
     if (current.status === target) return current
     if (action.action === "send" && current.status !== "draft") {
@@ -218,10 +226,18 @@ export async function updateInvoiceStatus(
     if (action.action === "void" && current.status === "paid") {
       throw new ConflictError("A paid invoice can't be voided — delete its income entry first, which reopens it.")
     }
-    const next = InvoiceSchema.parse({ ...current, status: target, updatedAt: new Date().toISOString() })
+    const next = InvoiceSchema.parse({
+      ...current,
+      status: target,
+      checkoutSessionId: target === "void" ? null : current.checkoutSessionId,
+      updatedAt: new Date().toISOString(),
+    })
     txn.set(ref, next)
     return next
   })
+  // A voided invoice must not stay payable through an open Checkout.
+  // (A payment that still slips through is refunded by the webhook.)
+  if (action.action === "void" && voidedSessionId) await expireCheckoutSession(workspaceId, voidedSessionId)
   return { invoice }
 }
 
@@ -426,7 +442,7 @@ async function shareInvoice(
 // but a shared invoice's own data is the check, not the index).
 export async function findSharedInvoice(
   shareToken: string
-): Promise<{ invoice: InvoiceType; settings: InvoiceSettings } | null> {
+): Promise<{ workspaceId: string; invoice: InvoiceType; settings: InvoiceSettings } | null> {
   if (!/^[A-Za-z0-9_-]{16,64}$/.test(shareToken)) return null
   const shareSnap = await invoiceSharesCol().doc(shareToken).get()
   const share = shareSnap.data() as { workspaceId?: string; invoiceId?: string } | undefined
@@ -437,7 +453,7 @@ export async function findSharedInvoice(
   ])
   const parsed = InvoiceSchema.safeParse(invoiceSnap.data())
   if (!parsed.success || parsed.data.shareToken !== shareToken || parsed.data.status === "draft") return null
-  return { invoice: parsed.data, settings }
+  return { workspaceId: share.workspaceId, invoice: parsed.data, settings }
 }
 
 // Called from account/workspace deletion before the workspace tree is
@@ -448,5 +464,19 @@ export async function deleteInvoiceSharesForWorkspace(workspaceId: string): Prom
     const batch = db.batch()
     for (const doc of snap.docs.slice(i, i + 400)) batch.delete(doc.ref)
     await batch.commit()
+  }
+}
+
+// Best-effort: closes a client's open Stripe Checkout for an invoice whose
+// total changed or that was voided.
+async function expireCheckoutSession(workspaceId: string, sessionId: string): Promise<void> {
+  try {
+    const { getStripe, readPaymentAccount } = await import("./paymentAccountsService.js")
+    const account = await readPaymentAccount(workspaceId)
+    if (!account) return
+    await getStripe().checkout.sessions.expire(sessionId, {}, { stripeAccount: account.stripeAccountId })
+  } catch (error) {
+    // Already completed or expired — nothing to close.
+    console.warn("invoicesService.expireCheckoutSession: couldn't expire", sessionId, error instanceof Error ? error.message : error)
   }
 }

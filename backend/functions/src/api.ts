@@ -173,20 +173,30 @@ export const createInvoice = withCorsAuth(async (req, res) => {
   await createInvoiceHandler(req, res)
 })
 
-export const editInvoice = withCorsAuth(async (req, res) => {
-  const { editInvoiceHandler } = await import("./routes/editInvoice.js")
-  await editInvoiceHandler(req, res)
-})
+// Stripe key: changing the total or voiding closes the client's open Checkout.
+export const editInvoice = withCorsAuth(
+  async (req, res) => {
+    const { editInvoiceHandler } = await import("./routes/editInvoice.js")
+    await editInvoiceHandler(req, res)
+  },
+  true,
+  { secrets: [SECRETS.STRIPE_SECRET_KEY] }
+)
 
 export const deleteInvoice = withCorsAuth(async (req, res) => {
   const { deleteInvoiceHandler } = await import("./routes/deleteInvoice.js")
   await deleteInvoiceHandler(req, res)
 })
 
-export const updateInvoiceStatus = withCorsAuth(async (req, res) => {
-  const { updateInvoiceStatusHandler } = await import("./routes/updateInvoiceStatus.js")
-  await updateInvoiceStatusHandler(req, res)
-})
+// Stripe key: changing the total or voiding closes the client's open Checkout.
+export const updateInvoiceStatus = withCorsAuth(
+  async (req, res) => {
+    const { updateInvoiceStatusHandler } = await import("./routes/updateInvoiceStatus.js")
+    await updateInvoiceStatusHandler(req, res)
+  },
+  true,
+  { secrets: [SECRETS.STRIPE_SECRET_KEY] }
+)
 
 export const saveInvoiceSettings = withCorsAuth(async (req, res) => {
   const { saveInvoiceSettingsHandler } = await import("./routes/saveInvoiceSettings.js")
@@ -213,7 +223,8 @@ export const stripeConnectWebhook = onRequest(
 
 // Bare onRequest: the public page behind a shared invoice link — no sign-in
 // (firebase.json rewrites /i/** here).
-export const publicInvoice = onRequest(async (req, res) => {
+// Stripe key: the Pay button checks the workspace's account and opens Checkout.
+export const publicInvoice = onRequest({ secrets: [SECRETS.STRIPE_SECRET_KEY] }, async (req, res) => {
   const { publicInvoiceHandler } = await import("./routes/publicInvoice.js")
   await publicInvoiceHandler(req as any, res as any)
 })

@@ -144,7 +144,10 @@ const PlaidPendingTransactionObjectSchema = z.object({
   // which predate this field).
   // "invoice_already_paid": the money for an invoice the user had already
   // marked paid by hand (see pickPaidInvoices with manually-paid candidates).
-  dismissReason: z.enum(["transfer", "invoice_already_paid"]).optional(),
+  // "stripe_payout": a payout from the workspace's own Stripe account —
+  // invoices it covers were booked when the client paid (shared/stripePayouts.ts).
+  dismissReason: z.enum(["transfer", "invoice_already_paid", "stripe_payout"]).optional(),
+  stripePayoutId: z.string().optional(),
   // The other half of a matched transfer (see isPlaidTransferPair), so one
   // transaction can't be paired twice.
   transferPairId: z.string().optional(),

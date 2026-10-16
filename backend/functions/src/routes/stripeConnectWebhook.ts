@@ -2,12 +2,13 @@ import type { Request, Response } from "express"
 import Stripe from "stripe"
 import { STRIPE_CONNECT_WEBHOOK_SECRET, STRIPE_SECRET_KEY } from "../secrets"
 import { handleStripeAccountUpdated } from "../services/paymentAccountsService"
+import { handleCheckoutSessionCompleted, handlePayoutEvent } from "../services/invoicePaymentsService"
 
 // Events from users' Stripe Connect accounts (a separate endpoint and
 // signing secret from stripeWebhook.ts, which handles 521's own
-// subscriptions). Phase 1 only keeps account status current; payments,
-// payouts and refunds arrive in later phases. Unhandled events get a 200 so
-// Stripe doesn't retry them.
+// subscriptions): account status, paid invoices, and payouts (recorded so
+// their bank deposits aren't counted again). Refunds and disputes come in a
+// later phase. Unhandled events get a 200 so Stripe doesn't retry them.
 export async function stripeConnectWebhookHandler(req: Request, res: Response): Promise<void> {
   if (req.method !== "POST") {
     res.status(405).send("Method not allowed")
@@ -34,6 +35,16 @@ export async function stripeConnectWebhookHandler(req: Request, res: Response): 
     switch (event.type) {
       case "account.updated":
         await handleStripeAccountUpdated(event.data.object as Stripe.Account)
+        break
+      case "checkout.session.completed":
+        if (event.account) await handleCheckoutSessionCompleted(event.account, event.data.object as Stripe.Checkout.Session)
+        break
+      case "payout.created":
+      case "payout.updated":
+      case "payout.paid":
+      case "payout.failed":
+      case "payout.canceled":
+        if (event.account) await handlePayoutEvent(event.account, event.data.object as Stripe.Payout)
         break
       default:
         break

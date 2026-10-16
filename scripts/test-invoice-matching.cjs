@@ -417,4 +417,47 @@ run("payment account actions validate", () => {
   assert.equal(PaymentAccountActionSchema.safeParse({ action: "delete" }).success, false);
 });
 
+const { matchStripePayout } = require("../shared/stripePayouts.ts");
+
+run("Stripe payouts: exact amount within 3 days, closest wins, never twice", () => {
+  const payouts = [
+    { id: "po_a", amount: 436.65, arrivalDate: "2026-10-18", status: "paid", matchedPendingTransactionId: null },
+    { id: "po_b", amount: 436.65, arrivalDate: "2026-10-21", status: "in_transit", matchedPendingTransactionId: null },
+    { id: "po_c", amount: 120.0, arrivalDate: "2026-10-19", status: "paid", matchedPendingTransactionId: "t9" },
+  ];
+  const dep = (over) => ({ date: "2026-10-19", amount: 436.65, merchantName: null, rawName: "MARIA LOPEZ DESIGN PAYOUT", ...over });
+  assert.equal(matchStripePayout(dep({}), payouts).id, "po_a");
+  assert.equal(matchStripePayout(dep({ date: "2026-10-21" }), payouts).id, "po_b");
+  assert.equal(matchStripePayout(dep({ date: "2026-10-25" }), payouts), null);
+  assert.equal(matchStripePayout(dep({ amount: 436.64 }), payouts), null);
+  assert.equal(matchStripePayout(dep({ amount: 120 }), payouts), null, "already matched");
+  assert.equal(matchStripePayout(dep({ merchantName: "Venmo", rawName: "VENMO CASHOUT" }), payouts), null);
+  assert.equal(matchStripePayout(dep({ rawName: "SQ *SQUARE INC TRANSFER" }), payouts), null);
+  assert.equal(matchStripePayout(dep({ merchantName: "Stripe", rawName: "STRIPE TRANSFER" }), payouts).id, "po_a");
+  assert.equal(matchStripePayout(dep({}), [{ ...payouts[0], status: "failed" }]), null);
+});
+
+run("public page: Pay button only when payable, and not after returning paid", () => {
+  const base = {
+    id: "i", workspaceId: "w", number: "0016", clientName: "Acme", clientEmail: null,
+    lines: [{ description: "Work", amount: 100, category: "services" }],
+    total: 100, issueDate: "2026-10-01", dueDate: "2026-10-31", note: "Venmo @me", shareToken: "t",
+    status: "sent", paidAt: null, paidVia: null, paidEntryId: null, paidPlaidTransactionId: null, paidFeeAmount: 0,
+    createdAt: "x", updatedAt: "x",
+  };
+  const settings = InvoiceSettingsSchema.parse({});
+  const plain = renderPublicInvoicePage(base, settings, "2026-10-15");
+  assert.equal(plain.includes("Pay $100.00"), false);
+  assert.ok(plain.includes("How to pay"));
+  const payable = renderPublicInvoicePage(base, settings, "2026-10-15", { payPath: "/i/tok/pay" });
+  assert.ok(payable.includes('action="/i/tok/pay"'));
+  assert.ok(payable.includes("Pay $100.00"));
+  assert.ok(payable.includes("Other ways to pay"));
+  const back = renderPublicInvoicePage(base, settings, "2026-10-15", { payPath: "/i/tok/pay", justPaid: true });
+  assert.equal(back.includes("Pay $100.00"), false);
+  assert.ok(back.includes("Payment received"));
+  const paid = renderPublicInvoicePage({ ...base, status: "paid", paidAt: "2026-10-10T12:00:00.000Z" }, settings, "2026-10-15", { payPath: "/i/tok/pay" });
+  assert.equal(paid.includes("<form"), false);
+});
+
 process.stdout.write("invoice matching checks passed\n");

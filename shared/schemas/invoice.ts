@@ -53,9 +53,15 @@ export const InvoiceSchema = z
     // "overdue" is derived (sent and dueDate before today), never stored.
     status: InvoiceStatusSchema,
     paidAt: z.string().nullable().default(null),
-    paidVia: z.enum(["bank_match", "manual"]).nullable().default(null),
+    // bank_match: a Plaid deposit confirmed as this payment. manual: marked
+    // paid by hand. online: paid through Stripe Checkout from the share link.
+    paidVia: z.enum(["bank_match", "manual", "online"]).nullable().default(null),
     paidEntryId: z.string().nullable().default(null),
     paidPlaidTransactionId: z.string().nullable().default(null),
+    // Online payments (Stripe Connect): the client's open Checkout session,
+    // reused while it's still open, and the PaymentIntent that paid it.
+    checkoutSessionId: z.string().nullable().default(null),
+    paidStripePaymentIntentId: z.string().nullable().default(null),
     // The processor's cut when the payout arrived net of fees (booked as a
     // Payment Processing Fees expense); the Entry still carries the full total.
     paidFeeAmount: z.number().nonnegative().default(0),
