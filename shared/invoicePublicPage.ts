@@ -106,6 +106,8 @@ export type PublicInvoicePageOptions = {
   payPath?: string | null
   // Back from Stripe Checkout (?paid=1) before the webhook has marked it paid.
   justPaid?: boolean
+  // Checkout offers bank transfer too (the account has ACH enabled).
+  bankTransfer?: boolean
 }
 
 export function renderPublicInvoicePage(
@@ -131,10 +133,13 @@ export function renderPublicInvoicePage(
     .filter(Boolean)
     .join(" · ")
 
-  const showPay = !!options.payPath && invoice.status === "sent"
+  const showPay = !!options.payPath && invoice.status === "sent" && !invoice.pendingPaymentAt
+  const processing = invoice.status === "sent" && !!invoice.pendingPaymentAt
   const banner =
-    options.justPaid && invoice.status === "sent"
-      ? `<div class="banner" style="background:${TONE_COLORS.paid.bg};color:${TONE_COLORS.paid.fg}">Payment received — thank you! It can take a minute to show as paid.</div>`
+    processing
+      ? `<div class="banner" style="background:${TONE_COLORS.open.bg};color:${TONE_COLORS.open.fg}">A bank payment is on its way — it usually clears in about 4 business days.</div>`
+      : options.justPaid && invoice.status === "sent"
+      ? `<div class="banner" style="background:${TONE_COLORS.paid.bg};color:${TONE_COLORS.paid.fg}">Thank you — your payment is being processed.</div>`
       : invoice.status === "void"
       ? `<div class="banner" style="background:${tone.bg};color:${tone.fg}">This invoice was voided — nothing is owed.</div>`
       : invoice.status === "paid"
@@ -182,7 +187,7 @@ export function renderPublicInvoicePage(
       showPay && !options.justPaid
         ? `<form method="post" action="${escapeHtml(options.payPath!)}" style="margin-top:16px">
       <button class="btn pay" type="submit">Pay ${escapeHtml(formatInvoiceMoney(balance))}</button>
-      <div class="pay-note">Card, Apple Pay or Google Pay · secure checkout by Stripe</div>
+      <div class="pay-note">${options.bankTransfer ? "Card, Apple Pay, Google Pay or bank account" : "Card, Apple Pay or Google Pay"} · secure checkout by Stripe</div>
     </form>`
         : ""
     }

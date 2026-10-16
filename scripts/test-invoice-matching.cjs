@@ -410,6 +410,12 @@ run("Stripe account status: onboarding, verifying, active, restricted", () => {
   assert.equal(paymentAccountStatusFrom({ details_submitted: true, charges_enabled: false, payouts_enabled: false, requirements: { disabled_reason: "rejected.fraud" } }).status, "restricted");
 });
 
+run("Stripe account: bank transfer capability status", () => {
+  assert.equal(paymentAccountStatusFrom({ details_submitted: true, capabilities: { us_bank_account_ach_payments: "active" } }).achStatus, "active");
+  assert.equal(paymentAccountStatusFrom({ details_submitted: true, capabilities: { us_bank_account_ach_payments: "pending" } }).achStatus, "pending");
+  assert.equal(paymentAccountStatusFrom({ details_submitted: true }).achStatus, "unrequested");
+});
+
 run("payment account actions validate", () => {
   assert.equal(PaymentAccountActionSchema.safeParse({ action: "onboard", client: "native" }).success, true);
   assert.equal(PaymentAccountActionSchema.safeParse({ action: "onboard" }).success, false);
@@ -455,7 +461,11 @@ run("public page: Pay button only when payable, and not after returning paid", (
   assert.ok(payable.includes("Other ways to pay"));
   const back = renderPublicInvoicePage(base, settings, "2026-10-15", { payPath: "/i/tok/pay", justPaid: true });
   assert.equal(back.includes("Pay $100.00"), false);
-  assert.ok(back.includes("Payment received"));
+  assert.ok(back.includes("payment is being processed"));
+  const clearing = renderPublicInvoicePage({ ...base, pendingPaymentAt: "2026-10-18T12:00:00.000Z" }, settings, "2026-10-19", { payPath: "/i/tok/pay" });
+  assert.equal(clearing.includes("Pay $100.00"), false);
+  assert.ok(clearing.includes("bank payment is on its way"));
+  assert.ok(renderPublicInvoicePage(base, settings, "2026-10-15", { payPath: "/i/tok/pay", bankTransfer: true }).includes("or bank account"));
   const paid = renderPublicInvoicePage({ ...base, status: "paid", paidAt: "2026-10-10T12:00:00.000Z" }, settings, "2026-10-15", { payPath: "/i/tok/pay" });
   assert.equal(paid.includes("<form"), false);
 });

@@ -62,6 +62,12 @@ export const InvoiceSchema = z
     // reused while it's still open, and the PaymentIntent that paid it.
     checkoutSessionId: z.string().nullable().default(null),
     paidStripePaymentIntentId: z.string().nullable().default(null),
+    // A bank transfer (ACH) the client started in Checkout, still clearing —
+    // the invoice stays "sent" and isn't payable again until it settles.
+    pendingPaymentAt: z.string().nullable().default(null),
+    // The last bank transfer that bounced (insufficient funds, closed
+    // account); cleared when the invoice is paid.
+    paymentFailedAt: z.string().nullable().default(null),
     // The processor's cut when the payout arrived net of fees (booked as a
     // Payment Processing Fees expense); the Entry still carries the full total.
     paidFeeAmount: z.number().nonnegative().default(0),

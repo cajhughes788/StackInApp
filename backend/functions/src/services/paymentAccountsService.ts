@@ -109,7 +109,12 @@ async function ensureStripeAccount(workspaceId: string, uid: string, workspaceNa
         requirement_collection: "stripe",
         stripe_dashboard: { type: "express" },
       },
-      capabilities: { card_payments: { requested: true }, transfers: { requested: true } },
+      capabilities: {
+        card_payments: { requested: true },
+        transfers: { requested: true },
+        // Bank transfers in Checkout (phase 3): 0.8%, capped at $5.
+        us_bank_account_ach_payments: { requested: true },
+      },
       business_profile: businessName ? { name: businessName } : undefined,
       metadata: { workspaceId },
     },
@@ -161,6 +166,15 @@ export async function updatePaymentAccount(
   switch (action.action) {
     case "onboard": {
       const account = await ensureStripeAccount(workspaceId, uid, name)
+      // Accounts created before bank transfers existed: ask for that
+      // capability now, so the sign-up link collects anything it needs.
+      if (account.achStatus === "unrequested") {
+        await getStripe()
+          .accounts.update(account.stripeAccountId, { capabilities: { us_bank_account_ach_payments: { requested: true } } })
+          .catch((error) => {
+            console.warn("paymentAccountsService: couldn't request bank transfers", account.stripeAccountId, error instanceof Error ? error.message : error)
+          })
+      }
       return { paymentAccount: account, url: await onboardingLink(account.stripeAccountId, action.client) }
     }
     case "refresh": {

@@ -141,6 +141,7 @@ const TONE_CLASSES: Record<InvoiceDisplayStatus["tone"], string> = {
 
 // List rows use the short form ("Due Nov 14"); the detail page the full date.
 export function shortStatusLabel(invoice: InvoiceType, today: string): string {
+  if (invoice.status === "sent" && invoice.pendingPaymentAt) return "Processing"
   const status = invoiceDisplayStatus(invoice, today)
   if (status.tone === "overdue") {
     const days = Math.round(
@@ -157,14 +158,16 @@ export function shortStatusLabel(invoice: InvoiceType, today: string): string {
 
 export function InvoiceStatusPill({ invoice, today, short }: { invoice: InvoiceType; today: string; short?: boolean }) {
   const status = invoiceDisplayStatus(invoice, today)
+  // A bank transfer clearing reads as on its way, not overdue.
+  const tone = invoice.status === "sent" && invoice.pendingPaymentAt ? "open" : status.tone
   return (
     <span
       className={cn(
         "inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold",
-        TONE_CLASSES[status.tone]
+        TONE_CLASSES[tone]
       )}
     >
-      {short ? shortStatusLabel(invoice, today) : status.label}
+      {short ? shortStatusLabel(invoice, today) : invoice.status === "sent" && invoice.pendingPaymentAt ? "Payment processing" : status.label}
     </span>
   )
 }

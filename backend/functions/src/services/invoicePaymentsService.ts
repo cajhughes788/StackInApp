@@ -41,10 +41,16 @@ export type CheckoutStart =
   | { kind: "not_payable" }
   | { kind: "not_found" }
 
-export async function isInvoicePayableOnline(workspaceId: string, invoice: InvoiceType): Promise<boolean> {
-  if (invoice.status !== "sent") return false
+// What the public page offers: nothing, or Pay (with bank transfer when the
+// account has it). Never while a bank transfer is already clearing.
+export async function invoiceOnlinePayment(
+  workspaceId: string,
+  invoice: InvoiceType
+): Promise<{ payable: boolean; bankTransfer: boolean }> {
+  if (invoice.status !== "sent" || invoice.pendingPaymentAt) return { payable: false, bankTransfer: false }
   const account = await readPaymentAccount(workspaceId)
-  return !!account && account.chargesEnabled && account.acceptOnline
+  const payable = !!account && account.chargesEnabled && account.acceptOnline
+  return { payable, bankTransfer: payable && account?.achStatus === "active" }
 }
 
 export async function startInvoiceCheckout(shareToken: string): Promise<CheckoutStart> {
@@ -52,7 +58,9 @@ export async function startInvoiceCheckout(shareToken: string): Promise<Checkout
   if (!shared) return { kind: "not_found" }
   const { workspaceId, invoice, settings } = shared
   const account = await readPaymentAccount(workspaceId)
-  if (invoice.status !== "sent" || !account?.chargesEnabled || !account.acceptOnline) return { kind: "not_payable" }
+  if (invoice.status !== "sent" || invoice.pendingPaymentAt || !account?.chargesEnabled || !account.acceptOnline) {
+    return { kind: "not_payable" }
+  }
 
   const stripe = getStripe()
   const stripeAccount = account.stripeAccountId
@@ -75,9 +83,11 @@ export async function startInvoiceCheckout(shareToken: string): Promise<Checkout
   const session = await stripe.checkout.sessions.create(
     {
       mode: "payment",
-      // Cards (with Apple Pay / Google Pay / Link where offered). Bank
-      // debits are phase 3: they settle days later and need their own flow.
-      payment_method_types: ["card"],
+      // Cards (with Apple Pay / Google Pay / Link where offered), plus bank
+      // transfers once Stripe has enabled them on the account — 0.8% capped
+      // at $5, the cheapest way for a client to pay a large invoice. A bank
+      // transfer settles days later (checkout.session.async_payment_*).
+      payment_method_types: account.achStatus === "active" ? ["card", "us_bank_account"] : ["card"],
       line_items: invoice.lines.map((line) => ({
         quantity: 1,
         price_data: {
@@ -117,18 +127,90 @@ async function workspaceTimeZone(workspaceId: string): Promise<string> {
   return (snap.get("common.timeZone") as string | undefined) || DEFAULT_TIME_ZONE
 }
 
-export async function handleCheckoutSessionCompleted(stripeAccountId: string, session: Stripe.Checkout.Session): Promise<void> {
+async function sessionTarget(stripeAccountId: string, session: Stripe.Checkout.Session) {
   const workspaceId = await workspaceForStripeAccount(stripeAccountId)
   const invoiceId = session.metadata?.invoiceId
   if (!workspaceId || !invoiceId || session.metadata?.workspaceId !== workspaceId) {
-    console.warn("invoicePayments.handleCheckoutSessionCompleted: not one of ours", { stripeAccountId, session: session.id })
+    console.warn("invoicePayments: Checkout session isn't one of ours", { stripeAccountId, session: session.id })
+    return null
+  }
+  return { workspaceId, invoiceId }
+}
+
+// checkout.session.completed: a card payment is paid now; a bank transfer
+// has only started and settles in a few business days.
+export async function handleCheckoutSessionCompleted(stripeAccountId: string, session: Stripe.Checkout.Session): Promise<void> {
+  const target = await sessionTarget(stripeAccountId, session)
+  if (!target) return
+  if (session.payment_status === "paid") {
+    await bookPaidSession(stripeAccountId, target.workspaceId, target.invoiceId, session)
     return
   }
-  // Card payments are paid at completion; delayed methods aren't offered yet.
-  if (session.payment_status !== "paid") {
-    console.warn("invoicePayments.handleCheckoutSessionCompleted: not paid yet", { session: session.id, status: session.payment_status })
-    return
-  }
+  // Bank transfer under way: the invoice stays open but isn't payable again
+  // (no second payment while this one clears).
+  const ref = invoicesCol(target.workspaceId).doc(target.invoiceId)
+  await db.runTransaction(async (txn) => {
+    const snap = await txn.get(ref)
+    if (!snap.exists) return
+    const current = InvoiceSchema.parse(snap.data())
+    if (current.status !== "sent") return
+    txn.set(
+      ref,
+      { pendingPaymentAt: new Date().toISOString(), paymentFailedAt: null, checkoutSessionId: session.id },
+      { merge: true }
+    )
+  })
+}
+
+// checkout.session.async_payment_succeeded: the bank transfer cleared.
+export async function handleAsyncPaymentSucceeded(
+  stripeAccountId: string,
+  session: Stripe.Checkout.Session,
+  eventCreated: number
+): Promise<void> {
+  const target = await sessionTarget(stripeAccountId, session)
+  if (!target) return
+  await bookPaidSession(stripeAccountId, target.workspaceId, target.invoiceId, session, eventCreated)
+}
+
+// checkout.session.async_payment_failed: the bank transfer bounced. The
+// invoice is payable again, and the owner is told.
+export async function handleAsyncPaymentFailed(stripeAccountId: string, session: Stripe.Checkout.Session): Promise<void> {
+  const target = await sessionTarget(stripeAccountId, session)
+  if (!target) return
+  const ref = invoicesCol(target.workspaceId).doc(target.invoiceId)
+  const failed = await db.runTransaction(async (txn) => {
+    const snap = await txn.get(ref)
+    if (!snap.exists) return null
+    const current = InvoiceSchema.parse(snap.data())
+    if (current.status !== "sent" || current.checkoutSessionId !== session.id) return null
+    txn.set(
+      ref,
+      { pendingPaymentAt: null, paymentFailedAt: new Date().toISOString(), checkoutSessionId: null },
+      { merge: true }
+    )
+    return current
+  })
+  if (!failed) return
+  const workspaceSnap = await db.doc(`workspaces/${target.workspaceId}`).get()
+  const ownerUid = workspaceSnap.data()?.ownerId as string | undefined
+  if (!ownerUid) return
+  const { sendTransactionNotification } = await import("./pushNotificationService.js")
+  await sendTransactionNotification(ownerUid, {
+    title: `${failed.clientName}'s bank payment failed`,
+    body: `Invoice #${failed.number} is open again — they can pay from the same link.`,
+    data: { deepLink: `stackin://invoices/${failed.id}`, workspaceId: target.workspaceId },
+  }).catch((error) => console.error("invoicePayments: failed-payment notification failed", error))
+}
+
+async function bookPaidSession(
+  stripeAccountId: string,
+  workspaceId: string,
+  invoiceId: string,
+  session: Stripe.Checkout.Session,
+  // When the money actually arrived; defaults to the charge time (cards).
+  paidAtSeconds?: number
+): Promise<void> {
   const paymentIntentId = typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id
   if (!paymentIntentId) throw new Error(`Checkout session ${session.id} has no PaymentIntent`)
 
@@ -147,8 +229,13 @@ export async function handleCheckoutSessionCompleted(stripeAccountId: string, se
   }
   const receivedCents = paymentIntent.amount_received
   const feeCents = balanceTransaction.fee
+  const paidSeconds = paidAtSeconds ?? charge.created
   const timeZone = await workspaceTimeZone(workspaceId)
-  const paidDate = DateTime.fromSeconds(charge.created).setZone(timeZone).toISODate() ?? new Date().toISOString().slice(0, 10)
+  const paidDate = DateTime.fromSeconds(paidSeconds).setZone(timeZone).toISODate() ?? new Date().toISOString().slice(0, 10)
+  // A bank transfer has no Entry payment method of its own: booked as named
+  // Other income under the client, like a check. Cards go under Card / POS.
+  const isBankTransfer = charge.payment_method_details?.type === "us_bank_account"
+  const entryMethod = isBankTransfer ? ("other" as const) : ("pos" as const)
 
   const ref = invoicesCol(workspaceId).doc(invoiceId)
   const claim = await db.runTransaction(async (txn) => {
@@ -162,16 +249,18 @@ export async function handleCheckoutSessionCompleted(stripeAccountId: string, se
     const next = InvoiceSchema.parse({
       ...current,
       status: "paid",
-      paidAt: new Date(charge.created * 1000).toISOString(),
+      paidAt: new Date(paidSeconds * 1000).toISOString(),
       paidVia: "online",
-      paidMethod: "pos",
+      paidMethod: entryMethod,
+      pendingPaymentAt: null,
+      paymentFailedAt: null,
       paidStripePaymentIntentId: paymentIntentId,
       paidFeeAmount: feeCents / 100,
       checkoutSessionId: session.id,
       updatedAt: new Date().toISOString(),
     })
     txn.set(ref, next)
-    return { outcome: "claimed" as const, invoice: next }
+    return { outcome: "claimed" as const, invoice: next, previousPendingAt: current.pendingPaymentAt }
   })
 
   if (claim.outcome === "done") return
@@ -182,7 +271,7 @@ export async function handleCheckoutSessionCompleted(stripeAccountId: string, se
       { payment_intent: paymentIntentId, reason: "duplicate", metadata: { workspaceId, invoiceId } },
       { stripeAccount: stripeAccountId, idempotencyKey: `refund-${paymentIntentId}` }
     )
-    console.warn("invoicePayments.handleCheckoutSessionCompleted: refunded a payment for an invoice that wasn't open", {
+    console.warn("invoicePayments: refunded a payment for an invoice that wasn't open", {
       workspaceId,
       invoiceId,
       paymentIntentId,
@@ -192,6 +281,7 @@ export async function handleCheckoutSessionCompleted(stripeAccountId: string, se
   }
 
   const invoice = claim.invoice
+  const previousPendingAt = claim.outcome === "claimed" ? claim.previousPendingAt : null
   try {
     const workspaceSnap = await db.doc(`workspaces/${workspaceId}`).get()
     const ownerUid = workspaceSnap.data()?.ownerId as string | undefined
@@ -203,8 +293,17 @@ export async function handleCheckoutSessionCompleted(stripeAccountId: string, se
     const totalMatches = receivedCents === toCents(invoice.total)
     const [topCategory] = [...invoiceCentsByCategory(invoice.lines)].sort((a, b) => b[1] - a[1])[0]
     const incomeBreakdowns = totalMatches
-      ? [invoiceIncomeBreakdown(invoice.lines, "pos")]
-      : [{ paymentMethod: "pos" as const, [topCategory]: receivedCents / 100 }]
+      ? [invoiceIncomeBreakdown(invoice.lines, entryMethod)]
+      : [{ paymentMethod: entryMethod, [topCategory]: receivedCents / 100 }]
+    const customIncome = !isBankTransfer
+      ? []
+      : totalMatches
+        ? [...invoiceCentsByCategory(invoice.lines)].map(([category, cents]) => ({
+            label: invoice.clientName,
+            amount: cents / 100,
+            category,
+          }))
+        : [{ label: invoice.clientName, amount: receivedCents / 100, category: topCategory }]
     if (!totalMatches) {
       console.warn("invoicePayments: received amount differs from invoice total", { invoiceId, receivedCents, total: invoice.total })
     }
@@ -212,14 +311,14 @@ export async function handleCheckoutSessionCompleted(stripeAccountId: string, se
     const entry = await entriesSvc.createEntry(workspaceId, ownerUid, {
       workspace: "independent",
       date: paidDate,
-      notes: [`Invoice #${invoice.number}`, invoice.clientName, "Paid online (Stripe)"].join(" | "),
+      notes: [`Invoice #${invoice.number}`, invoice.clientName, isBankTransfer ? "Paid by bank transfer (Stripe)" : "Paid online (Stripe)"].join(" | "),
       clientMutationId: `stripe_${paymentIntentId}`,
       independent: {
         hours: 0,
         incomeBreakdowns,
         unreportedCash: 0,
         unreportedCashTips: 0,
-        customIncome: [],
+        customIncome,
       },
     })
     if (feeCents > 0) {
@@ -250,6 +349,8 @@ export async function handleCheckoutSessionCompleted(stripeAccountId: string, se
             paidMethod: null,
             paidStripePaymentIntentId: null,
             paidFeeAmount: 0,
+            // A cleared bank transfer stays "processing" so it can't be paid twice.
+            pendingPaymentAt: previousPendingAt,
             updatedAt: new Date().toISOString(),
           },
           { merge: true }

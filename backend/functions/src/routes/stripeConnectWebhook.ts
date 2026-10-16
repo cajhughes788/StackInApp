@@ -2,7 +2,12 @@ import type { Request, Response } from "express"
 import Stripe from "stripe"
 import { STRIPE_CONNECT_WEBHOOK_SECRET, STRIPE_SECRET_KEY } from "../secrets"
 import { handleStripeAccountUpdated } from "../services/paymentAccountsService"
-import { handleCheckoutSessionCompleted, handlePayoutEvent } from "../services/invoicePaymentsService"
+import {
+  handleAsyncPaymentFailed,
+  handleAsyncPaymentSucceeded,
+  handleCheckoutSessionCompleted,
+  handlePayoutEvent,
+} from "../services/invoicePaymentsService"
 
 // Events from users' Stripe Connect accounts (a separate endpoint and
 // signing secret from stripeWebhook.ts, which handles 521's own
@@ -38,6 +43,14 @@ export async function stripeConnectWebhookHandler(req: Request, res: Response): 
         break
       case "checkout.session.completed":
         if (event.account) await handleCheckoutSessionCompleted(event.account, event.data.object as Stripe.Checkout.Session)
+        break
+      case "checkout.session.async_payment_succeeded":
+        if (event.account) {
+          await handleAsyncPaymentSucceeded(event.account, event.data.object as Stripe.Checkout.Session, event.created)
+        }
+        break
+      case "checkout.session.async_payment_failed":
+        if (event.account) await handleAsyncPaymentFailed(event.account, event.data.object as Stripe.Checkout.Session)
         break
       case "payout.created":
       case "payout.updated":

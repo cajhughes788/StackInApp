@@ -54,9 +54,10 @@ function rowDetail(invoice: InvoiceType): string {
   else if (invoice.status === "paid") {
     if (invoice.paidAt) parts.push(`Paid ${shortDate(invoice.paidAt.slice(0, 10))}`)
     if (invoice.paidVia === "bank_match") parts.push("bank match")
-    else if (invoice.paidVia === "online") parts.push("paid online")
+    else if (invoice.paidVia === "online") parts.push(invoice.paidMethod === "other" ? "bank transfer" : "paid online")
     else if (invoice.paidMethod) parts.push(PAID_METHOD_LABELS[invoice.paidMethod])
-  } else parts.push(`Sent ${shortDate((invoice.sharedAt ?? invoice.createdAt).slice(0, 10))}`)
+  } else if (invoice.pendingPaymentAt) parts.push("bank payment clearing")
+  else parts.push(`Sent ${shortDate((invoice.sharedAt ?? invoice.createdAt).slice(0, 10))}`)
   return parts.join(" · ")
 }
 

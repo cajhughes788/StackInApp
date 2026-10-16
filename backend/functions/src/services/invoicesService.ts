@@ -156,6 +156,9 @@ export async function updateInvoice(workspaceId: string, uid: string, invoiceId:
     const current = InvoiceSchema.parse(snap.data())
     if (current.status === "paid") throw new ConflictError("A paid invoice can't be edited.")
     if (current.status === "void") throw new ConflictError("A void invoice can't be edited.")
+    if (current.pendingPaymentAt) {
+      throw new ConflictError("A bank payment for this invoice is still clearing — it can be edited if that payment fails.")
+    }
     const lines = patch.lines ?? current.lines
     const next = {
       ...current,

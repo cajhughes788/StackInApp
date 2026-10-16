@@ -28,6 +28,9 @@ export const PaymentAccountSchema = z.object({
   // things"); the details stay in Stripe's own onboarding.
   requirementsDueCount: z.number().int().nonnegative().default(0),
   disabledReason: z.string().nullable().default(null),
+  // Stripe's us_bank_account_ach_payments capability: whether Checkout can
+  // offer bank transfers. "unrequested" on accounts created before phase 3.
+  achStatus: z.enum(["active", "pending", "inactive", "unrequested"]).default("unrequested"),
   // The user's switch: show a Pay button on shared invoices. Only takes
   // effect while status is "active".
   acceptOnline: z.boolean().default(false),
@@ -54,6 +57,7 @@ export type PaymentAccountAction = z.infer<typeof PaymentAccountActionSchema>
 // The fields of a Stripe Account this needs, so the mapping is testable
 // without the Stripe SDK.
 export type StripeAccountSnapshot = {
+  capabilities?: { us_bank_account_ach_payments?: string | null } | null
   charges_enabled?: boolean | null
   payouts_enabled?: boolean | null
   details_submitted?: boolean | null
@@ -72,6 +76,7 @@ export function paymentAccountStatusFrom(account: StripeAccountSnapshot): {
   detailsSubmitted: boolean
   requirementsDueCount: number
   disabledReason: string | null
+  achStatus: "active" | "pending" | "inactive" | "unrequested"
 } {
   const chargesEnabled = account.charges_enabled === true
   const payoutsEnabled = account.payouts_enabled === true
@@ -87,5 +92,7 @@ export function paymentAccountStatusFrom(account: StripeAccountSnapshot): {
       : due.size > 0 || (disabledReason && !disabledReason.includes("pending_verification"))
         ? "restricted"
         : "verifying"
-  return { status, chargesEnabled, payoutsEnabled, detailsSubmitted, requirementsDueCount: due.size, disabledReason }
+  const ach = account.capabilities?.us_bank_account_ach_payments
+  const achStatus = ach === "active" || ach === "pending" || ach === "inactive" ? ach : "unrequested"
+  return { status, chargesEnabled, payoutsEnabled, detailsSubmitted, requirementsDueCount: due.size, disabledReason, achStatus }
 }

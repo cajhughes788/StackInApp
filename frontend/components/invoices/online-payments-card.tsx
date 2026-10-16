@@ -192,6 +192,16 @@ export default function OnlinePaymentsCard({ workspaceId }: { workspaceId: strin
             </label>
           ) : null}
 
+          {account.chargesEnabled ? (
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {account.achStatus === "active"
+                ? "Clients can also pay by bank transfer: 0.8%, capped at $5 — the cheapest option on big invoices."
+                : account.achStatus === "pending"
+                  ? "Bank transfers are being turned on by Stripe."
+                  : "Bank transfers (0.8%, capped at $5) need a little more info — tap Update details if Stripe asks."}
+            </p>
+          ) : null}
+
           {account.detailsSubmitted ? (
             <button
               type="button"

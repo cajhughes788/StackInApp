@@ -70,11 +70,14 @@ function metaLine(invoice: InvoiceType): string {
     case "paid": {
       const parts = [invoice.paidAt ? `Paid ${formatInvoiceDate(invoice.paidAt.slice(0, 10))}` : "Paid"]
       if (invoice.paidVia === "bank_match") parts.push("matched from your bank")
-      else if (invoice.paidVia === "online") parts.push("paid online")
+      else if (invoice.paidVia === "online") parts.push(invoice.paidMethod === "other" ? "paid by bank transfer" : "paid online")
       else if (invoice.paidMethod) parts.push(PAID_METHOD_LABELS[invoice.paidMethod])
       return parts.join(" · ")
     }
     case "sent":
+      if (invoice.pendingPaymentAt) {
+        return `Bank payment processing · started ${formatInvoiceDate(invoice.pendingPaymentAt.slice(0, 10))}`
+      }
       return [invoice.sharedAt ? `Shared ${formatInvoiceDate(invoice.sharedAt.slice(0, 10))}` : "Sent", termsLabel(invoice)]
         .filter(Boolean)
         .join(" · ")
@@ -174,7 +177,8 @@ export default function InvoiceDetailPage() {
     }
   }
 
-  const editable = invoice?.status === "draft" || invoice?.status === "sent"
+  // Not while a bank payment clears: it would land against a changed invoice.
+  const editable = (invoice?.status === "draft" || invoice?.status === "sent") && !invoice?.pendingPaymentAt
 
   return (
     <InvoicesPage
@@ -275,7 +279,21 @@ export default function InvoiceDetailPage() {
             </div>
           ) : null}
 
-          {editable ? (
+          {invoice.status === "sent" && invoice.paymentFailedAt && !invoice.pendingPaymentAt ? (
+            <div className="rounded-[14px] bg-red-100 px-3.5 py-3 text-sm text-red-900 dark:bg-red-950 dark:text-red-200">
+              {invoice.clientName}&apos;s bank payment failed on {formatInvoiceDate(invoice.paymentFailedAt.slice(0, 10))}.
+              The invoice is open again — they can pay from the same link.
+            </div>
+          ) : null}
+
+          {invoice.status === "sent" && invoice.pendingPaymentAt ? (
+            // Marking it paid now would make the clearing payment a duplicate
+            // (refunded when it lands).
+            <div className="rounded-[14px] bg-muted px-3.5 py-3 text-sm text-foreground">
+              {invoice.clientName} started a bank payment. It usually clears in about 4 business days, then this
+              invoice is marked paid automatically.
+            </div>
+          ) : editable ? (
             <Button
               type="button"
               variant="outline"
@@ -288,7 +306,7 @@ export default function InvoiceDetailPage() {
             </Button>
           ) : null}
 
-          {invoice.status === "sent" ? (
+          {invoice.status === "sent" && !invoice.pendingPaymentAt ? (
             <div className="flex items-start gap-2.5 rounded-[14px] bg-accent px-3.5 py-3 text-sm leading-relaxed text-foreground">
               <Landmark className="mt-0.5 size-[18px] shrink-0 text-emerald-700 dark:text-emerald-400" aria-hidden="true" />
               <span>

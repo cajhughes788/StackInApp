@@ -1,6 +1,6 @@
 import type { Request, Response } from "express"
 import { findSharedInvoice } from "../services/invoicesService"
-import { isInvoicePayableOnline, startInvoiceCheckout } from "../services/invoicePaymentsService"
+import { invoiceOnlinePayment, startInvoiceCheckout } from "../services/invoicePaymentsService"
 import { renderPublicInvoiceNotFound, renderPublicInvoicePage } from "@shared/invoicePublicPage"
 
 // Public, unauthenticated: the page behind a shared invoice link. Hosting
@@ -55,11 +55,12 @@ export async function publicInvoiceHandler(req: Request, res: Response): Promise
       return
     }
     const today = new Date().toISOString().slice(0, 10)
-    const payable = await isInvoicePayableOnline(shared.workspaceId, shared.invoice).catch(() => false)
+    const online = await invoiceOnlinePayment(shared.workspaceId, shared.invoice).catch(() => ({ payable: false, bankTransfer: false }))
     res.status(200).send(
       renderPublicInvoicePage(shared.invoice, shared.settings, today, {
-        payPath: payable ? `/i/${encodeURIComponent(token)}/pay` : null,
+        payPath: online.payable ? `/i/${encodeURIComponent(token)}/pay` : null,
         justPaid: req.query.paid === "1",
+        bankTransfer: online.bankTransfer,
       })
     )
   } catch (error) {

@@ -22,7 +22,7 @@ export type DeepLinkRequest = {
   // Null for older notifications that predate workspaceId in the payload —
   // those stay in the current workspace.
   workspaceId: string | null
-  route: "/app/home" | "/app/banks"
+  route: "/app/home" | "/app/banks" | `/app/invoices${string}`
   review: DeepLinkReviewTab | null
 }
 
@@ -80,6 +80,15 @@ export function deepLinkRequestFromPushData(data: Record<string, unknown> | unde
   if (deepLink.startsWith("stackin://home")) {
     // Weekly summary (sendWeeklyDigest.ts).
     return { workspaceId, route: "/app/home", review: null }
+  }
+  if (deepLink.startsWith("stackin://invoices/")) {
+    // A bank payment on an invoice failed (invoicePaymentsService.ts).
+    const invoiceId = deepLink.slice("stackin://invoices/".length).split(/[/?#]/)[0]
+    return {
+      workspaceId,
+      route: invoiceId ? `/app/invoices/view?id=${encodeURIComponent(invoiceId)}` : "/app/invoices",
+      review: null,
+    }
   }
   if (deepLink.startsWith("stackin://plaid/reconnect")) {
     // Reconnecting a bank happens on the Bank connections page.
