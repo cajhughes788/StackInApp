@@ -2,6 +2,7 @@ import { apiFetch, tryWrite } from "@/lib/api/core/client"
 import { API_ENDPOINTS } from "@/lib/api/core/endpoints"
 import type { RecurringCadence } from "@shared/schemas/recurringRule"
 import type { IncomeCategory, PaymentMethod } from "@shared/schemas/entry"
+import type { PlaidInvoiceMatch } from "@shared/schemas/plaidPendingTransaction"
 
 export type PlaidLinkedAccount = {
   accountId: string
@@ -56,8 +57,10 @@ export type PlaidPendingTransaction = {
   refundOf?: { pendingId: string; expenseId: string; date: string; amount: number } | null
   /** A deposit cashed out from Venmo — see isVenmoCashoutDescriptor. */
   isVenmoCashout?: boolean
-  /** Set when the app dismissed this on its own as a transfer. */
-  dismissReason?: "transfer"
+  /** Income direction only — the invoice(s) this deposit most likely pays. */
+  invoiceMatch?: PlaidInvoiceMatch | null
+  /** Why it was dismissed without a plain "not income/personal" decision. */
+  dismissReason?: "transfer" | "invoice_already_paid"
   /** The other half of a matched transfer, when it was hidden by pairing. */
   transferPairId?: string
 }
@@ -168,10 +171,18 @@ export async function confirmPlaidPendingTransaction(
     paymentMethod?: PaymentMethod
     /** "Who paid you?" — only used with paymentMethod "other". */
     incomeLabel?: string
+    /** Income: the invoice group from invoiceMatch (suggested or an alternative) this deposit pays. */
+    invoiceIds?: string[]
+    /** With isBusiness false: money for an invoice already marked paid (invoiceMatch.alreadyPaid). */
+    invoiceAlreadyPaid?: boolean
   }
 ): Promise<{
   committedExpenseId?: string
   committedEntryId?: string
+  /** Invoice payments: one Entry per invoice. */
+  committedEntryIds?: string[]
+  /** Invoice payments that arrived net of fees: the processing-fee Expense. */
+  feeExpenseId?: string
   recurringSuggestion?: PlaidRecurringSuggestion
   personalSuggestion?: PlaidPersonalSuggestion
   /** Income dismissals: a one-time "stop asking about this payer?" offer. */

@@ -54,6 +54,31 @@ export const PlaidSuggestionSourceSchema = z.enum([
 
 export type PlaidSuggestionSource = z.infer<typeof PlaidSuggestionSourceSchema>
 
+export const PlaidInvoiceRefSchema = z.object({
+  invoiceId: z.string(),
+  number: z.string(),
+  clientName: z.string(),
+  amount: z.number(),
+})
+
+// "exact": one invoice equals the deposit. "combined": 2–3 invoices sum to
+// it (two checks deposited together). "net_of_fees": a processor payout
+// short of the invoice total by its fee.
+export const PlaidInvoiceMatchSchema = z.object({
+  kind: z.enum(["exact", "combined", "net_of_fees"]),
+  invoices: z.array(PlaidInvoiceRefSchema).min(1).max(3),
+  invoiceTotal: z.number(),
+  // invoiceTotal minus the deposit; 0 unless net_of_fees.
+  feeAmount: z.number().nonnegative(),
+  // Other invoice groups that fit just as well — non-empty means the review
+  // card asks which one instead of suggesting `invoices`.
+  alternatives: z.array(z.array(PlaidInvoiceRefSchema).min(1).max(3)).default([]),
+  // The invoices were already marked paid by hand — this deposit is that
+  // money arriving, so the card offers "already recorded" (a dismissal with
+  // dismissReason "invoice_already_paid") instead of "mark paid".
+  alreadyPaid: z.boolean().default(false),
+})
+
 const PlaidPendingTransactionObjectSchema = z.object({
   id: z.string(),
   workspaceId: z.string(),
@@ -117,7 +142,9 @@ const PlaidPendingTransactionObjectSchema = z.object({
   // Why the app dismissed this on its own, when it did. Absent for a user's
   // own dismissal (and for merchant-memory "always personal" dismissals,
   // which predate this field).
-  dismissReason: z.enum(["transfer"]).optional(),
+  // "invoice_already_paid": the money for an invoice the user had already
+  // marked paid by hand (see pickPaidInvoices with manually-paid candidates).
+  dismissReason: z.enum(["transfer", "invoice_already_paid"]).optional(),
   // The other half of a matched transfer (see isPlaidTransferPair), so one
   // transaction can't be paired twice.
   transferPairId: z.string().optional(),
@@ -143,9 +170,19 @@ const PlaidPendingTransactionObjectSchema = z.object({
     })
     .nullable()
     .default(null),
+  // Income direction only: the open invoice(s) this deposit most likely
+  // pays (see pickPaidInvoices in shared/invoiceMatching.ts). Null when
+  // nothing fit, and on records from before invoicing.
+  invoiceMatch: PlaidInvoiceMatchSchema.nullable().default(null),
   committedExpenseId: z.string().optional(),
   // Set instead of committedExpenseId when an income transaction is confirmed.
   committedEntryId: z.string().optional(),
+  // Set instead of committedEntryId when the deposit paid invoices: one
+  // Entry per invoice, plus the processing-fee Expense when it arrived net
+  // of fees. Kept apart from committedExpenseId, which means the deposit
+  // itself was booked as an expense (a refund).
+  committedEntryIds: z.array(z.string()).optional(),
+  feeExpenseId: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })
@@ -154,3 +191,5 @@ export const PlaidPendingTransactionSchema = z.preprocess(normalizeLegacyDirecti
 
 export type PlaidPendingTransactionType = z.infer<typeof PlaidPendingTransactionObjectSchema>
 export type PlaidTransactionDirection = z.infer<typeof PlaidTransactionDirectionSchema>
+export type PlaidInvoiceRef = z.infer<typeof PlaidInvoiceRefSchema>
+export type PlaidInvoiceMatch = z.infer<typeof PlaidInvoiceMatchSchema>

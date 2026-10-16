@@ -408,6 +408,11 @@ export async function deleteEntry(workspaceId: string, uid: string, entryId: str
     let payStubs: PayStub.Type[] | null | undefined;
     if (removedEntry?.workspace === "independent") {
         await syncIndependentProfitLossDates(workspaceId, [removedEntry.date]);
+        // An invoice this Entry was the payment for goes back to open.
+        // Dynamic import: invoicesService imports this module.
+        await import("./invoicesService.js")
+            .then(({ reopenInvoicesForDeletedEntry }) => reopenInvoicesForDeletedEntry(workspaceId, entryId))
+            .catch((error) => console.error("entriesService.deleteEntry: failed to reopen invoice", error));
     }
     else if (removedEntry?.workspace === "w2") {
         payStubs = await syncW2PayStubDates(workspaceId, uid, [removedEntry.date]);

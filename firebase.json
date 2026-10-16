@@ -85,6 +85,9 @@
 
       { "source": "/api/user", "function": "deleteUserData", "method": "DELETE" },
 
+      // Shared invoice links (publicInvoice renders the page server-side).
+      { "source": "/i/**", "function": "publicInvoice" },
+
       { "source": "**", "destination": "/index.html" }
     ]
   },

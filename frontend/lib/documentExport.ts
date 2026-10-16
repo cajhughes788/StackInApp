@@ -178,3 +178,31 @@ export async function shareElementAsPdf(
     mimeType: "application/pdf",
   })
 }
+
+export async function sharePdfBlob(blob: Blob, filename: string, title?: string): Promise<void> {
+  await shareBlobFile({ blob, filename, title, mimeType: "application/pdf" })
+}
+
+// Native share sheet on iOS; the Web Share API where the browser has it;
+// otherwise copies the link. Returns "copied" so the caller can say so.
+export async function shareLink(url: string, title: string, text?: string): Promise<"shared" | "copied"> {
+  try {
+    if (Capacitor.isNativePlatform()) {
+      const { Share } = await import("@capacitor/share")
+      await Share.share({ title, text, url, dialogTitle: title })
+      return "shared"
+    }
+    if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+      await navigator.share({ title, text, url })
+      return "shared"
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error ?? "")
+    // The user closing the share sheet isn't a failure.
+    if (/cancel|abort/i.test(message)) return "shared"
+    // Browsers refuse navigator.share outside a fresh tap; copy instead.
+    if (!(error instanceof Error && error.name === "NotAllowedError")) throw error
+  }
+  await navigator.clipboard.writeText(url)
+  return "copied"
+}

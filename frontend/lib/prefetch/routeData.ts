@@ -4,6 +4,7 @@ import type { WorkspaceId, WorkspaceType } from "@shared/contracts/workspace"
 
 import { usePayStubsStore } from "@/lib/stores/usePaystubsStore"
 import { useProfitLossStore } from "@/lib/stores/useProfitLossStore"
+import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
 
 const PREFETCH_DEDUPE_WINDOW_MS = 15_000
 
@@ -60,5 +61,10 @@ export function prefetchRouteData(
 
   if (href === "/app/profitloss" && workspaceType === "independent") {
     runPrefetch(`profitloss:${workspaceId}:month`, () => prefetchProfitLoss(workspaceId))
+    return
+  }
+
+  if (href === "/app/invoices" && workspaceType === "independent") {
+    runPrefetch(`invoices:${workspaceId}`, () => useInvoicesStore.getState().load(workspaceId))
   }
 }

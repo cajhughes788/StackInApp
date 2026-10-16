@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Check, ChevronDown, ChevronUp, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -42,6 +42,10 @@ import {
 import { useToast } from "@/hooks/use-toast"
 import { useReviewRequestNonce } from "@/lib/push/deepLinkStore"
 import { useReviewCountsStore } from "@/lib/stores/useReviewCountsStore"
+import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
+import InvoiceMatchCard from "@/components/invoices/invoice-match-card"
+import type { PlaidInvoiceRef } from "@shared/schemas/plaidPendingTransaction"
+import type { InvoiceType } from "@shared/schemas/invoice"
 
 // The Income-tab counterpart of plaid-pending-transactions-panel.tsx: bank
 // deposits (Plaid direction "income") land here instead of the expense
@@ -242,6 +246,14 @@ export default function PlaidIncomeReviewPanel() {
   const [isBulkWorking, setIsBulkWorking] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
   const [notIncomePrompt, setNotIncomePrompt] = useState<PlaidPersonalSuggestion | null>(null)
+  // Deposits whose invoice suggestion the user turned down ("Not this") —
+  // they go back to the ordinary income card for this session.
+  const [skippedMatchIds, setSkippedMatchIds] = useState<Set<string>>(new Set())
+  const invoicesEntry = useInvoicesStore((state) => (activeWorkspaceId ? state.byWorkspaceId[activeWorkspaceId] : undefined))
+  const invoicesById = useMemo(
+    () => new Map<string, InvoiceType>((invoicesEntry?.invoices ?? []).map((invoice) => [invoice.id, invoice])),
+    [invoicesEntry?.invoices]
+  )
   // Set by a notification tap (see the review-request effect below) so the
   // list it brought the user to never auto-collapses.
   const didAutoCollapseRef = useRef(false)
@@ -308,6 +320,15 @@ export default function PlaidIncomeReviewPanel() {
     }
   }, [isLoading, transactions.length])
 
+  // Invoice cards read due dates and how an invoice was paid from the
+  // invoices store — loaded only when there's a match to show.
+  const hasInvoiceMatches = transactions.some((t) => t.invoiceMatch)
+  useEffect(() => {
+    if (activeWorkspaceId && hasInvoiceMatches) {
+      void useInvoicesStore.getState().load(activeWorkspaceId).catch(() => {})
+    }
+  }, [activeWorkspaceId, hasInvoiceMatches])
+
   useEffect(() => {
     if (activeWorkspaceId && loadedWorkspaceIdRef.current === activeWorkspaceId) {
       writeHadPending(activeWorkspaceId, transactions.length > 0)
@@ -315,6 +336,12 @@ export default function PlaidIncomeReviewPanel() {
       useReviewCountsStore.getState().setCount(activeWorkspaceId, "income", transactions.length)
     }
   }, [activeWorkspaceId, transactions])
+
+  function matchFor(transaction: PlaidPendingTransaction) {
+    return transaction.invoiceMatch && !skippedMatchIds.has(transaction.id) ? transaction.invoiceMatch : null
+  }
+  // Invoice cards are decided one at a time, never in a bulk run.
+  const selectable = transactions.filter((t) => !matchFor(t))
 
   function choiceFor(transaction: PlaidPendingTransaction): RowChoice {
     return choices[transaction.id] ?? defaultChoice(transaction)
@@ -343,11 +370,11 @@ export default function PlaidIncomeReviewPanel() {
     return { result, incomeLabel }
   }
 
-  async function handleDecision(transaction: PlaidPendingTransaction, isIncome: boolean) {
+  // Optimistic — drop the row now, restore it in place if the call fails.
+  async function decideOne(transaction: PlaidPendingTransaction, submit: (workspaceId: string) => Promise<void>) {
     if (!activeWorkspaceId) return
     const workspaceId = activeWorkspaceId
     const previousTransactions = transactions
-    // Optimistic — drop the row now, restore it in place if the call fails.
     setTransactions((prev) => prev.filter((t) => t.id !== transaction.id))
     setSelectedIds((prev) => {
       if (!prev.has(transaction.id)) return prev
@@ -356,12 +383,7 @@ export default function PlaidIncomeReviewPanel() {
       return next
     })
     try {
-      const { result, incomeLabel } = await submitDecision(workspaceId, transaction, isIncome)
-      if (isIncome) refreshVisibleEntries(workspaceId)
-      if (incomeLabel) void saveNewIncomeNames(workspaceId, [incomeLabel])
-      // Only offered from single-row dismissals, like the expense panel's
-      // personalSuggestion — a bulk run would stack one dialog per payer.
-      if (result.notIncomeSuggestion) setNotIncomePrompt(result.notIncomeSuggestion)
+      await submit(workspaceId)
     } catch {
       setTransactions((prev) => {
         if (prev.some((p) => p.id === transaction.id)) return prev
@@ -374,6 +396,45 @@ export default function PlaidIncomeReviewPanel() {
       })
       toast({ title: "Couldn't save your decision — restored to your review list", variant: "destructive" })
     }
+  }
+
+  function handleDecision(transaction: PlaidPendingTransaction, isIncome: boolean) {
+    return decideOne(transaction, async (workspaceId) => {
+      const { result, incomeLabel } = await submitDecision(workspaceId, transaction, isIncome)
+      if (isIncome) refreshVisibleEntries(workspaceId)
+      if (incomeLabel) void saveNewIncomeNames(workspaceId, [incomeLabel])
+      // Only offered from single-row dismissals, like the expense panel's
+      // personalSuggestion — a bulk run would stack one dialog per payer.
+      if (result.notIncomeSuggestion) setNotIncomePrompt(result.notIncomeSuggestion)
+    })
+  }
+
+  // Pays the chosen invoices from this deposit (confirmInvoicePayment on the
+  // server: one entry per invoice, plus a fee expense for a net payout).
+  function handlePayInvoices(transaction: PlaidPendingTransaction, group: PlaidInvoiceRef[]) {
+    return decideOne(transaction, async (workspaceId) => {
+      await confirmPlaidPendingTransaction(workspaceId, transaction.id, {
+        isBusiness: true,
+        invoiceIds: group.map((ref) => ref.invoiceId),
+        paymentMethod: choiceFor(transaction).paymentMethod,
+      })
+      refreshVisibleEntries(workspaceId)
+      void useInvoicesStore.getState().load(workspaceId, { force: true }).catch(() => {})
+      toast({
+        title:
+          group.length === 1
+            ? `Invoice #${group[0].number} marked paid`
+            : `Invoices ${group.map((ref) => `#${ref.number}`).join(" and ")} marked paid`,
+      })
+    })
+  }
+
+  // Money for an invoice already marked paid by hand: dismissed without
+  // teaching income memory "not income".
+  function handleAlreadyCounted(transaction: PlaidPendingTransaction) {
+    return decideOne(transaction, async (workspaceId) => {
+      await confirmPlaidPendingTransaction(workspaceId, transaction.id, { isBusiness: false, invoiceAlreadyPaid: true })
+    })
   }
 
   async function handleBulkDecision(isIncome: boolean) {
@@ -460,14 +521,14 @@ export default function PlaidIncomeReviewPanel() {
         </div>
       ) : null}
 
-      {!collapsed && transactions.length > 1 ? (
+      {!collapsed && selectable.length > 1 ? (
         <div className="flex flex-wrap items-center gap-2 px-1 text-sm">
           <label className="flex items-center gap-2 font-medium">
             <Checkbox
-              checked={selectedIds.size === transactions.length}
+              checked={selectedIds.size === selectable.length}
               onCheckedChange={() =>
                 setSelectedIds((prev) =>
-                  prev.size === transactions.length ? new Set() : new Set(transactions.map((t) => t.id))
+                  prev.size === selectable.length ? new Set() : new Set(selectable.map((t) => t.id))
                 )
               }
               aria-label="Select all"
@@ -496,7 +557,23 @@ export default function PlaidIncomeReviewPanel() {
       ) : null}
 
       {!collapsed &&
-        transactions.map((transaction) => (
+        transactions.map((transaction) => {
+          const match = matchFor(transaction)
+          if (match) {
+            return (
+              <InvoiceMatchCard
+                key={transaction.id}
+                transaction={transaction}
+                match={match}
+                invoicesById={invoicesById}
+                disabled={isBulkWorking}
+                onPay={(group) => void handlePayInvoices(transaction, group)}
+                onAlreadyCounted={() => void handleAlreadyCounted(transaction)}
+                onNotThis={() => setSkippedMatchIds((prev) => new Set(prev).add(transaction.id))}
+              />
+            )
+          }
+          return (
           <IncomeReviewCard
             key={transaction.id}
             transaction={transaction}
@@ -510,7 +587,8 @@ export default function PlaidIncomeReviewPanel() {
             onConfirm={() => void handleDecision(transaction, true)}
             onDismiss={() => void handleDecision(transaction, false)}
           />
-        ))}
+          )
+        })}
 
       <AlertDialog open={notIncomePrompt != null} onOpenChange={(open) => !open && setNotIncomePrompt(null)}>
         <AlertDialogContent>

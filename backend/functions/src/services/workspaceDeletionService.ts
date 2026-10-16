@@ -170,6 +170,13 @@ export async function purgeWorkspace(
       uid,
       workspaceId,
     })
+    // Top-level index recursiveDelete doesn't reach. Dynamic import:
+    // invoicesService pulls in entriesService, which this module shouldn't
+    // load for every storage cleanup.
+    const { deleteInvoiceSharesForWorkspace } = await import("./invoicesService.js")
+    await deleteInvoiceSharesForWorkspace(workspaceId)
+    const { deletePaymentAccountForWorkspace } = await import("./paymentAccountsService.js")
+    await deletePaymentAccountForWorkspace(workspaceId)
     await db.recursiveDelete(workspaceRef)
     logWorkspaceDeleteInfo("recursive_delete_complete", {
       uid,

@@ -77,10 +77,15 @@ export const updateWorkspace = withCorsAuth(async (req, res) => {
   await updateWorkspaceHandler(req, res)
 })
 
-export const deleteWorkspace = withCorsAuth(async (req, res) => {
-  const { deleteWorkspaceHandler } = await import("./routes/deleteWorkspace.js")
-  await deleteWorkspaceHandler(req, res)
-})
+// Stripe key: deleting a workspace also removes its Connect account.
+export const deleteWorkspace = withCorsAuth(
+  async (req, res) => {
+    const { deleteWorkspaceHandler } = await import("./routes/deleteWorkspace.js")
+    await deleteWorkspaceHandler(req, res)
+  },
+  true,
+  { secrets: [SECRETS.STRIPE_SECRET_KEY] }
+)
 
 // ---------------------------------------------------------------------------
 // Entries
@@ -152,6 +157,65 @@ export const deleteRecurringRule = withCorsAuth(async (req, res) => {
 export const getRecurringRules = withCorsAuth(async (req, res) => {
   const { getRecurringRulesHandler } = await import("./routes/getRecurringRules.js")
   await getRecurringRulesHandler(req, res)
+})
+
+// ---------------------------------------------------------------------------
+// Invoices
+// ---------------------------------------------------------------------------
+
+export const getInvoices = withCorsAuth(async (req, res) => {
+  const { getInvoicesHandler } = await import("./routes/getInvoices.js")
+  await getInvoicesHandler(req, res)
+})
+
+export const createInvoice = withCorsAuth(async (req, res) => {
+  const { createInvoiceHandler } = await import("./routes/createInvoice.js")
+  await createInvoiceHandler(req, res)
+})
+
+export const editInvoice = withCorsAuth(async (req, res) => {
+  const { editInvoiceHandler } = await import("./routes/editInvoice.js")
+  await editInvoiceHandler(req, res)
+})
+
+export const deleteInvoice = withCorsAuth(async (req, res) => {
+  const { deleteInvoiceHandler } = await import("./routes/deleteInvoice.js")
+  await deleteInvoiceHandler(req, res)
+})
+
+export const updateInvoiceStatus = withCorsAuth(async (req, res) => {
+  const { updateInvoiceStatusHandler } = await import("./routes/updateInvoiceStatus.js")
+  await updateInvoiceStatusHandler(req, res)
+})
+
+export const saveInvoiceSettings = withCorsAuth(async (req, res) => {
+  const { saveInvoiceSettingsHandler } = await import("./routes/saveInvoiceSettings.js")
+  await saveInvoiceSettingsHandler(req, res)
+})
+
+export const updatePaymentAccount = withCorsAuth(
+  async (req, res) => {
+    const { updatePaymentAccountHandler } = await import("./routes/updatePaymentAccount.js")
+    await updatePaymentAccountHandler(req, res)
+  },
+  true,
+  { secrets: [SECRETS.STRIPE_SECRET_KEY] }
+)
+
+// Bare onRequest like stripeWebhook: signature checks need the raw body.
+export const stripeConnectWebhook = onRequest(
+  { secrets: [SECRETS.STRIPE_SECRET_KEY, SECRETS.STRIPE_CONNECT_WEBHOOK_SECRET] },
+  async (req, res) => {
+    const { stripeConnectWebhookHandler } = await import("./routes/stripeConnectWebhook.js")
+    await stripeConnectWebhookHandler(req as any, res as any)
+  }
+)
+
+// Bare onRequest: the public page behind a shared invoice link — no sign-in
+// (firebase.json rewrites /i/** here).
+export const publicInvoice = onRequest(async (req, res) => {
+  const { publicInvoiceHandler } = await import("./routes/publicInvoice.js")
+  await publicInvoiceHandler(req as any, res as any)
 })
 
 // ---------------------------------------------------------------------------
@@ -374,7 +438,7 @@ export const deleteUserData = withCorsAuth(
     await deleteUserDataHandler(req, res)
   },
   true,
-  { secrets: PLAID_SECRETS }
+  { secrets: [...PLAID_SECRETS, SECRETS.STRIPE_SECRET_KEY] }
 )
 
 export const getAppBootstrap = withCorsAuth(async (req, res) => {

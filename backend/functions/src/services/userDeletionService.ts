@@ -1,6 +1,8 @@
 import { auth, db } from "../admin"
 import { revokePlaidItemsForWorkspace } from "./plaidService"
 import { deleteWorkspaceStorage } from "./workspaceDeletionService"
+import { deleteInvoiceSharesForWorkspace } from "./invoicesService"
+import { deletePaymentAccountForWorkspace } from "./paymentAccountsService"
 
 function serializeError(error: unknown) {
   if (!(error instanceof Error)) {
@@ -129,6 +131,16 @@ export async function purgeUserData(uid: string): Promise<void> {
         "delete_workspace_storage",
         { uid, workspaceId },
         () => deleteWorkspaceStorage(workspaceId)
+      )
+      await runLoggedStep(
+        "delete_payment_account",
+        { uid, workspaceId },
+        () => deletePaymentAccountForWorkspace(workspaceId)
+      )
+      await runLoggedStep(
+        "delete_invoice_shares",
+        { uid, workspaceId },
+        () => deleteInvoiceSharesForWorkspace(workspaceId)
       )
       await runLoggedStep(
         "recursive_delete_workspace",

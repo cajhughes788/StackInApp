@@ -16,6 +16,9 @@ export const AWS_TEXTRACT_REGION = defineSecret("AWS_TEXTRACT_REGION")
 // Stripe
 export const STRIPE_SECRET_KEY = defineSecret("STRIPE_SECRET_KEY")
 export const STRIPE_WEBHOOK_SECRET = defineSecret("STRIPE_WEBHOOK_SECRET")
+// Signing secret of the separate Connect webhook endpoint (events from
+// users' connected accounts) — see routes/stripeConnectWebhook.ts.
+export const STRIPE_CONNECT_WEBHOOK_SECRET = defineSecret("STRIPE_CONNECT_WEBHOOK_SECRET")
 
 // SendGrid
 export const SENDGRID_API_KEY = defineSecret("SENDGRID_API_KEY")

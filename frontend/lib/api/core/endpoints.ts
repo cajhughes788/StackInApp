@@ -13,6 +13,18 @@ export const API_ENDPOINTS = {
     delete: "https://deleteexpense-3lc2fwdgwq-uc.a.run.app",
   },
 
+  // Cloud Run URLs follow the deployed function names — these resolve once
+  // the invoice functions are deployed.
+  invoices: {
+    get: "https://getinvoices-3lc2fwdgwq-uc.a.run.app",
+    post: "https://createinvoice-3lc2fwdgwq-uc.a.run.app",
+    patch: "https://editinvoice-3lc2fwdgwq-uc.a.run.app",
+    delete: "https://deleteinvoice-3lc2fwdgwq-uc.a.run.app",
+    status: "https://updateinvoicestatus-3lc2fwdgwq-uc.a.run.app",
+    saveSettings: "https://saveinvoicesettings-3lc2fwdgwq-uc.a.run.app",
+    paymentAccount: "https://updatepaymentaccount-3lc2fwdgwq-uc.a.run.app",
+  },
+
   recurringRules: {
     get: "https://getrecurringrules-3lc2fwdgwq-uc.a.run.app",
     post: "https://createrecurringrule-3lc2fwdgwq-uc.a.run.app",

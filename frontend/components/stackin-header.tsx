@@ -20,6 +20,7 @@ import {
   LifeBuoy,
   Menu,
   Receipt,
+  FileText,
   Settings,
   UserRound,
   type LucideIcon,
@@ -67,7 +68,10 @@ export default function StackInHeader() {
       ? { label: "Profit & Loss", href: "/app/profitloss", icon: ChartNoAxesColumnIncreasing }
       : { label: "Earnings", href: "/app/earnings", icon: ChartNoAxesColumnIncreasing },
     ...(activeWorkspace?.type === "independent"
-      ? [{ label: "Receipts", href: "/app/receipts", icon: Receipt }]
+      ? [
+          { label: "Invoices", href: "/app/invoices", icon: FileText },
+          { label: "Receipts", href: "/app/receipts", icon: Receipt },
+        ]
       : []),
   ]
   const setupItems: MenuItem[] = [

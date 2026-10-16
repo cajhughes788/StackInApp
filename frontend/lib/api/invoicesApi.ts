@@ -1,0 +1,95 @@
+import { apiFetch } from "@/lib/api/core/client"
+import { API_ENDPOINTS } from "@/lib/api/core/endpoints"
+import type {
+  InvoiceCreateInput,
+  InvoicePatch,
+  InvoiceSettings,
+  InvoiceSettingsPatch,
+  InvoiceStatusAction,
+  InvoiceType,
+} from "@shared/schemas/invoice"
+import type { PaymentAccount, PaymentAccountAction } from "@shared/schemas/paymentAccount"
+
+// apiFetch, not tryWrite — like recurring rules, invoice changes need a
+// connection: numbering and the paid/void transitions are decided by the
+// server, and a queued replay could act on an invoice that changed since.
+
+function query(workspaceId: string, invoiceId?: string): string {
+  const base = `workspaceId=${encodeURIComponent(workspaceId)}`
+  return invoiceId ? `${base}&invoiceId=${encodeURIComponent(invoiceId)}` : base
+}
+
+/** All invoices, newest first, plus the workspace's invoice settings and Stripe account (null if none). */
+export async function getInvoices(
+  workspaceId: string
+): Promise<{ invoices: InvoiceType[]; settings: InvoiceSettings; paymentAccount: PaymentAccount | null }> {
+  const res = await apiFetch<{ invoices: InvoiceType[]; settings: InvoiceSettings; paymentAccount: PaymentAccount | null }>(
+    `${API_ENDPOINTS.invoices.get}?${query(workspaceId)}`,
+    { method: "GET" }
+  )
+  return { invoices: res.invoices ?? [], settings: res.settings, paymentAccount: res.paymentAccount ?? null }
+}
+
+/**
+ * Stripe Connect: onboard (returns a Stripe sign-up link), refresh, dashboard
+ * (returns a one-time Express dashboard link), set_accept_online.
+ */
+export async function updatePaymentAccount(
+  workspaceId: string,
+  action: PaymentAccountAction
+): Promise<{ paymentAccount: PaymentAccount | null; url: string | null }> {
+  const res = await apiFetch<{ paymentAccount: PaymentAccount | null; url: string | null }>(
+    `${API_ENDPOINTS.invoices.paymentAccount}?${query(workspaceId)}`,
+    { method: "POST", body: JSON.stringify(action) }
+  )
+  return { paymentAccount: res.paymentAccount ?? null, url: res.url ?? null }
+}
+
+/** Omitted fields keep their saved value; logoDataUrl null removes the logo. */
+export async function saveInvoiceSettings(workspaceId: string, patch: InvoiceSettingsPatch): Promise<InvoiceSettings> {
+  const res = await apiFetch<{ settings: InvoiceSettings }>(`${API_ENDPOINTS.invoices.saveSettings}?${query(workspaceId)}`, {
+    method: "POST",
+    body: JSON.stringify(patch),
+  })
+  return res.settings
+}
+
+export async function createInvoice(workspaceId: string, input: InvoiceCreateInput): Promise<InvoiceType> {
+  const res = await apiFetch<{ invoice: InvoiceType }>(`${API_ENDPOINTS.invoices.post}?${query(workspaceId)}`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  })
+  return res.invoice
+}
+
+export async function editInvoice(workspaceId: string, invoiceId: string, patch: InvoicePatch): Promise<InvoiceType> {
+  const res = await apiFetch<{ invoice: InvoiceType }>(`${API_ENDPOINTS.invoices.patch}?${query(workspaceId, invoiceId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  })
+  return res.invoice
+}
+
+/** Drafts only — a sent invoice is voided instead. */
+export async function deleteInvoice(workspaceId: string, invoiceId: string): Promise<void> {
+  await apiFetch(`${API_ENDPOINTS.invoices.delete}?${query(workspaceId, invoiceId)}`, {
+    method: "DELETE",
+    body: JSON.stringify({}),
+  })
+}
+
+/**
+ * send / void / mark_paid / share. mark_paid also books the income Entry and
+ * returns its id; share returns the public link (and sends a draft).
+ */
+export async function updateInvoiceStatus(
+  workspaceId: string,
+  invoiceId: string,
+  action: InvoiceStatusAction
+): Promise<{ invoice: InvoiceType; entryId: string | null; shareUrl: string | null }> {
+  const res = await apiFetch<{ invoice: InvoiceType; entryId: string | null; shareUrl: string | null }>(
+    `${API_ENDPOINTS.invoices.status}?${query(workspaceId, invoiceId)}`,
+    { method: "POST", body: JSON.stringify(action) }
+  )
+  return { invoice: res.invoice, entryId: res.entryId ?? null, shareUrl: res.shareUrl ?? null }
+}

@@ -36,6 +36,15 @@ import type { RecurringCadence } from "@shared/schemas/recurringRule"
 import type { IncomeCategory, PaymentMethod } from "@shared/schemas/entry"
 import * as expensesSvc from "./expensesService"
 import * as entriesSvc from "./entriesService"
+import { findInvoiceMatchForDeposit, invoicesCol } from "./invoicesService"
+import { InvoiceSchema, type InvoiceType } from "@shared/schemas/invoice"
+import {
+  allocateInvoiceFee,
+  invoiceCentsByCategory,
+  invoiceGroupFee,
+  invoiceIncomeBreakdown,
+  resolveChosenInvoiceGroup,
+} from "@shared/invoiceMatching"
 import { sendTransactionNotification } from "./pushNotificationService"
 import { suggestCategoriesWithAi, type AiCategoryRequest } from "./aiCategorySuggestion"
 import { PLAID_CLIENT_ID, PLAID_SECRET, PLAID_ENV, PLAID_TOKEN_ENCRYPTION_KEY } from "../secrets"
@@ -725,6 +734,23 @@ async function upsertPendingTransactionFromPlaid(
     !existing?.transferOverride && (transferSignal === "transfer" || transferPairId !== null || venmoCashoutIsTransfer)
   const autoDismiss = memoryDismiss || isTransfer
 
+  // Recomputed on every sync of a still-pending deposit, so an invoice
+  // paid or voided in the meantime drops out of the suggestion. Best-effort:
+  // a failed lookup just means no invoice suggestion, never a failed sync.
+  const invoiceMatch =
+    direction === "income" && !isRefund && !autoDismiss
+      ? await findInvoiceMatchForDeposit(workspaceId, {
+          date: transaction.date,
+          amount,
+          merchantName,
+          rawName,
+          payerLabel: incomeMemory?.lastOutcome === "income" ? incomeMemory.incomeLabel : null,
+        }).catch((error) => {
+          console.error("plaidService.upsertPendingTransactionFromPlaid: invoice matching failed", error)
+          return null
+        })
+      : null
+
   const nowIso = new Date().toISOString()
   const pending: PlaidPendingTransactionType = {
     id: transaction.transaction_id,
@@ -745,6 +771,7 @@ async function upsertPendingTransactionFromPlaid(
     isVenmoCashout,
     isRefund,
     refundOf,
+    invoiceMatch,
     suggestedExpenseAccount: classification.suggestedExpenseAccount,
     suggestionSource: classification.suggestionSource,
     suggestedIncomeCategory: incomeMemory?.lastOutcome === "income" ? incomeMemory.incomeCategory : null,
@@ -1502,10 +1529,18 @@ export async function confirmPendingTransaction(
     incomeCategory?: IncomeCategory
     paymentMethod?: PaymentMethod
     incomeLabel?: string
+    // Income only: the invoice group from pending.invoiceMatch this deposit
+    // pays — see confirmInvoicePayment.
+    invoiceIds?: string[]
+    // Dismiss only (isBusiness false): the deposit is money for an invoice
+    // already marked paid by hand (pending.invoiceMatch.alreadyPaid).
+    invoiceAlreadyPaid?: boolean
   }
 ): Promise<{
   committedExpenseId?: string
   committedEntryId?: string
+  committedEntryIds?: string[]
+  feeExpenseId?: string
   recurringSuggestion?: PlaidRecurringSuggestion
   personalSuggestion?: PlaidPersonalSuggestion
   notIncomeSuggestion?: PlaidPersonalSuggestion
@@ -1547,7 +1582,12 @@ export async function confirmPendingTransaction(
       return {}
     }
     if (decision.isBusiness && current.status === "confirmed") {
-      return { committedExpenseId: current.committedExpenseId, committedEntryId: current.committedEntryId }
+      return {
+        committedExpenseId: current.committedExpenseId,
+        committedEntryId: current.committedEntryId,
+        committedEntryIds: current.committedEntryIds,
+        feeExpenseId: current.feeExpenseId,
+      }
     }
     if (current.status === "processing") {
       throw new ConflictError("This transaction is already being processed — try again in a moment.")
@@ -1560,6 +1600,23 @@ export async function confirmPendingTransaction(
   // memory); only very old records without one are resolved again here.
   const merchantKey = pending.merchantKey || await resolveMerchantKey(workspaceId, pending.merchantName, pending.rawName)
   const displayName = resolvePlaidDisplayName(pending.merchantName, pending.rawName)
+
+  if (!decision.isBusiness && decision.invoiceAlreadyPaid) {
+    // Not a "this isn't income" decision — the income was booked when the
+    // invoice was marked paid — so income memory is left alone.
+    if (!pending.invoiceMatch?.alreadyPaid) {
+      await ref.set({ status: "pending", updatedAt: new Date().toISOString() }, { merge: true }).catch(() => {})
+      throw new BadRequestError("This deposit doesn't match an invoice that was already marked paid.")
+    }
+    await ref.set(
+      { status: "dismissed", dismissReason: "invoice_already_paid", updatedAt: new Date().toISOString() },
+      { merge: true }
+    ).catch(async (error) => {
+      await ref.set({ status: "pending", updatedAt: new Date().toISOString() }, { merge: true }).catch(() => {})
+      throw error
+    })
+    return {}
+  }
 
   if (!decision.isBusiness) {
     await ref.set({ status: "dismissed", updatedAt: new Date().toISOString() }, { merge: true }).catch(async (error) => {
@@ -1617,6 +1674,9 @@ export async function confirmPendingTransaction(
 
   if (pending.isRefund) {
     return confirmRefundTransaction(workspaceId, uid, ref, pending, displayName, decision.account)
+  }
+  if (pending.direction === "income" && decision.invoiceIds?.length) {
+    return confirmInvoicePayment(workspaceId, uid, ref, pending, displayName, decision.invoiceIds, decision.paymentMethod)
   }
   if (pending.direction === "income") {
     return confirmIncomeTransaction(workspaceId, uid, ref, pending, displayName, decision)
@@ -1746,6 +1806,192 @@ async function confirmIncomeTransaction(
     console.error("plaidService.confirmIncomeTransaction: rememberIncomeDecision failed", error)
   })
   return { committedEntryId: entryId }
+}
+
+const PROCESSING_FEE_EXPENSE_ACCOUNT = "Payment Processing Fees"
+
+// A deposit that pays invoices (pending.invoiceMatch): one Entry per
+// invoice for its full amount, dated the day the money arrived, plus a
+// processing-fee Expense when the payout came in net of fees — gross income
+// and a separate fee, the way a processor's 1099-K reports it. Called with
+// the transaction already claimed, so every failure releases the claim.
+//
+// The invoices are claimed first (sent → paid, in one transaction) so a
+// concurrent "mark paid" or a second deposit can't pay them too; if booking
+// fails after that, they're put back to "sent".
+async function confirmInvoicePayment(
+  workspaceId: string,
+  uid: string,
+  ref: FirebaseFirestore.DocumentReference,
+  pending: PlaidPendingTransactionType,
+  displayName: string,
+  invoiceIds: string[],
+  paymentMethodOverride: PaymentMethod | undefined
+): Promise<{ committedEntryIds: string[]; feeExpenseId?: string }> {
+  const releasePending = () =>
+    ref.set({ status: "pending", updatedAt: new Date().toISOString() }, { merge: true }).catch(() => {})
+
+  const match = pending.invoiceMatch
+  const group = match && !match.alreadyPaid ? resolveChosenInvoiceGroup(match, invoiceIds) : null
+  const feeAmount = match && group ? invoiceGroupFee(match, group, pending.amount) : null
+  if (!match || !group || feeAmount === null) {
+    await releasePending()
+    throw new BadRequestError("Those invoices weren't offered as a match for this deposit.")
+  }
+
+  const workspaceSnap = await db.doc(`workspaces/${workspaceId}`).get().catch(async (error) => {
+    await releasePending()
+    throw error
+  })
+  if (workspaceSnap.data()?.type !== "independent") {
+    await releasePending()
+    throw new BadRequestError("Bank deposits can only be added as income in an independent workspace.")
+  }
+
+  const paymentMethod =
+    paymentMethodOverride ?? pending.suggestedPaymentMethod ?? suggestPlaidIncomePaymentMethod(pending.merchantName, pending.rawName)
+  const feeShares = allocateInvoiceFee(group, feeAmount)
+  const invoiceRefs = group.map((invoiceRef) => invoicesCol(workspaceId).doc(invoiceRef.invoiceId))
+
+  let invoices: InvoiceType[]
+  try {
+    invoices = await db.runTransaction(async (txn) => {
+      const snaps = await txn.getAll(...invoiceRefs)
+      const current = snaps.map((snap, index) => {
+        if (!snap.exists) throw new NotFoundError(`Invoice #${group[index].number} no longer exists.`)
+        const invoice = InvoiceSchema.parse(snap.data())
+        if (invoice.status !== "sent") throw new ConflictError(`Invoice #${invoice.number} is no longer open.`)
+        if (Math.round(invoice.total * 100) !== Math.round(group[index].amount * 100)) {
+          throw new ConflictError(`Invoice #${invoice.number} changed since this deposit was matched.`)
+        }
+        return invoice
+      })
+      const nowIso = new Date().toISOString()
+      current.forEach((invoice, index) => {
+        txn.set(
+          invoiceRefs[index],
+          {
+            status: "paid",
+            paidAt: nowIso,
+            paidVia: "bank_match",
+            paidMethod: paymentMethod,
+            paidPlaidTransactionId: pending.plaidTransactionId,
+            paidFeeAmount: feeShares[index],
+            updatedAt: nowIso,
+          },
+          { merge: true }
+        )
+      })
+      return current
+    })
+  } catch (error) {
+    await releasePending()
+    throw error
+  }
+
+  try {
+    const committedEntryIds: string[] = []
+    for (const invoice of invoices) {
+      // Named custom income for an "Other" deposit, like confirmIncomeTransaction —
+      // here the name is the invoice's client.
+      const customIncome =
+        paymentMethod === "other"
+          ? [...invoiceCentsByCategory(invoice.lines)].map(([category, cents]) => ({
+              label: invoice.clientName,
+              amount: cents / 100,
+              category,
+            }))
+          : []
+      const created = await entriesSvc.createEntry(workspaceId, uid, {
+        workspace: "independent",
+        date: pending.date,
+        notes: [`Invoice #${invoice.number}`, invoice.clientName, displayName, "Imported from bank"].join(" | "),
+        // One deterministic id per invoice, so a retry never double-books.
+        clientMutationId: `plaid:${pending.plaidTransactionId}:invoice:${invoice.id}`,
+        independent: {
+          hours: 0,
+          incomeBreakdowns: [invoiceIncomeBreakdown(invoice.lines, paymentMethod)],
+          unreportedCash: 0,
+          unreportedCashTips: 0,
+          customIncome,
+        },
+      })
+      committedEntryIds.push(created.id)
+    }
+
+    let feeExpenseId: string | undefined
+    if (feeAmount > 0) {
+      const created = await expensesSvc.createExpense(workspaceId, uid, {
+        date: pending.date,
+        amount: feeAmount,
+        vendor: displayName,
+        description: `Processing fee on ${invoices.map((invoice) => `Invoice #${invoice.number}`).join(", ")}`,
+        account: PROCESSING_FEE_EXPENSE_ACCOUNT,
+        clientMutationId: `plaid:${pending.plaidTransactionId}:fee`,
+      })
+      feeExpenseId = created.id
+    }
+
+    const batch = db.batch()
+    invoices.forEach((_, index) => {
+      batch.set(invoiceRefs[index], { paidEntryId: committedEntryIds[index] }, { merge: true })
+    })
+    batch.set(
+      ref,
+      {
+        status: "confirmed",
+        committedEntryIds,
+        ...(feeExpenseId ? { feeExpenseId } : {}),
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    )
+    await batch.commit()
+
+    // Best-effort, and only when one client paid: a combined check deposit
+    // says nothing about who this payer key is.
+    const [first] = invoices
+    if (invoices.every((invoice) => invoice.clientName === first.clientName)) {
+      const [topCategory] = [...invoiceCentsByCategory(first.lines)].sort((a, b) => b[1] - a[1])[0]
+      await rememberIncomeDecision(workspaceId, payerKeyFor(pending), displayName, {
+        outcome: "income",
+        incomeCategory: topCategory,
+        paymentMethod,
+        incomeLabel: paymentMethod === "other" ? first.clientName : null,
+      }).catch((error) => {
+        console.error("plaidService.confirmInvoicePayment: rememberIncomeDecision failed", error)
+      })
+    }
+    return { committedEntryIds, feeExpenseId }
+  } catch (error) {
+    // Hand the invoices back, but only ones this deposit still holds.
+    await db
+      .runTransaction(async (txn) => {
+        const snaps = await txn.getAll(...invoiceRefs)
+        snaps.forEach((snap, index) => {
+          if (snap.data()?.paidPlaidTransactionId !== pending.plaidTransactionId) return
+          txn.set(
+            invoiceRefs[index],
+            {
+              status: "sent",
+              paidAt: null,
+              paidVia: null,
+              paidMethod: null,
+              paidEntryId: null,
+              paidPlaidTransactionId: null,
+              paidFeeAmount: 0,
+              updatedAt: new Date().toISOString(),
+            },
+            { merge: true }
+          )
+        })
+      })
+      .catch((revertError) => {
+        console.error("plaidService.confirmInvoicePayment: failed to reopen invoices", revertError)
+      })
+    await releasePending()
+    throw error
+  }
 }
 
 // Books a refund as a negative expense in the category it reverses, so the

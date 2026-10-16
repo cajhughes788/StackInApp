@@ -432,6 +432,22 @@ export default function IndependentSettingsSection({
         </CardContent>
       </Card>
 
+      {/* INVOICES */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Invoices</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="mb-3 text-sm text-muted-foreground">
+            Your business name, logo, color, payment terms and the &ldquo;How to pay&rdquo; note that appear on
+            every invoice.
+          </p>
+          <Button variant="outline" onClick={() => router.push("/app/invoices/settings")}>
+            Invoice settings
+          </Button>
+        </CardContent>
+      </Card>
+
       {/* RECURRING */}
       <Card>
         <CardHeader>

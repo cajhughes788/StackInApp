@@ -18,6 +18,10 @@ const BodySchema = z.object({
   paymentMethod: PaymentMethodSchema.optional(),
   // "Who paid you?" — only used with paymentMethod "other".
   incomeLabel: z.string().trim().max(60).optional(),
+  // Income only: the invoices from the deposit's invoiceMatch it pays.
+  invoiceIds: z.array(z.string().min(1)).min(1).max(3).optional(),
+  // Dismiss only: the deposit is money for an invoice already marked paid.
+  invoiceAlreadyPaid: z.boolean().optional(),
 })
 
 export async function confirmPlaidPendingTransactionHandler(req: Request, res: Response): Promise<void> {
