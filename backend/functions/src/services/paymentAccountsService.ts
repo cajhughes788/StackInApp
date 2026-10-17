@@ -107,7 +107,10 @@ async function ensureStripeAccount(workspaceId: string, uid: string, workspaceNa
         fees: { payer: "account" },
         losses: { payments: "stripe" },
         requirement_collection: "stripe",
-        stripe_dashboard: { type: "express" },
+        // Stripe only allows the Express dashboard when the platform pays
+        // the fees and carries losses; with the user as merchant of record,
+        // they get their own full Stripe account and dashboard.
+        stripe_dashboard: { type: "full" },
       },
       capabilities: {
         card_payments: { requested: true },
@@ -118,7 +121,7 @@ async function ensureStripeAccount(workspaceId: string, uid: string, workspaceNa
       business_profile: businessName ? { name: businessName } : undefined,
       metadata: { workspaceId },
     },
-    { idempotencyKey: `connect-account-${workspaceId}` }
+    { idempotencyKey: `connect-account-full-${workspaceId}` }
   )
 
   const nowIso = new Date().toISOString()
@@ -186,8 +189,9 @@ export async function updatePaymentAccount(
     case "dashboard": {
       const existing = await readPaymentAccount(workspaceId)
       if (!existing?.detailsSubmitted) throw new ConflictError("Finish setting up with Stripe first.")
-      const link = await getStripe().accounts.createLoginLink(existing.stripeAccountId)
-      return { paymentAccount: existing, url: link.url }
+      // Full Stripe accounts have no one-time login links: the user signs in
+      // to their own dashboard.
+      return { paymentAccount: existing, url: "https://dashboard.stripe.com/" }
     }
     case "set_accept_online": {
       const ref = paymentAccountDoc(workspaceId)
@@ -224,7 +228,7 @@ export async function handleStripeAccountUpdated(account: Stripe.Account): Promi
 
 // Account/workspace deletion. Stripe only deletes an account with a zero
 // balance; otherwise it's left in place (the owner can still reach it via
-// Stripe's own Express login) and only our records go. Best-effort.
+// their own Stripe login) and only our records go. Best-effort.
 export async function deletePaymentAccountForWorkspace(workspaceId: string): Promise<void> {
   const existing = await readPaymentAccount(workspaceId)
   if (!existing) return

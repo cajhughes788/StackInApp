@@ -7,8 +7,11 @@ import { renderPublicInvoiceNotFound, renderPublicInvoicePage } from "@shared/in
 // rewrites /i/** here, so the token is the last path segment; ?t= also
 // works when the function is hit directly.
 //
-// POST /i/{token}/pay starts Stripe Checkout for the client (303 to
-// Stripe); the amount always comes from the stored invoice, never the form.
+// /i/{token}/pay starts Stripe Checkout for the client (303 to Stripe): POST
+// from the page's Pay button, GET from the email's "Pay now" link. The
+// amount always comes from the stored invoice, never the request, and the
+// session is reused per invoice — so a mail scanner opening the link first
+// can't create a second payment.
 //
 // The CSP allows nothing but inline styles, data: images (the logo), the one
 // inline print handler, and the Pay form posting here and on to Stripe.
@@ -34,8 +37,14 @@ export async function publicInvoiceHandler(req: Request, res: Response): Promise
   for (const [key, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(key, value)
   res.setHeader("Content-Type", "text/html; charset=utf-8")
   const { token, pay } = parsePath(req)
-  if (pay ? req.method !== "POST" : req.method !== "GET" && req.method !== "HEAD") {
+  const allowed = pay ? ["GET", "POST", "HEAD"] : ["GET", "HEAD"]
+  if (!allowed.includes(req.method)) {
     res.status(405).send("Method not allowed")
+    return
+  }
+  // A HEAD probe of the pay link shouldn't start a Checkout session.
+  if (pay && req.method === "HEAD") {
+    res.status(200).end()
     return
   }
   try {

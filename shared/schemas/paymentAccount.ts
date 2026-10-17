@@ -2,13 +2,13 @@ import { z } from "zod"
 
 // -------------------------------------------------------------
 // PaymentAccount
-// The workspace's Stripe Connect (Express) account, for clients paying
+// The workspace's Stripe Connect account (full Stripe dashboard), for clients paying
 // invoices online. Firestore path:
 // workspaces/{workspaceId}/settings/payments
 // plus the top-level index stripeAccounts/{stripeAccountId} → { workspaceId },
 // because Connect webhooks name the Stripe account, not the workspace.
 //
-// Direct charges on an Express account whose controller has Stripe billing
+// Direct charges on a connected account whose controller has Stripe billing
 // fees to the account and carrying payment losses: the user is the merchant
 // of record and 521 never holds the money.
 // -------------------------------------------------------------
@@ -45,7 +45,7 @@ export const PaymentAccountActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("onboard"), client: z.enum(["native", "browser"]) }),
   // Re-reads the account from Stripe — after returning from sign-up.
   z.object({ action: z.literal("refresh") }),
-  // A one-time link into the Express dashboard (payouts, bank details).
+  // Where to manage payouts and bank details: the user's Stripe dashboard.
   z.object({ action: z.literal("dashboard") }),
   z.object({ action: z.literal("set_accept_online"), acceptOnline: z.boolean() }),
 ])

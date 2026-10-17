@@ -26,7 +26,9 @@ export function buildInvoiceEmail(params: {
   const accent = settings.accentColor || DEFAULT_INVOICE_ACCENT_COLOR
   const due = formatInvoiceMoney(invoiceBalanceDue(invoice))
   const dueDate = formatInvoiceDate(invoice.dueDate)
-  const cta = payableOnline ? "View and pay invoice" : "View invoice"
+  // Pay now goes straight to Stripe Checkout (GET /i/{token}/pay); the
+  // invoice page stays one tap away.
+  const payLink = payableOnline ? `${link.replace(/\/+$/, "")}/pay` : null
 
   const subject = `Invoice #${invoice.number} from ${business} — ${due} due ${dueDate.replace(/, \d{4}$/, "")}`
 
@@ -37,7 +39,8 @@ export function buildInvoiceEmail(params: {
     `Due: ${dueDate}`,
     ...(message ? ["", message] : []),
     "",
-    `${cta}: ${link}`,
+    ...(payLink ? [`Pay now: ${payLink}`, ""] : []),
+    `View invoice: ${link}`,
     ...(invoice.note ? ["", payableOnline ? "Other ways to pay:" : "How to pay:", invoice.note] : []),
     "",
     settings.businessEmail ? `Questions? Reply to this email to reach ${business}.` : "",
@@ -63,9 +66,14 @@ export function buildInvoiceEmail(params: {
 <tr><td style="padding:0 0 16px;font-size:14px;color:#5F6864;">Due ${e(dueDate)}</td></tr>
 </table></td></tr>
 ${message ? `<tr><td style="padding:20px 24px 0;font-size:15px;line-height:1.5;white-space:pre-wrap;">${e(message)}</td></tr>` : ""}
-<tr><td align="center" style="padding:24px;">
-<a href="${e(link)}" style="display:inline-block;background:${accent};color:${textColorOnAccent(accent)};text-decoration:none;font-weight:600;font-size:16px;padding:14px 28px;border-radius:999px;">${e(cta)}</a>
+<tr><td align="center" style="padding:24px 24px ${payLink ? "8px" : "24px"};">
+<a href="${e(payLink ?? link)}" style="display:inline-block;background:${accent};color:${textColorOnAccent(accent)};text-decoration:none;font-weight:600;font-size:16px;padding:14px 32px;border-radius:999px;">${payLink ? `Pay ${e(due)} now` : "View invoice"}</a>
 </td></tr>
+${
+  payLink
+    ? `<tr><td align="center" style="padding:4px 24px 24px;"><a href="${e(link)}" style="display:inline-block;color:#161B1E;text-decoration:none;font-weight:600;font-size:15px;padding:12px 28px;border-radius:999px;border:1px solid #D6D5CF;">View invoice</a></td></tr>`
+    : ""
+}
 ${
   invoice.note
     ? `<tr><td style="padding:0 24px 24px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#FAFAF8;border-left:4px solid ${accent};"><tr><td style="padding:12px 14px;font-size:12px;color:#5F6864;text-transform:uppercase;letter-spacing:.04em;">${
