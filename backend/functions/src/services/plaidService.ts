@@ -120,7 +120,7 @@ const PLAID_WEBHOOK_URL = "https://plaidwebhook-3lc2fwdgwq-uc.a.run.app"
 // (Chase, and a growing list of others) redirect the browser back to after
 // the user authenticates with their bank — see frontend/app/plaid-link/page.tsx,
 // which resumes the Link flow from this exact URL via receivedRedirectUri.
-const PLAID_OAUTH_REDIRECT_URI = "https://stackin.web.app/plaid-link"
+const PLAID_OAUTH_REDIRECT_URI = "https://app.the521app.com/plaid-link"
 // The native iOS SDK (LinkKit, see frontend/ios/App/App/NativePlaidLinkPlugin.swift)
 // needs a Universal Link instead: the bank sends the user back here, iOS
 // hands the URL to the app (via the applinks entitlement and the

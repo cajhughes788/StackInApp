@@ -93,12 +93,14 @@ function persistCachedPlaidItems(workspaceId: string, items: PlaidItem[]) {
 // that domain is a separate GitHub Pages marketing site (used only for
 // Stripe checkout redirects and the public signup link) and doesn't serve
 // this Next.js app at all. This app's actual Firebase Hosting deploy lives
-// at stackin.web.app.
+// at stackin.web.app, also served as app.the521app.com (which must match
+// PLAID_OAUTH_REDIRECT_URI's domain: the token is kept in that page's
+// sessionStorage across the bank redirect).
 //
 // Only used as a fallback now — iOS builds with NativePlaidLinkPlugin run
 // Plaid's native SDK instead (see runLinkFlow below).
 const STACKIN_APP_HOSTING_URL =
-  process.env.NEXT_PUBLIC_STACKIN_APP_HOSTING_URL?.trim() || "https://stackin.web.app"
+  process.env.NEXT_PUBLIC_STACKIN_APP_HOSTING_URL?.trim() || "https://app.the521app.com"
 
 // Plaid link tokens last 4 hours; anything older than this gets replaced
 // rather than risk handing Link one that's about to expire.
