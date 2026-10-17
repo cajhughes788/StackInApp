@@ -81,7 +81,7 @@ You can also view this in your Safe Money account.
   `;
         const msg = {
             to,
-            from: "optiviumai@gmail.com", // verified sender in SendGrid
+            from: "invoices@the521app.com", // domain-authenticated in SendGrid
             subject,
             text,
             html,
@@ -145,7 +145,7 @@ ${serializedLogs}
   `;
         const msg = {
             to: payload.to,
-            from: "optiviumai@gmail.com",
+            from: "invoices@the521app.com",
             subject,
             text,
             html,

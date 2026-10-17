@@ -9,7 +9,7 @@ import { SENDGRID_API_KEY } from "../utils/sendEmail"
 // Loops every workspace with a few small queries each; fine at today's size,
 // worth revisiting (counters or an export) past a few thousand workspaces.
 const OWNER_REPORT_TO = "cajetanhughes@gmail.com"
-const REPORT_FROM = "optiviumai@gmail.com" // verified SendGrid sender (sendEmail.ts)
+const REPORT_FROM = "invoices@the521app.com" // domain-authenticated in SendGrid
 
 const DAY_MS = 24 * 60 * 60 * 1000
 // Logged anything within this long of creating the workspace = activated.

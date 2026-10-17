@@ -14,13 +14,12 @@ import { readInvoiceSettings, shareInvoice } from "./invoicesService"
 // name ("Barber Shop via 521") and the business email as Reply-To, so
 // replies reach the user, not 521.
 //
-// INVOICE_EMAIL_FROM should become an address on a domain authenticated in
-// SendGrid (SPF + DKIM, e.g. invoices@<your domain>): mail "from" a
-// gmail.com address sent through SendGrid fails Gmail's DMARC alignment and
-// tends to land in spam.
+// the521app.com is domain-authenticated in SendGrid (DKIM + DMARC on
+// Spaceship DNS), so any address on it can send without per-address
+// verification.
 // ---------------------------------------------------------------------------
 
-export const INVOICE_EMAIL_FROM = "optiviumai@gmail.com"
+export const INVOICE_EMAIL_FROM = "invoices@the521app.com"
 
 // Caps so 521 can't be used to flood an inbox: per invoice, and per
 // workspace per day.
