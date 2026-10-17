@@ -39,7 +39,7 @@ const SWATCHES: Array<{ hex: string; label: string }> = [
   { hex: "#C98A2B", label: "Gold" },
 ]
 const TERMS: InvoiceTerms[] = ["due_on_receipt", "net_15", "net_30"]
-const TERMS_SHORT: Record<InvoiceTerms, string> = { due_on_receipt: "On receipt", net_15: "Net 15", net_30: "Net 30" }
+const TERMS_SHORT: Record<InvoiceTerms, string> = { due_on_receipt: "Due now", net_15: "15 days", net_30: "30 days" }
 const HEX_RE = /^#[0-9a-fA-F]{6}$/
 
 type Draft = Omit<InvoiceSettings, "updatedAt">
@@ -285,8 +285,8 @@ function InvoiceSettingsPage() {
 
           <section className={cn(cardClass, "space-y-3")}>
             <h2 className="text-sm font-semibold text-muted-foreground">New invoices</h2>
-            <fieldset>
-              <legend className="mb-1.5 text-sm font-medium text-muted-foreground">Payment terms</legend>
+            <fieldset className="space-y-1.5">
+              <legend className="mb-1.5 text-sm font-medium text-muted-foreground">When it&apos;s due</legend>
               <div className="grid grid-cols-3 gap-1 rounded-[14px] bg-muted p-1">
                 {TERMS.map((terms) => {
                   const active = draft.defaultTerms === terms
@@ -307,6 +307,9 @@ function InvoiceSettingsPage() {
                   )
                 })}
               </div>
+              <p className="text-xs text-muted-foreground">
+                How long clients have to pay. You can change it on each invoice.
+              </p>
             </fieldset>
             <label className={fieldLabelClass}>
               Note to customer

@@ -19,7 +19,7 @@ import {
 // Where Stripe sends the person after its hosted sign-up. The page bounces
 // back into the iOS app (stackin://stripe/onboarding-return) or, on the web,
 // to Invoice settings. frontend/app/stripe-return/page.tsx.
-const APP_HOSTING_URL = "https://stackin.web.app"
+const APP_HOSTING_URL = "https://app.the521app.com"
 
 let stripeClient: Stripe | null = null
 export function getStripe(): Stripe {

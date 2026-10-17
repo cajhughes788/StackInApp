@@ -9,8 +9,9 @@ import { invoiceRefundedTotal, type InvoiceTerms, type InvoiceType } from "./sch
 // ---------------------------------------------------------------------------
 
 // Shared invoice links: the hosting site rewrites /i/** to the publicInvoice
-// function. Update here if 521 moves to its own domain.
-export const PUBLIC_INVOICE_BASE_URL = "https://stackin.web.app/i/"
+// function. app.the521app.com is a custom domain on the same hosting site,
+// so links already sent on stackin.web.app keep working.
+export const PUBLIC_INVOICE_BASE_URL = "https://app.the521app.com/i/"
 
 export function publicInvoiceUrl(shareToken: string): string {
   return `${PUBLIC_INVOICE_BASE_URL}${shareToken}`
@@ -18,8 +19,8 @@ export function publicInvoiceUrl(shareToken: string): string {
 
 export const INVOICE_TERMS_LABELS: Record<InvoiceTerms, string> = {
   due_on_receipt: "Due on receipt",
-  net_15: "Net 15",
-  net_30: "Net 30",
+  net_15: "Due in 15 days",
+  net_30: "Due in 30 days",
 }
 
 const TERMS_DAYS: Record<InvoiceTerms, number> = { due_on_receipt: 0, net_15: 15, net_30: 30 }

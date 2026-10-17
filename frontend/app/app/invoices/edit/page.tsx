@@ -33,7 +33,7 @@ const CATEGORY_OPTIONS: Array<{ value: IncomeCategory; label: string }> = [
   { value: "other", label: "Other" },
 ]
 const TERMS: InvoiceTerms[] = ["due_on_receipt", "net_15", "net_30"]
-const TERMS_SHORT: Record<InvoiceTerms, string> = { due_on_receipt: "On receipt", net_15: "Net 15", net_30: "Net 30" }
+const TERMS_SHORT: Record<InvoiceTerms, string> = { due_on_receipt: "Due now", net_15: "15 days", net_30: "30 days" }
 
 // "$1,250.5" → 1250.5; null when it isn't a positive amount in whole cents.
 function parseAmount(text: string): number | null {

@@ -10,7 +10,7 @@ import { DEFAULT_INVOICE_ACCENT_COLOR, type InvoiceSettings, type InvoiceType } 
 
 // ---------------------------------------------------------------------------
 // The page a client sees when they open a shared invoice link
-// (stackin.web.app/i/{token}, served by the publicInvoice function).
+// (app.the521app.com/i/{token}, served by the publicInvoice function).
 //
 // Plain server-rendered HTML: no app bundle, no sign-in, works in any mail
 // or messaging in-app browser. Every user-supplied string goes through
