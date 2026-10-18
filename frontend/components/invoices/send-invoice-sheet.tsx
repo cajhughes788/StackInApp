@@ -13,7 +13,8 @@ import { fieldLabelClass, softInputClass } from "@/components/invoices/invoice-u
 import { updateInvoiceStatus } from "@/lib/api/invoicesApi"
 import { invoiceSaved, latestInvoice } from "@/lib/domain/invoiceService"
 import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
-import { formatInvoiceDate, formatInvoiceMoney, invoiceBalanceDue, publicInvoiceUrl } from "@shared/invoiceDisplay"
+import { formatInvoiceDate, formatInvoiceMoney, publicInvoiceUrl } from "@shared/invoiceDisplay"
+import { invoiceBalanceDue } from "@shared/invoicePayments"
 import type { InvoiceSettings, InvoiceType } from "@shared/schemas/invoice"
 
 // Getting an invoice to the client: 521 emails it (from "<Business> via 521",

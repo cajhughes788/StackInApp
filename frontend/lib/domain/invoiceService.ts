@@ -27,6 +27,7 @@ import { createInvoice, deleteInvoice, editInvoice, updateInvoiceStatus } from "
 import { useEntriesStore } from "@/lib/stores/useEntriesStore"
 import { isTempInvoiceId, useInvoicesStore } from "@/lib/stores/useInvoicesStore"
 import {
+  deriveLedgerFromLegacy,
   invoiceTotalFromLines,
   type InvoiceCreateInput,
   type InvoicePaidMethod,
@@ -161,6 +162,16 @@ export function createInvoiceInBackground(workspaceId: string, input: CreateInpu
     paidFeeAmount: 0,
     paidMethod: null,
     sharedAt: null,
+    payments: [],
+    deposit: null,
+    pendingPayment: null,
+    openCheckout: null,
+    closedAt: null,
+    amountPaid: 0,
+    paymentEntryIds: [],
+    paymentPlaidTransactionIds: [],
+    paymentIntentIds: [],
+    lastManualPaymentOn: null,
     createdAt: now,
     updatedAt: now,
   }
@@ -223,17 +234,21 @@ export function markInvoicePaidInBackground(
   paymentMethod: InvoicePaidMethod
 ) {
   const previous = latestInvoice(workspaceId, invoice.id) ?? invoice
-  store().upsertInvoice(workspaceId, {
-    ...previous,
-    status: "paid",
-    // As the server records a hand-marked payment.
-    paidAt: `${paidDate}T12:00:00.000Z`,
-    paidVia: "manual",
-    paidMethod: paymentMethod,
-    pendingPaymentAt: null,
-    paymentFailedAt: null,
-    updatedAt: new Date().toISOString(),
-  })
+  // As the server records a hand-marked payment, with the payment ledger
+  // worked out the same way (phase 1: from the paid* fields).
+  store().upsertInvoice(
+    workspaceId,
+    deriveLedgerFromLegacy({
+      ...previous,
+      status: "paid",
+      paidAt: `${paidDate}T12:00:00.000Z`,
+      paidVia: "manual",
+      paidMethod: paymentMethod,
+      pendingPaymentAt: null,
+      paymentFailedAt: null,
+      updatedAt: new Date().toISOString(),
+    }) as InvoiceType
+  )
   enqueue(invoice.id, async (id) => {
     const { invoice: paid } = await updateInvoiceStatus(workspaceId, requireSaved(id), {
       action: "mark_paid",
@@ -251,7 +266,7 @@ export function markInvoicePaidInBackground(
 
 export function voidInvoiceInBackground(workspaceId: string, invoice: InvoiceType) {
   const previous = latestInvoice(workspaceId, invoice.id) ?? invoice
-  store().upsertInvoice(workspaceId, { ...previous, status: "void", updatedAt: new Date().toISOString() })
+  store().upsertInvoice(workspaceId, { ...previous, status: "void", openCheckout: null, updatedAt: new Date().toISOString() })
   enqueue(invoice.id, async (id) => {
     const { invoice: voided } = await updateInvoiceStatus(workspaceId, requireSaved(id), { action: "void" })
     applyServerCopy(workspaceId, invoice.id, voided)

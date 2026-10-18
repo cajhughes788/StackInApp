@@ -1,5 +1,6 @@
 import { isPeerToPeerDescriptor, suggestPlaidIncomePaymentMethod } from "./plaidClassification"
-import type { IncomeBreakdown, IncomeCategory, PaymentMethod } from "./schemas/entry"
+import { invoiceCentsByCategory, invoicePaymentBreakdown } from "./invoicePayments"
+import type { IncomeBreakdown, PaymentMethod } from "./schemas/entry"
 import type { InvoiceLine, InvoiceType } from "./schemas/invoice"
 import type { PlaidInvoiceMatch, PlaidInvoiceRef } from "./schemas/plaidPendingTransaction"
 
@@ -74,14 +75,14 @@ function byOldestDue(a: InvoiceMatchCandidate, b: InvoiceMatchCandidate): number
 
 // Open invoices a deposit on `depositDate` could be paying.
 export function selectOpenInvoiceCandidates<
-  T extends InvoiceMatchCandidate & Pick<InvoiceType, "status"> & Partial<Pick<InvoiceType, "pendingPaymentAt">>,
+  T extends InvoiceMatchCandidate & Pick<InvoiceType, "status"> & Partial<Pick<InvoiceType, "pendingPayment">>,
 >(invoices: T[], depositDate: string): T[] {
   return invoices
     .filter(
       (invoice) =>
         invoice.status === "sent" &&
         // A bank transfer through Stripe is already clearing for it.
-        !invoice.pendingPaymentAt &&
+        !invoice.pendingPayment &&
         dayDiff(depositDate, invoice.issueDate) >= 0 &&
         dayDiff(depositDate, invoice.dueDate) <= INVOICE_MATCH_MAX_DAYS_PAST_DUE
     )
@@ -92,13 +93,16 @@ export function selectOpenInvoiceCandidates<
 // Invoices marked paid by hand whose money might be this deposit — a match
 // means the deposit is already counted and should be dismissed, not booked.
 export function selectManuallyPaidInvoiceCandidates<
-  T extends InvoiceMatchCandidate & Pick<InvoiceType, "status" | "paidVia" | "paidAt">,
+  T extends InvoiceMatchCandidate & Pick<InvoiceType, "status" | "payments">,
 >(invoices: T[], depositDate: string): T[] {
   return invoices
     .filter((invoice) => {
-      if (invoice.status !== "paid" || invoice.paidVia !== "manual" || !invoice.paidAt) return false
-      const gap = dayDiff(depositDate, invoice.paidAt.slice(0, 10))
-      return gap >= -MANUAL_PAID_LOOKAHEAD_DAYS && gap <= MANUAL_PAID_LOOKBACK_DAYS
+      if (invoice.status !== "paid") return false
+      return invoice.payments.some((payment) => {
+        if (payment.via !== "manual") return false
+        const gap = dayDiff(depositDate, payment.receivedOn)
+        return gap >= -MANUAL_PAID_LOOKAHEAD_DAYS && gap <= MANUAL_PAID_LOOKBACK_DAYS
+      })
     })
     .sort(byOldestDue)
     .slice(0, INVOICE_MATCH_MAX_CANDIDATES)
@@ -238,18 +242,13 @@ export function invoiceGroupFee(match: PlaidInvoiceMatch, group: PlaidInvoiceRef
   return feeCents / 100
 }
 
-// An invoice's lines as one Entry income breakdown, summed per category.
+// An invoice's lines as one Entry income breakdown, summed per category —
+// a payment of the whole total (shared/invoicePayments.ts).
 export function invoiceIncomeBreakdown(lines: InvoiceLine[], paymentMethod: PaymentMethod): IncomeBreakdown {
-  const breakdown: IncomeBreakdown = { paymentMethod }
-  for (const [category, cents] of invoiceCentsByCategory(lines)) breakdown[category] = cents / 100
-  return breakdown
+  return invoicePaymentBreakdown(lines, lines.reduce((sum, line) => sum + toCents(line.amount), 0) / 100, 0, paymentMethod)
 }
 
-export function invoiceCentsByCategory(lines: InvoiceLine[]): Map<IncomeCategory, number> {
-  const byCategory = new Map<IncomeCategory, number>()
-  for (const line of lines) byCategory.set(line.category, (byCategory.get(line.category) ?? 0) + toCents(line.amount))
-  return byCategory
-}
+export { invoiceCentsByCategory }
 
 // Splits a payout's fee across the invoices it paid, in proportion to each
 // invoice's amount, with leftover cents on the last one so the parts add up

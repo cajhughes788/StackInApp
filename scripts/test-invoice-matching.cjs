@@ -31,10 +31,11 @@ const {
   formatInvoiceMoney,
   formatInvoiceDate,
   invoiceDisplayStatus,
-  invoiceBalanceDue,
   invoiceFileName,
   textColorOnAccent,
 } = require("../shared/invoiceDisplay.ts");
+const { invoiceBalanceDue } = require("../shared/invoicePayments.ts");
+const { deriveLedgerFromLegacy: legacy } = require("../shared/schemas/invoice.ts");
 const { renderPublicInvoicePage, escapeHtml } = require("../shared/invoicePublicPage.ts");
 const { InvoiceSettingsSchema, InvoiceSettingsPatchSchema } = require("../shared/schemas/invoice.ts");
 const { PlaidPendingTransactionSchema } = require("../shared/schemas/plaidPendingTransaction.ts");
@@ -44,8 +45,10 @@ function run(name, fn) {
   process.stdout.write(`ok - ${name}\n`);
 }
 
+// Built from the single-payment fields and run through the same
+// conversion every parse does (deriveLedgerFromLegacy).
 function invoice(overrides) {
-  return {
+  return legacy({
     id: overrides.number,
     status: "sent",
     clientName: "Acme",
@@ -54,7 +57,7 @@ function invoice(overrides) {
     paidVia: null,
     paidAt: null,
     ...overrides,
-  };
+  });
 }
 
 function deposit(amount, overrides = {}) {
@@ -339,7 +342,7 @@ run("display status and balance follow the invoice status", () => {
   assert.deepEqual(invoiceDisplayStatus(sent, "2026-10-20"), { label: "Due Nov 14, 2026", tone: "open" });
   assert.equal(invoiceDisplayStatus(sent, "2026-11-14").label, "Due today");
   assert.equal(invoiceDisplayStatus(sent, "2026-11-15").tone, "overdue");
-  assert.equal(invoiceDisplayStatus({ ...sent, status: "paid", paidAt: "2026-10-18T12:00:00.000Z" }, "2026-10-20").label, "Paid Oct 18, 2026");
+  assert.equal(invoiceDisplayStatus(legacy({ ...sent, status: "paid", paidAt: "2026-10-18T12:00:00.000Z" }), "2026-10-20").label, "Paid Oct 18, 2026");
   assert.equal(invoiceBalanceDue(sent), 100);
   assert.equal(invoiceBalanceDue({ ...sent, status: "paid" }), 0);
   assert.equal(invoiceBalanceDue({ ...sent, status: "void" }), 0);
@@ -393,10 +396,10 @@ run("public page: void and paid invoices say so and owe nothing", () => {
     paidVia: null, paidEntryId: null, paidPlaidTransactionId: null, paidFeeAmount: 0, createdAt: "x", updatedAt: "x",
   };
   const settings = InvoiceSettingsSchema.parse({});
-  const voided = renderPublicInvoicePage({ ...base, status: "void", paidAt: null }, settings, "2026-10-15");
+  const voided = renderPublicInvoicePage(legacy({ ...base, status: "void", paidAt: null }), settings, "2026-10-15");
   assert.ok(voided.includes("voided"));
   assert.equal(voided.includes("Venmo @me"), false);
-  const paid = renderPublicInvoicePage({ ...base, status: "paid", paidAt: "2026-10-10T12:00:00.000Z" }, settings, "2026-10-15");
+  const paid = renderPublicInvoicePage(legacy({ ...base, status: "paid", paidAt: "2026-10-10T12:00:00.000Z" }), settings, "2026-10-15");
   assert.ok(paid.includes("Paid Oct 10, 2026"));
   assert.ok(paid.includes("$0.00"));
 });
@@ -472,11 +475,11 @@ run("public page: Pay button only when payable, and not after returning paid", (
   const back = renderPublicInvoicePage(base, settings, "2026-10-15", { payPath: "/i/tok/pay", justPaid: true });
   assert.equal(back.includes("Pay $100.00"), false);
   assert.ok(back.includes("payment is being processed"));
-  const clearing = renderPublicInvoicePage({ ...base, pendingPaymentAt: "2026-10-18T12:00:00.000Z" }, settings, "2026-10-19", { payPath: "/i/tok/pay" });
+  const clearing = renderPublicInvoicePage(legacy({ ...base, pendingPaymentAt: "2026-10-18T12:00:00.000Z" }), settings, "2026-10-19", { payPath: "/i/tok/pay" });
   assert.equal(clearing.includes("Pay $100.00"), false);
   assert.ok(clearing.includes("bank payment is on its way"));
   assert.ok(renderPublicInvoicePage(base, settings, "2026-10-15", { payPath: "/i/tok/pay", bankTransfer: true }).includes("or bank account"));
-  const paid = renderPublicInvoicePage({ ...base, status: "paid", paidAt: "2026-10-10T12:00:00.000Z" }, settings, "2026-10-15", { payPath: "/i/tok/pay" });
+  const paid = renderPublicInvoicePage(legacy({ ...base, status: "paid", paidAt: "2026-10-10T12:00:00.000Z" }), settings, "2026-10-15", { payPath: "/i/tok/pay" });
   assert.equal(paid.includes("<form"), false);
 });
 
@@ -543,7 +546,7 @@ run("refundable amount: total less refunds and disputed money", () => {
 });
 
 run("display status: partly refunded, refunded, disputed", () => {
-  const paid = { status: "paid", dueDate: "2026-11-14", paidAt: "2026-10-18T12:00:00.000Z", total: 100, refunds: [], dispute: null };
+  const paid = legacy({ status: "paid", dueDate: "2026-11-14", paidAt: "2026-10-18T12:00:00.000Z", total: 100, refunds: [], dispute: null });
   assert.equal(invoiceDisplayStatus({ ...paid, refunds: [{ amount: 40 }] }, "2026-10-22").label, "Paid · partly refunded");
   assert.equal(invoiceDisplayStatus({ ...paid, refunds: [{ amount: 100 }] }, "2026-10-22").label, "Refunded");
   assert.equal(invoiceDisplayStatus({ ...paid, dispute: { status: "open" } }, "2026-10-22").label, "Disputed");

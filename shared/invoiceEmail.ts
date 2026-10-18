@@ -1,4 +1,5 @@
-import { formatInvoiceDate, formatInvoiceMoney, invoiceBalanceDue, textColorOnAccent } from "./invoiceDisplay"
+import { formatInvoiceDate, formatInvoiceMoney, textColorOnAccent } from "./invoiceDisplay"
+import { invoiceBalanceDue } from "./invoicePayments"
 import { escapeHtml } from "./invoicePublicPage"
 import { DEFAULT_INVOICE_ACCENT_COLOR, type InvoiceSettings, type InvoiceType } from "./schemas/invoice"
 

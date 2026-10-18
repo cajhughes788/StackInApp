@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
 import { updatePaymentAccount } from "@/lib/api/invoicesApi"
 import { formatInvoiceDate, formatInvoiceMoney } from "@shared/invoiceDisplay"
+import { invoiceAmountPaid, invoiceFeesPaid, invoiceLatestPayment, invoiceTipsReceived } from "@shared/invoicePayments"
 import { invoiceRefundedTotal, type InvoiceType } from "@shared/schemas/invoice"
 
 // What happened to a paid invoice's money: the payment, any refunds, a
@@ -23,12 +24,13 @@ const REASON_LABELS: Record<string, string> = {
   other: "refund",
 }
 
-// Money the user still has from this invoice: the total, less refunds and
-// any disputed money not won back.
+// Money the user still has from this invoice: what was paid (tips
+// included), less refunds and any disputed money not won back.
 export function invoiceKeptAmount(invoice: InvoiceType): number {
   const disputed =
     invoice.dispute && invoice.dispute.fundsWithdrawn && invoice.dispute.status !== "won" ? invoice.dispute.amount : 0
-  return (Math.round(invoice.total * 100) - Math.round(invoiceRefundedTotal(invoice) * 100) - Math.round(disputed * 100)) / 100
+  const received = Math.round(invoiceAmountPaid(invoice) * 100) + Math.round(invoiceTipsReceived(invoice) * 100)
+  return (received - Math.round(invoiceRefundedTotal(invoice) * 100) - Math.round(disputed * 100)) / 100
 }
 
 export function hasMoneyHistory(invoice: InvoiceType): boolean {
@@ -38,13 +40,15 @@ export function hasMoneyHistory(invoice: InvoiceType): boolean {
 export function InvoiceMoneyBreakdown({ invoice }: { invoice: InvoiceType }) {
   const dispute = invoice.dispute
   const disputedOut = dispute && dispute.fundsWithdrawn && dispute.status !== "won"
-  const fees = invoice.paidFeeAmount + (dispute?.feeAmount ?? 0)
+  const fees = invoiceFeesPaid(invoice) + (dispute?.feeAmount ?? 0)
+  const latest = invoiceLatestPayment(invoice)
+  const received = invoiceAmountPaid(invoice) + invoiceTipsReceived(invoice)
   const keep = invoiceKeptAmount(invoice) - fees
   return (
     <section aria-label="Money" className="rounded-[18px] border border-card-border bg-card px-4 py-1 text-sm">
       <div className="flex justify-between gap-3 border-b border-border py-3">
-        <span>Paid {invoice.paidAt ? shortDate(invoice.paidAt) : ""}</span>
-        <span className="shrink-0 whitespace-nowrap tabular-nums">{formatInvoiceMoney(invoice.total)}</span>
+        <span>Paid {latest ? shortDate(latest.receivedOn) : ""}</span>
+        <span className="shrink-0 whitespace-nowrap tabular-nums">{formatInvoiceMoney(received)}</span>
       </div>
       {invoice.refunds.map((refund) => (
         <div key={refund.id} className="flex justify-between gap-3 border-b border-border py-3">

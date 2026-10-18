@@ -62,9 +62,9 @@ import {
   dueDateForTerms,
   formatInvoiceDate,
   formatInvoiceMoney,
-  invoiceBalanceDue,
   publicInvoiceUrl,
 } from "@shared/invoiceDisplay"
+import { invoiceBalanceDue, invoiceHasPayments, invoiceLatestPayment } from "@shared/invoicePayments"
 import { invoiceRefundableAmount, type InvoiceTerms, type InvoiceType } from "@shared/schemas/invoice"
 
 function formatMoment(iso: string): string {
@@ -84,16 +84,20 @@ function metaLine(invoice: InvoiceType): string {
       return "Draft · not shared yet"
     case "void":
       return "Voided · nothing is owed"
+    case "closed":
+      return "Closed · nothing more is owed"
     case "paid": {
-      const parts = [invoice.paidAt ? `Paid ${formatInvoiceDate(invoice.paidAt.slice(0, 10))}` : "Paid"]
-      if (invoice.paidVia === "bank_match") parts.push("matched from your bank")
-      else if (invoice.paidVia === "online") parts.push(invoice.paidMethod === "other" ? "paid by bank transfer" : "paid online")
-      else if (invoice.paidMethod) parts.push(PAID_METHOD_LABELS[invoice.paidMethod])
+      const latest = invoiceLatestPayment(invoice)
+      if (!latest) return "Paid"
+      const parts = [`Paid ${formatInvoiceDate(latest.receivedOn)}`]
+      if (latest.via === "bank_match") parts.push("matched from your bank")
+      else if (latest.via === "online") parts.push(latest.method === "other" ? "paid by bank transfer" : "paid online")
+      else parts.push(PAID_METHOD_LABELS[latest.method])
       return parts.join(" · ")
     }
     case "sent":
-      if (invoice.pendingPaymentAt) {
-        return `Bank payment processing · started ${formatInvoiceDate(invoice.pendingPaymentAt.slice(0, 10))}`
+      if (invoice.pendingPayment) {
+        return `Bank payment processing · started ${formatInvoiceDate(invoice.pendingPayment.startedAt.slice(0, 10))}`
       }
       return [invoice.sharedAt ? `Shared ${formatInvoiceDate(invoice.sharedAt.slice(0, 10))}` : "Sent", termsLabel(invoice)]
         .filter(Boolean)
@@ -225,7 +229,7 @@ function InvoiceDetailPage() {
   }
 
   // Not while a bank payment clears: it would land against a changed invoice.
-  const editable = (invoice?.status === "draft" || invoice?.status === "sent") && !invoice?.pendingPaymentAt
+  const editable = (invoice?.status === "draft" || invoice?.status === "sent") && !invoice?.pendingPayment
 
   return (
     <InvoicesPage
@@ -262,7 +266,7 @@ function InvoiceDetailPage() {
               ) : null}
               {invoice.status === "paid" && invoiceRefundableAmount(invoice) > 0 ? (
                 <DropdownMenuItem onSelect={() => setRefundOpen(true)}>
-                  {invoice.paidVia === "online" ? "Refund" : "Record a refund"}
+                  {invoiceLatestPayment(invoice)?.via === "online" ? "Refund" : "Record a refund"}
                 </DropdownMenuItem>
               ) : null}
               {invoice.status === "paid" ? (
@@ -372,14 +376,14 @@ function InvoiceDetailPage() {
             </Button>
           ) : null}
 
-          {invoice.status === "sent" && invoice.paymentFailedAt && !invoice.pendingPaymentAt ? (
+          {invoice.status === "sent" && invoice.paymentFailedAt && !invoice.pendingPayment ? (
             <div className="rounded-[14px] bg-red-100 px-3.5 py-3 text-sm text-red-900 dark:bg-red-950 dark:text-red-200">
               {invoice.clientName}&apos;s bank payment failed on {formatInvoiceDate(invoice.paymentFailedAt.slice(0, 10))}.
               The invoice is open again — they can pay from the same link.
             </div>
           ) : null}
 
-          {invoice.status === "sent" && invoice.pendingPaymentAt ? (
+          {invoice.status === "sent" && invoice.pendingPayment ? (
             // Marking it paid now would make the clearing payment a duplicate
             // (refunded when it lands).
             <div className="rounded-[14px] bg-muted px-3.5 py-3 text-sm text-foreground">
@@ -399,7 +403,7 @@ function InvoiceDetailPage() {
             </Button>
           ) : null}
 
-          {invoice.status === "sent" && !invoice.pendingPaymentAt ? (
+          {invoice.status === "sent" && !invoice.pendingPayment ? (
             <div className="flex items-start gap-2.5 rounded-[14px] bg-accent px-3.5 py-3 text-sm leading-relaxed text-foreground">
               <Landmark className="mt-0.5 size-[18px] shrink-0 text-emerald-700 dark:text-emerald-400" aria-hidden="true" />
               <span>
@@ -426,18 +430,18 @@ function InvoiceDetailPage() {
                 {formatInvoiceDate(invoice.dispute.updatedAt.slice(0, 10))}
               </div>
             ) : null}
-            {invoice.paidAt ? (
-              <div className="flex items-center gap-2.5">
+            {[...invoice.payments].reverse().map((payment) => (
+              <div key={payment.id} className="flex items-center gap-2.5">
                 <span className="size-2 rounded-full bg-primary" aria-hidden="true" />
-                Paid · {formatInvoiceDate(invoice.paidAt.slice(0, 10))}
-                {invoice.paidFeeAmount > 0
-                  ? ` · ${invoice.paidVia === "online" ? "Stripe kept" : "processing fee"} ${formatInvoiceMoney(invoice.paidFeeAmount)}`
+                Paid · {formatInvoiceDate(payment.receivedOn)}
+                {payment.feeAmount > 0
+                  ? ` · ${payment.via === "online" ? "Stripe kept" : "processing fee"} ${formatInvoiceMoney(payment.feeAmount)}`
                   : ""}
               </div>
-            ) : null}
+            ))}
             {invoice.lastEmailedAt ? (
               <div className="flex items-center gap-2.5">
-                <span className={cn("size-2 rounded-full", invoice.paidAt ? "bg-input" : "bg-primary")} aria-hidden="true" />
+                <span className={cn("size-2 rounded-full", invoiceHasPayments(invoice) ? "bg-input" : "bg-primary")} aria-hidden="true" />
                 <span className="min-w-0 truncate">
                   Emailed to {invoice.lastEmailedTo} · {formatMoment(invoice.lastEmailedAt)}
                 </span>
@@ -446,7 +450,7 @@ function InvoiceDetailPage() {
             {invoice.sharedAt ? (
               <div className="flex items-center gap-2.5">
                 <span
-                  className={cn("size-2 rounded-full", invoice.paidAt || invoice.lastEmailedAt ? "bg-input" : "bg-primary")}
+                  className={cn("size-2 rounded-full", invoiceHasPayments(invoice) || invoice.lastEmailedAt ? "bg-input" : "bg-primary")}
                   aria-hidden="true"
                 />
                 Link shared · {formatMoment(invoice.sharedAt)}

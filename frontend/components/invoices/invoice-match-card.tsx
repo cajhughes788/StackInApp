@@ -74,12 +74,13 @@ export default function InvoiceMatchCard({
   if (match.alreadyPaid) {
     const paidInvoice = invoicesById.get(first.invoiceId)
     // Mid-sentence: brand names keep their capitals ("by Zelle", "by check").
-    const method = paidInvoice?.paidMethod
+    const manual = paidInvoice?.payments.filter((payment) => payment.via === "manual").pop()
+    const method = manual?.method
     const how =
       !method || method === "other"
         ? ""
         : ` by ${["cash", "check", "card", "pos"].includes(method) ? PAID_METHOD_LABELS[method].toLowerCase() : PAID_METHOD_LABELS[method]}`
-    const when = paidInvoice?.paidAt ? ` on ${shortDate(paidInvoice.paidAt.slice(0, 10))}` : ""
+    const when = manual ? ` on ${shortDate(manual.receivedOn)}` : ""
     const label =
       match.invoices.length === 1 ? `Invoice #${first.number}` : match.invoices.map((ref) => `#${ref.number}`).join(" and ")
     return (

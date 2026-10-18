@@ -11,14 +11,27 @@ import { IncomeCategorySchema, PaymentMethodSchema } from "./entry"
 // paid is (dated the day the money arrived), so a paid invoice and the bank
 // deposit that paid it count once. Matching deposits to invoices lives in
 // shared/invoiceMatching.ts.
+//
+// Payments are moving to a ledger (docs/invoice-payments-architecture.md):
+// `payments` lists every payment, each with its own Entry. During phase 1 the
+// older single-payment fields (paidAt, paidVia, paidEntryId, …) are still
+// what every write path sets, and the ledger fields are recomputed from them
+// each time an invoice is parsed (deriveLedgerFromLegacy), so a stored
+// ledger is never trusted over them. Read payment state through
+// shared/invoicePayments.ts, never the paid* fields.
 // -------------------------------------------------------------
+const InvoiceDateSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/, "Use YYYY-MM-DD")
+
 export const InvoiceLineSchema = z.object({
   description: z.string(),
   amount: z.number().positive(),
   category: IncomeCategorySchema,
 })
 
-export const InvoiceStatusSchema = z.enum(["draft", "sent", "paid", "void"])
+// sent: open, including partly paid. paid: payments cover the total.
+// void: ended with nothing paid. closed: ended early with what was paid kept
+// (a forfeited deposit).
+export const InvoiceStatusSchema = z.enum(["draft", "sent", "paid", "void", "closed"])
 
 // Money returned on a paid invoice. Each one is also a refund Entry (kind
 // "refund", negative amounts) dated when it went back; this list is what the
@@ -36,6 +49,8 @@ export const InvoiceRefundSchema = z.object({
   // bank payment that is that money leaving, hidden from expense review as
   // "invoice_refund" so it isn't booked a second time (matchInvoiceRefundPayment).
   plaidTransactionId: z.string().nullable().default(null),
+  // The payment this refund returns (InvoicePaymentSchema.id).
+  paymentId: z.string().nullable().default(null),
 })
 
 // A chargeback on an online payment (Stripe dispute).
@@ -62,7 +77,63 @@ export function invoiceTotalFromLines(lines: Array<{ amount: number }>): number 
   return lines.reduce((sum, line) => sum + Math.round(line.amount * 100), 0) / 100
 }
 
-export const InvoiceSchema = z
+export const InvoicePaymentPurposeSchema = z.enum(["deposit", "balance", "full", "partial"])
+
+// One payment toward an invoice, booked as its own Entry dated the day the
+// money arrived. `amount` is what it took off the invoice; a tip on top is
+// tipAmount, booked as tip income on the same Entry.
+export const InvoicePaymentSchema = z.object({
+  // Stable key, also what the Entry's clientMutationId is built from:
+  // "stripe_<paymentIntentId>", "plaid_<plaidTransactionId>",
+  // "manual_<clientMutationId>", or "legacy" for a payment converted from
+  // the single-payment fields.
+  id: z.string(),
+  purpose: InvoicePaymentPurposeSchema,
+  amount: z.number().positive(),
+  tipAmount: z.number().nonnegative().default(0),
+  receivedOn: InvoiceDateSchema,
+  via: z.enum(["bank_match", "manual", "online"]),
+  method: InvoicePaidMethodSchema,
+  // Null only between claiming the invoice and booking the Entry.
+  entryId: z.string().nullable().default(null),
+  plaidTransactionId: z.string().nullable().default(null),
+  stripePaymentIntentId: z.string().nullable().default(null),
+  checkoutSessionId: z.string().nullable().default(null),
+  // The processor's cut, booked as a Payment Processing Fees expense.
+  feeAmount: z.number().nonnegative().default(0),
+  createdAt: z.string(),
+})
+
+// Money asked for up front, with its own due date. Paying it unlocks the
+// balance; a date passing doesn't (docs/invoice-payments-architecture.md).
+export const InvoiceDepositSchema = z.object({
+  amount: z.number().positive(),
+  dueDate: InvoiceDateSchema,
+  // Waived: the full amount is due by the invoice's due date instead.
+  waivedAt: z.string().nullable().default(null),
+})
+
+// A payment started through Stripe Checkout that's still clearing (a bank
+// transfer takes a few business days). The invoice isn't payable again
+// until it settles or fails.
+export const InvoicePendingPaymentSchema = z.object({
+  checkoutSessionId: z.string().nullable(),
+  purpose: InvoicePaymentPurposeSchema,
+  amount: z.number().positive(),
+  tipAmount: z.number().nonnegative().default(0),
+  startedAt: z.string(),
+})
+
+// The one Checkout session the client may have open, reused while it still
+// matches what they chose.
+export const InvoiceOpenCheckoutSchema = z.object({
+  sessionId: z.string(),
+  purpose: InvoicePaymentPurposeSchema,
+  amountCents: z.number().int().positive(),
+  tipCents: z.number().int().nonnegative().default(0),
+})
+
+const InvoiceObjectSchema = z
   .object({
     id: z.string(),
     workspaceId: z.string(),
@@ -116,6 +187,20 @@ export const InvoiceSchema = z
     paidMethod: InvoicePaidMethodSchema.nullable().default(null),
     // First time the public link was shared.
     sharedAt: z.string().nullable().default(null),
+
+    // --- Payment ledger -------------------------------------------------
+    payments: z.array(InvoicePaymentSchema).default([]),
+    deposit: InvoiceDepositSchema.nullable().default(null),
+    pendingPayment: InvoicePendingPaymentSchema.nullable().default(null),
+    openCheckout: InvoiceOpenCheckoutSchema.nullable().default(null),
+    closedAt: z.string().nullable().default(null),
+    // Derived from payments, stored so Firestore can query them.
+    amountPaid: z.number().nonnegative().default(0),
+    paymentEntryIds: z.array(z.string()).default([]),
+    paymentPlaidTransactionIds: z.array(z.string()).default([]),
+    paymentIntentIds: z.array(z.string()).default([]),
+    lastManualPaymentOn: z.string().nullable().default(null),
+
     createdAt: z.string(),
     updatedAt: z.string(),
   })
@@ -127,7 +212,107 @@ export const InvoiceSchema = z
         message: "Invoice total must equal the sum of its lines.",
       })
     }
+    const paidCents = invoice.payments.reduce((sum, payment) => sum + Math.round(payment.amount * 100), 0)
+    if (paidCents !== Math.round(invoice.amountPaid * 100)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["amountPaid"], message: "amountPaid must equal the sum of payments." })
+    }
+    if (paidCents > Math.round(invoice.total * 100)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["payments"], message: "Payments can't add up to more than the total." })
+    }
+    if (invoice.deposit && Math.round(invoice.deposit.amount * 100) >= Math.round(invoice.total * 100)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["deposit", "amount"], message: "A deposit must be less than the total." })
+    }
   })
+
+type LegacyRecord = Record<string, unknown>
+
+function stringOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null
+}
+
+function numberOr(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback
+}
+
+// Phase 1: the single-payment fields are the source of truth, and the
+// ledger is their projection — recomputed on every parse, so a stale stored
+// ledger (left by a merge write that only touched the old fields) never
+// shows. A paid invoice becomes one "legacy" payment for the full total.
+// receivedOn comes from paidAt, unless a stored legacy payment for the same
+// Entry already has one (the backfill corrects it from the Entry's own date).
+export function deriveLedgerFromLegacy(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw
+  const doc = raw as LegacyRecord
+  const total = numberOr(doc.total, 0)
+  const status = doc.status
+  const paidVia = doc.paidVia === "bank_match" || doc.paidVia === "manual" || doc.paidVia === "online" ? doc.paidVia : null
+  const paidAt = stringOrNull(doc.paidAt)
+  const entryId = stringOrNull(doc.paidEntryId)
+  const checkoutSessionId = stringOrNull(doc.checkoutSessionId)
+  const pendingPaymentAt = stringOrNull(doc.pendingPaymentAt)
+  const updatedAt = stringOrNull(doc.updatedAt) ?? new Date(0).toISOString()
+
+  const payments: LegacyRecord[] = []
+  if (status === "paid" && total > 0) {
+    const via = paidVia ?? "manual"
+    const stored = Array.isArray(doc.payments)
+      ? (doc.payments as LegacyRecord[]).find((p) => p && p.id === "legacy" && p.entryId === entryId)
+      : undefined
+    const receivedOn =
+      stringOrNull(stored?.receivedOn) ?? (paidAt ?? updatedAt).slice(0, 10)
+    payments.push({
+      id: "legacy",
+      purpose: "full",
+      amount: total,
+      tipAmount: 0,
+      receivedOn,
+      via,
+      method: stringOrNull(doc.paidMethod) ?? (via === "online" ? "pos" : "other"),
+      entryId,
+      plaidTransactionId: stringOrNull(doc.paidPlaidTransactionId),
+      stripePaymentIntentId: stringOrNull(doc.paidStripePaymentIntentId),
+      checkoutSessionId: via === "online" ? checkoutSessionId : null,
+      feeAmount: Math.max(0, numberOr(doc.paidFeeAmount, 0)),
+      createdAt: paidAt ?? updatedAt,
+    })
+  }
+  const paymentIds = new Set(payments.map((p) => p.id as string))
+  const refunds = Array.isArray(doc.refunds)
+    ? (doc.refunds as LegacyRecord[]).map((refund) =>
+        refund && typeof refund === "object"
+          ? {
+              ...refund,
+              paymentId:
+                typeof refund.paymentId === "string" && paymentIds.has(refund.paymentId)
+                  ? refund.paymentId
+                  : (payments[0]?.id ?? null),
+            }
+          : refund
+      )
+    : doc.refunds
+
+  return {
+    ...doc,
+    payments,
+    refunds,
+    amountPaid: payments.reduce((sum, p) => sum + Math.round((p.amount as number) * 100), 0) / 100,
+    pendingPayment:
+      status === "sent" && pendingPaymentAt && total > 0
+        ? { checkoutSessionId, purpose: "full", amount: total, tipAmount: 0, startedAt: pendingPaymentAt }
+        : null,
+    openCheckout:
+      status === "sent" && !pendingPaymentAt && checkoutSessionId && total > 0
+        ? { sessionId: checkoutSessionId, purpose: "full", amountCents: Math.round(total * 100), tipCents: 0 }
+        : null,
+    paymentEntryIds: payments.flatMap((p) => (p.entryId ? [p.entryId as string] : [])),
+    paymentPlaidTransactionIds: payments.flatMap((p) => (p.plaidTransactionId ? [p.plaidTransactionId as string] : [])),
+    paymentIntentIds: payments.flatMap((p) => (p.stripePaymentIntentId ? [p.stripePaymentIntentId as string] : [])),
+    lastManualPaymentOn:
+      payments.filter((p) => p.via === "manual").map((p) => p.receivedOn as string).sort().pop() ?? null,
+  }
+}
+
+export const InvoiceSchema = z.preprocess(deriveLedgerFromLegacy, InvoiceObjectSchema)
 
 export type InvoiceType = z.infer<typeof InvoiceSchema>
 export type InvoiceLine = z.infer<typeof InvoiceLineSchema>
@@ -135,6 +320,10 @@ export type InvoiceStatus = z.infer<typeof InvoiceStatusSchema>
 export type InvoicePaidMethod = z.infer<typeof InvoicePaidMethodSchema>
 export type InvoiceRefund = z.infer<typeof InvoiceRefundSchema>
 export type InvoiceDispute = z.infer<typeof InvoiceDisputeSchema>
+export type InvoicePayment = z.infer<typeof InvoicePaymentSchema>
+export type InvoicePaymentPurpose = z.infer<typeof InvoicePaymentPurposeSchema>
+export type InvoiceDeposit = z.infer<typeof InvoiceDepositSchema>
+export type InvoicePendingPayment = z.infer<typeof InvoicePendingPaymentSchema>
 
 // What's been given back, and what can still be: refunds plus any money a
 // dispute is holding.
@@ -158,7 +347,7 @@ export function invoiceRefundableAmount(invoice: {
  * REQUEST SCHEMAS — what the invoice routes accept
  * -------------------------------------------------------- */
 
-const DateSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/, "Use YYYY-MM-DD")
+const DateSchema = InvoiceDateSchema
 
 export const InvoiceLineInputSchema = z.object({
   description: z.string().trim().min(1).max(200),

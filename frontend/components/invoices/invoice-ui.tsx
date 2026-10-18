@@ -14,13 +14,14 @@ import { cn } from "@/lib/utils"
 import {
   formatInvoiceDate,
   formatInvoiceMoney,
-  invoiceBalanceDue,
   invoiceDisplayStatus,
   type InvoiceDisplayStatus,
 } from "@shared/invoiceDisplay"
+import { invoiceBalanceDue, invoiceLatestPayment } from "@shared/invoicePayments"
 import {
   DEFAULT_INVOICE_ACCENT_COLOR,
   type InvoicePaidMethod,
+  type InvoicePayment,
   type InvoiceSettings,
   type InvoiceType,
 } from "@shared/schemas/invoice"
@@ -36,6 +37,13 @@ export const PAID_METHOD_LABELS: Record<InvoicePaidMethod, string> = {
   pos: "Card",
   apple_cash: "Apple Pay",
   other: "Other",
+}
+
+// How a payment arrived, short: "bank match", "paid online", "Zelle".
+export function paymentHowLabel(payment: InvoicePayment): string {
+  if (payment.via === "bank_match") return "bank match"
+  if (payment.via === "online") return payment.method === "other" ? "bank transfer" : "paid online"
+  return PAID_METHOD_LABELS[payment.method]
 }
 
 // The device's own date, which is what "due today" means to the person.
@@ -144,7 +152,7 @@ const TONE_CLASSES: Record<InvoiceDisplayStatus["tone"], string> = {
 
 // List rows use the short form ("Due Nov 14"); the detail page the full date.
 export function shortStatusLabel(invoice: InvoiceType, today: string): string {
-  if (invoice.status === "sent" && invoice.pendingPaymentAt) return "Processing"
+  if (invoice.status === "sent" && invoice.pendingPayment) return "Processing"
   const status = invoiceDisplayStatus(invoice, today)
   // Refund and dispute states are already short.
   if (status.label === "Disputed" || status.label === "Refunded") return status.label
@@ -165,7 +173,7 @@ export function shortStatusLabel(invoice: InvoiceType, today: string): string {
 export function InvoiceStatusPill({ invoice, today, short }: { invoice: InvoiceType; today: string; short?: boolean }) {
   const status = invoiceDisplayStatus(invoice, today)
   // A bank transfer clearing reads as on its way, not overdue.
-  const tone = invoice.status === "sent" && invoice.pendingPaymentAt ? "open" : status.tone
+  const tone = invoice.status === "sent" && invoice.pendingPayment ? "open" : status.tone
   return (
     <span
       className={cn(
@@ -173,7 +181,7 @@ export function InvoiceStatusPill({ invoice, today, short }: { invoice: InvoiceT
         TONE_CLASSES[tone]
       )}
     >
-      {short ? shortStatusLabel(invoice, today) : invoice.status === "sent" && invoice.pendingPaymentAt ? "Payment processing" : status.label}
+      {short ? shortStatusLabel(invoice, today) : invoice.status === "sent" && invoice.pendingPayment ? "Payment processing" : status.label}
     </span>
   )
 }
@@ -187,12 +195,11 @@ function rowDetail(invoice: InvoiceType): string {
   const parts = [`#${invoice.number}`]
   if (invoice.status === "draft") parts.push("Not sent")
   else if (invoice.status === "void") parts.push("Voided")
+  else if (invoice.status === "closed") parts.push("Closed")
   else if (invoice.status === "paid") {
-    if (invoice.paidAt) parts.push(`Paid ${shortDate(invoice.paidAt.slice(0, 10))}`)
-    if (invoice.paidVia === "bank_match") parts.push("bank match")
-    else if (invoice.paidVia === "online") parts.push(invoice.paidMethod === "other" ? "bank transfer" : "paid online")
-    else if (invoice.paidMethod) parts.push(PAID_METHOD_LABELS[invoice.paidMethod])
-  } else if (invoice.pendingPaymentAt) parts.push("bank payment clearing")
+    const latest = invoiceLatestPayment(invoice)
+    if (latest) parts.push(`Paid ${shortDate(latest.receivedOn)}`, paymentHowLabel(latest))
+  } else if (invoice.pendingPayment) parts.push("bank payment clearing")
   else if (invoice.lastEmailedAt) parts.push(`Emailed ${shortDate(invoice.lastEmailedAt.slice(0, 10))}`)
   else parts.push(`Sent ${shortDate((invoice.sharedAt ?? invoice.createdAt).slice(0, 10))}`)
   return parts.join(" · ")

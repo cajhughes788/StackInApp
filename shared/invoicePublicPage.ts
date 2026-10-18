@@ -1,11 +1,11 @@
 import {
   formatInvoiceDate,
   formatInvoiceMoney,
-  invoiceBalanceDue,
   invoiceDisplayStatus,
   textColorOnAccent,
   type InvoiceDisplayStatus,
 } from "./invoiceDisplay"
+import { invoiceBalanceDue } from "./invoicePayments"
 import { DEFAULT_INVOICE_ACCENT_COLOR, type InvoiceSettings, type InvoiceType } from "./schemas/invoice"
 
 // ---------------------------------------------------------------------------
@@ -133,8 +133,8 @@ export function renderPublicInvoicePage(
     .filter(Boolean)
     .join(" · ")
 
-  const showPay = !!options.payPath && invoice.status === "sent" && !invoice.pendingPaymentAt
-  const processing = invoice.status === "sent" && !!invoice.pendingPaymentAt
+  const showPay = !!options.payPath && invoice.status === "sent" && !invoice.pendingPayment
+  const processing = invoice.status === "sent" && !!invoice.pendingPayment
   const banner =
     processing
       ? `<div class="banner" style="background:${TONE_COLORS.open.bg};color:${TONE_COLORS.open.fg}">A bank payment is on its way — it usually clears in about 4 business days.</div>`

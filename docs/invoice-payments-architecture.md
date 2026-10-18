@@ -120,16 +120,30 @@ Removing a payment (`removeInvoicePayment`) is the inverse, used when an entry i
 
 Goal: the new data shape exists and everything reads through it, while every write path still behaves exactly as today.
 
-1. **Schema.** Add `InvoicePaymentSchema`, the new invoice fields and `closed` status to `shared/schemas/invoice.ts`. Wrap `InvoiceSchema` in `z.preprocess(normalizeLegacyInvoice, …)`, the same pattern as `PlaidPendingTransactionSchema`'s `normalizeLegacyDirection`. A legacy paid invoice becomes one `payments` entry: `id: "legacy"`, `purpose: "full"`, built from the `paid*` fields. Legacy `pendingPaymentAt` and `checkoutSessionId` map to the new objects.
-2. **Shared helpers.** Add `shared/invoicePayments.ts` as above, with unit tests in `scripts/test-invoice-matching.cjs`, or a new `scripts/test-invoice-payments.cjs` registered in `package.json`.
-3. **Writes keep the old fields too.** Every current write path (mark paid, bank match, Stripe webhook, reopen, refunds) also writes the new fields, so data written during the transition is complete in both shapes. Every read moves to the helpers.
+1. **Schema.** Add `InvoicePaymentSchema`, the new invoice fields and `closed` status to `shared/schemas/invoice.ts`. `InvoiceSchema` becomes `z.preprocess(deriveLedgerFromLegacy, …)`.
+   - A paid invoice becomes one payment: `id: "legacy"`, `purpose: "full"`, built from the `paid*` fields.
+   - `pendingPaymentAt` and `checkoutSessionId` map to `pendingPayment` and `openCheckout`.
+   - Refunds get `paymentId` pointing at that payment.
+2. **The old fields stay the source of truth; the ledger is recomputed from them on every parse.**
+   - Every write path in this phase is unchanged and still sets the `paid*` fields.
+   - Writes that save the whole invoice also store the recomputed ledger.
+   - Writes that patch only a few old fields leave the stored ledger stale. That's harmless: every read recomputes it, nothing queries it in this phase, and the backfill refreshes it.
+   - The one stored value kept on recompute is a legacy payment's `receivedOn` when its entry is unchanged, so the backfill's correction sticks.
+   - Phase 2 flips this in one place: `payments` becomes the source, written by the payment engine.
+3. **Shared helpers.** `shared/invoicePayments.ts`, tested in `scripts/test-invoice-payments.cjs` (`npm run test:invoice-payments`).
 4. **Readers switched to the helpers:**
-   - `shared/invoiceDisplay.ts`, `invoiceEmail.ts`, `invoicePublicPage.ts`
+   - `shared/invoiceDisplay.ts`, `invoiceEmail.ts`, `invoicePublicPage.ts` and `invoiceMatching.ts`'s candidate selection
    - `frontend/lib/invoicePdf.ts`
-   - `components/invoices/invoice-money.tsx`, `invoice-clients.ts`, `invoice-ui.tsx`, `invoice-match-card.tsx`
-   - the invoices list, client and view pages, and `needs-you-panel.tsx`
-5. **Backfill script** (`scripts/backfill-invoice-payments.cjs`, run once per environment). It rewrites every invoice doc into the new shape through the same `normalizeLegacyInvoice`, verifies `amountPaid`, and logs anything it can't convert. It's idempotent and has a dry-run mode.
-6. **Firestore indexes:** none expected. Every query stays single-field (`array-contains` on the index arrays). Confirm in `firestore.indexes.json`.
+   - `components/invoices/invoice-money.tsx`, `invoice-ui.tsx`, `invoice-match-card.tsx`, `refund-sheet.tsx`, `send-invoice-sheet.tsx`
+   - the invoices list and view pages, `needs-you-panel.tsx`, and the optimistic updates in `lib/domain/invoiceService.ts`
+   - The list's "paid this month" now sums payments received that month (cash basis), not invoices whose paid date falls in it.
+   - The backend services still read the old fields until Phase 2 moves them onto the engine.
+5. **Backfill script** (`scripts/backfill-invoice-payments.cjs`).
+   - Dry run by default; `--write` to apply; `--workspace <id>` to limit it.
+   - Writes only the ledger fields, never the `paid*` fields or `updatedAt`, and is safe to run more than once.
+   - Corrects each payment's `receivedOn` from its entry's own date. An online payment's `paidAt` is a UTC instant, while the entry is dated in the workspace's time zone.
+   - **Run it again right before Phase 2's flip**, so payments written during Phase 1 are stored too.
+6. **Firestore indexes:** none needed. The backfill's collection-group read has no filter, and later lookups are single-field `array-contains`.
 
 **Done when:** all invoices are backfilled, every reader uses the helpers, the app looks identical, and the tests cover the legacy → ledger conversion for draft, sent, paid (each `paidVia`), refunded, disputed, ACH-pending and void invoices.
 

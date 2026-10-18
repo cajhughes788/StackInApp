@@ -20,6 +20,7 @@ import { computeReceiptCoverage } from "@shared/receiptRequirements"
 import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
 import { localToday } from "@/components/invoices/invoice-ui"
 import { formatInvoiceMoney } from "@shared/invoiceDisplay"
+import { invoiceBalanceDue } from "@shared/invoicePayments"
 
 // One review list for everything the bank sent over: deposits (income) and
 // charges and refunds (expenses). Shown on both the Income and Expenses tabs
@@ -64,7 +65,7 @@ export default function NeedsYouPanel() {
   // A client's bank transfer through Stripe bounced: the invoice is open
   // again, and only a push notification said so.
   const failedPayments = useMemo(
-    () => (invoices ?? []).filter((invoice) => invoice.status === "sent" && invoice.paymentFailedAt && !invoice.pendingPaymentAt),
+    () => (invoices ?? []).filter((invoice) => invoice.status === "sent" && invoice.paymentFailedAt && !invoice.pendingPayment),
     [invoices]
   )
   // Past due and unpaid, as one row — chasing them happens on the Invoices
@@ -73,11 +74,11 @@ export default function NeedsYouPanel() {
   const overdue = useMemo(
     () =>
       (invoices ?? []).filter(
-        (invoice) => invoice.status === "sent" && invoice.dueDate < today && !invoice.pendingPaymentAt && !invoice.paymentFailedAt
+        (invoice) => invoice.status === "sent" && invoice.dueDate < today && !invoice.pendingPayment && !invoice.paymentFailedAt
       ),
     [invoices, today]
   )
-  const overdueTotal = overdue.reduce((sum, invoice) => sum + Math.round(invoice.total * 100), 0) / 100
+  const overdueTotal = overdue.reduce((sum, invoice) => sum + Math.round(invoiceBalanceDue(invoice) * 100), 0) / 100
   const total =
     (incomeCount ?? 0) + (expensesCount ?? 0) + missingReceipts + openDisputes.length + failedPayments.length + (overdue.length > 0 ? 1 : 0)
 

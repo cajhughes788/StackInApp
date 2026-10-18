@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast"
 import { fieldLabelClass, softInputClass } from "@/components/invoices/invoice-ui"
 import { updateInvoiceStatus } from "@/lib/api/invoicesApi"
 import { invoiceSaved } from "@/lib/domain/invoiceService"
+import { invoiceLatestPayment } from "@shared/invoicePayments"
 import { useEntriesStore } from "@/lib/stores/useEntriesStore"
 import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
 import { cn } from "@/lib/utils"
@@ -57,7 +58,9 @@ export default function RefundSheet({
   const { toast } = useToast()
   const upsertInvoice = useInvoicesStore((state) => state.upsertInvoice)
   const refundable = invoiceRefundableAmount(invoice)
-  const throughStripe = invoice.paidVia === "online" && !!invoice.paidStripePaymentIntentId
+  // Phase 1: one payment per invoice; refunds come off the latest.
+  const payment = invoiceLatestPayment(invoice)
+  const throughStripe = payment?.via === "online" && !!payment.stripePaymentIntentId
   const [mode, setMode] = useState<"full" | "part">("full")
   const [amountText, setAmountText] = useState("")
   const [reason, setReason] = useState<InvoiceRefund["reason"]>("requested_by_client")
@@ -109,7 +112,7 @@ export default function RefundSheet({
     }
   }
 
-  const paidDate = invoice.paidAt ? formatInvoiceDate(invoice.paidAt.slice(0, 10)).replace(/, \d{4}$/, "") : "the paid date"
+  const paidDate = payment ? formatInvoiceDate(payment.receivedOn).replace(/, \d{4}$/, "") : "the paid date"
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -175,10 +178,10 @@ export default function RefundSheet({
           <p className="rounded-[14px] bg-muted px-3.5 py-3 text-sm leading-relaxed text-foreground">
             {throughStripe ? (
               <>
-                Goes back to {possessive(invoice.clientName)} {invoice.paidMethod === "other" ? "bank account" : "card"} in 5–10
+                Goes back to {possessive(invoice.clientName)} {payment?.method === "other" ? "bank account" : "card"} in 5–10
                 days and lowers your income by <strong className="tabular-nums">{amount ? formatInvoiceMoney(amount) : "—"}</strong> on
                 today&apos;s date — your {paidDate} income stays as it was.
-                {invoice.paidFeeAmount > 0 ? ` Stripe keeps its ${formatInvoiceMoney(invoice.paidFeeAmount)} fee from the original payment.` : ""}
+                {payment && payment.feeAmount > 0 ? ` Stripe keeps its ${formatInvoiceMoney(payment.feeAmount)} fee from the original payment.` : ""}
               </>
             ) : (
               <>

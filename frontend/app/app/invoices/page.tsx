@@ -17,6 +17,7 @@ import {
 import { groupInvoicesByClient } from "@/components/invoices/invoice-clients"
 import { cn } from "@/lib/utils"
 import { formatInvoiceMoney } from "@shared/invoiceDisplay"
+import { invoiceBalanceDue, invoicePaymentsReceivedIn } from "@shared/invoicePayments"
 import type { InvoiceType } from "@shared/schemas/invoice"
 
 type Filter = "all" | "open" | "overdue" | "paid" | "draft"
@@ -79,10 +80,14 @@ function InvoicesListPage() {
     let paidCount = 0
     for (const invoice of invoices) {
       if (invoice.status === "sent") {
-        waiting += invoice.total
-        if (invoice.dueDate < today) overdue += invoice.total
-      } else if (invoice.status === "paid" && invoice.paidAt?.slice(0, 7) === month) {
-        paidThisMonth += invoice.total
+        const balance = invoiceBalanceDue(invoice)
+        waiting += balance
+        if (invoice.dueDate < today) overdue += balance
+      }
+      // Cash basis: money counts in the month it arrived, payment by payment.
+      const received = invoicePaymentsReceivedIn(invoice, month)
+      if (received.length > 0) {
+        paidThisMonth += received.reduce((sum, payment) => sum + payment.amount, 0)
         paidCount += 1
       }
     }

@@ -4,10 +4,10 @@ import type { jsPDF as JsPDF } from "jspdf"
 import {
   formatInvoiceDate,
   formatInvoiceMoney,
-  invoiceBalanceDue,
   invoiceDisplayStatus,
   invoiceFileName,
 } from "@shared/invoiceDisplay"
+import { invoiceBalanceDue } from "@shared/invoicePayments"
 import { DEFAULT_INVOICE_ACCENT_COLOR, type InvoiceSettings, type InvoiceType } from "@shared/schemas/invoice"
 import { sharePdfBlob } from "@/lib/documentExport"
 

@@ -1,3 +1,4 @@
+import { invoiceAmountPaid, invoiceBalanceDue, invoiceLatestPayment } from "./invoicePayments"
 import { invoiceRefundedTotal, type InvoiceTerms, type InvoiceType } from "./schemas/invoice"
 
 // ---------------------------------------------------------------------------
@@ -55,7 +56,7 @@ export type InvoiceDisplayStatus = {
 
 // `today` is a YYYY-MM-DD in the business's local time; the caller decides.
 export function invoiceDisplayStatus(
-  invoice: Pick<InvoiceType, "status" | "dueDate" | "paidAt"> & Partial<Pick<InvoiceType, "total" | "refunds" | "dispute">>,
+  invoice: Pick<InvoiceType, "status" | "dueDate"> & Partial<Pick<InvoiceType, "total" | "refunds" | "dispute" | "payments">>,
   today: string
 ): InvoiceDisplayStatus {
   if (invoice.status === "paid" && (invoice.dispute?.status === "open" || invoice.dispute?.status === "inquiry")) {
@@ -67,22 +68,30 @@ export function invoiceDisplayStatus(
     return { label: fully ? "Refunded" : "Paid · partly refunded", tone: "paid" }
   }
   switch (invoice.status) {
-    case "paid":
-      return { label: invoice.paidAt ? `Paid ${formatInvoiceDate(invoice.paidAt.slice(0, 10))}` : "Paid", tone: "paid" }
+    case "paid": {
+      const latest = invoiceLatestPayment(invoice)
+      return { label: latest ? `Paid ${formatInvoiceDate(latest.receivedOn)}` : "Paid", tone: "paid" }
+    }
     case "void":
       return { label: "Void", tone: "void" }
+    case "closed":
+      return { label: invoiceAmountPaid(invoice) > 0 ? `Closed · ${formatInvoiceMoney(invoiceAmountPaid(invoice))} kept` : "Closed", tone: "void" }
     case "draft":
       return { label: "Draft", tone: "draft" }
     case "sent":
+      if (invoice.total !== undefined && invoiceAmountPaid(invoice) > 0) {
+        const balance = invoiceBalanceDue({ status: invoice.status, total: invoice.total, payments: invoice.payments })
+        return {
+          label: `Partly paid · ${formatInvoiceMoney(balance)} due`,
+          tone: invoice.dueDate < today ? "overdue" : "open",
+        }
+      }
       if (invoice.dueDate < today) return { label: `Overdue since ${formatInvoiceDate(invoice.dueDate)}`, tone: "overdue" }
       if (invoice.dueDate === today) return { label: "Due today", tone: "open" }
       return { label: `Due ${formatInvoiceDate(invoice.dueDate)}`, tone: "open" }
   }
 }
 
-export function invoiceBalanceDue(invoice: Pick<InvoiceType, "status" | "total">): number {
-  return invoice.status === "sent" || invoice.status === "draft" ? invoice.total : 0
-}
 
 // "Invoice-0012-Acme-Corp.pdf" — safe on every OS and share target.
 export function invoiceFileName(invoice: Pick<InvoiceType, "number" | "clientName">): string {
