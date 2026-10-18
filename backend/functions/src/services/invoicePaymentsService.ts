@@ -1,30 +1,39 @@
 import type Stripe from "stripe"
 import { DateTime } from "luxon"
 import { db } from "../admin"
-import { InvoiceSchema, type InvoiceType } from "@shared/schemas/invoice"
-import { invoiceCentsByCategory, invoiceIncomeBreakdown } from "@shared/invoiceMatching"
+import {
+  InvoicePaymentPurposeSchema,
+  InvoiceSchema,
+  type InvoicePaymentPurpose,
+  type InvoiceType,
+} from "@shared/schemas/invoice"
+import { invoicePaymentOptions } from "@shared/invoicePayments"
 import { publicInvoiceUrl } from "@shared/invoiceDisplay"
 import { StripePayoutSchema } from "@shared/stripePayouts"
 import { payoutsCol } from "./stripePayoutsStore"
 import { findSharedInvoice, invoicesCol } from "./invoicesService"
 import { getStripe, readPaymentAccount } from "./paymentAccountsService"
-import * as entriesSvc from "./entriesService"
-import * as expensesSvc from "./expensesService"
 
 // ---------------------------------------------------------------------------
 // Online invoice payments — Stripe Connect phase 2.
 //
 // A client taps Pay on the public invoice page → a Checkout session on the
 // user's own Stripe account (direct charge: Stripe's fee comes out of the
-// user's balance) → checkout.session.completed books the payment the same
-// way a bank-matched payment is booked: one Entry for the full invoice
-// amount, plus Stripe's actual fee as a Payment Processing Fees expense.
+// user's balance) for what's left to pay → checkout.session.completed books
+// it through the payment engine like any other payment: its own Entry, plus
+// Stripe's actual fee as a Payment Processing Fees expense.
 // Payouts are recorded so the bank deposit they become isn't counted again
 // (shared/stripePayouts.ts).
 // ---------------------------------------------------------------------------
 
 const DEFAULT_TIME_ZONE = "America/Los_Angeles"
-const PROCESSING_FEE_EXPENSE_ACCOUNT = "Payment Processing Fees"
+
+const PURPOSE_LINE_LABELS: Record<InvoicePaymentPurpose, string> = {
+  deposit: "Deposit",
+  balance: "Balance",
+  full: "Payment",
+  partial: "Payment",
+}
 
 function toCents(amount: number): number {
   return Math.round(amount * 100)
@@ -47,7 +56,7 @@ export async function invoiceOnlinePayment(
   workspaceId: string,
   invoice: InvoiceType
 ): Promise<{ payable: boolean; bankTransfer: boolean }> {
-  if (invoice.status !== "sent" || invoice.pendingPaymentAt) return { payable: false, bankTransfer: false }
+  if (invoicePaymentOptions(invoice).length === 0) return { payable: false, bankTransfer: false }
   const account = await readPaymentAccount(workspaceId)
   const payable = !!account && account.chargesEnabled && account.acceptOnline
   return { payable, bankTransfer: payable && account?.achStatus === "active" }
@@ -58,28 +67,42 @@ export async function startInvoiceCheckout(shareToken: string): Promise<Checkout
   if (!shared) return { kind: "not_found" }
   const { workspaceId, invoice, settings } = shared
   const account = await readPaymentAccount(workspaceId)
-  if (invoice.status !== "sent" || invoice.pendingPaymentAt || !account?.chargesEnabled || !account.acceptOnline) {
+  // Phase 5 lets the client choose (deposit, balance, full) and tip; until
+  // then the first option is what's offered.
+  const [option] = invoicePaymentOptions(invoice)
+  if (!option || !account?.chargesEnabled || !account.acceptOnline) {
     return { kind: "not_payable" }
   }
 
   const stripe = getStripe()
   const stripeAccount = account.stripeAccountId
-  const totalCents = toCents(invoice.total)
+  const amountCents = toCents(option.amount)
+  const tipCents = 0
   const pageUrl = publicInvoiceUrl(shareToken)
 
   // Reuse the client's open session (a second tap, a back button) so one
   // invoice doesn't collect two payments.
-  if (invoice.checkoutSessionId) {
+  if (invoice.openCheckout) {
     const existing = await stripe.checkout.sessions
-      .retrieve(invoice.checkoutSessionId, {}, { stripeAccount })
+      .retrieve(invoice.openCheckout.sessionId, {}, { stripeAccount })
       .catch(() => null)
-    if (existing?.status === "open" && existing.amount_total === totalCents && existing.url) {
+    if (existing?.status === "open" && existing.amount_total === amountCents + tipCents && existing.url) {
       return { kind: "redirect", url: existing.url }
     }
     if (existing?.status === "complete") return { kind: "redirect", url: `${pageUrl}?paid=1` }
   }
 
   const business = settings.businessName || ""
+  // What this payment is for, read back by the webhook — the amounts are
+  // never inferred from what arrived.
+  const checkoutMetadata = {
+    workspaceId,
+    invoiceId: invoice.id,
+    invoiceNumber: invoice.number,
+    purpose: option.purpose,
+    amountCents: String(amountCents),
+    tipCents: String(tipCents),
+  }
   const session = await stripe.checkout.sessions.create(
     {
       mode: "payment",
@@ -88,27 +111,42 @@ export async function startInvoiceCheckout(shareToken: string): Promise<Checkout
       // at $5, the cheapest way for a client to pay a large invoice. A bank
       // transfer settles days later (checkout.session.async_payment_*).
       payment_method_types: account.achStatus === "active" ? ["card", "us_bank_account"] : ["card"],
-      line_items: invoice.lines.map((line) => ({
-        quantity: 1,
-        price_data: {
-          currency: "usd",
-          unit_amount: toCents(line.amount),
-          product_data: { name: line.description.slice(0, 250) || `Invoice #${invoice.number}` },
-        },
-      })),
+      // The whole invoice: its own lines. Part of it: one line saying which.
+      line_items:
+        amountCents === toCents(invoice.total)
+          ? invoice.lines.map((line) => ({
+              quantity: 1,
+              price_data: {
+                currency: "usd",
+                unit_amount: toCents(line.amount),
+                product_data: { name: line.description.slice(0, 250) || `Invoice #${invoice.number}` },
+              },
+            }))
+          : [
+              {
+                quantity: 1,
+                price_data: {
+                  currency: "usd",
+                  unit_amount: amountCents,
+                  product_data: { name: `${PURPOSE_LINE_LABELS[option.purpose]} — Invoice #${invoice.number}` },
+                },
+              },
+            ],
       client_reference_id: invoice.id,
-      metadata: { workspaceId, invoiceId: invoice.id, invoiceNumber: invoice.number },
+      metadata: checkoutMetadata,
       payment_intent_data: {
         description: `Invoice #${invoice.number}${business ? ` from ${business}` : ""}`,
-        metadata: { workspaceId, invoiceId: invoice.id, invoiceNumber: invoice.number },
+        metadata: checkoutMetadata,
       },
       success_url: `${pageUrl}?paid=1`,
       cancel_url: pageUrl,
     },
-    // Same invoice, same total, same version → the same session for 24h.
-    { stripeAccount, idempotencyKey: `checkout-${invoice.id}-${totalCents}-${invoice.updatedAt}` }
+    // Same invoice, same amounts, same version → the same session for 24h.
+    { stripeAccount, idempotencyKey: `checkout-${invoice.id}-${option.purpose}-${amountCents}-${tipCents}-${invoice.updatedAt}` }
   )
-  await invoicesCol(workspaceId).doc(invoice.id).set({ checkoutSessionId: session.id }, { merge: true })
+  await invoicesCol(workspaceId)
+    .doc(invoice.id)
+    .set({ openCheckout: { sessionId: session.id, purpose: option.purpose, amountCents, tipCents } }, { merge: true })
   if (!session.url) throw new Error("Stripe returned a Checkout session without a URL")
   return { kind: "redirect", url: session.url }
 }
@@ -154,12 +192,40 @@ export async function handleCheckoutSessionCompleted(stripeAccountId: string, se
     if (!snap.exists) return
     const current = InvoiceSchema.parse(snap.data())
     if (current.status !== "sent") return
+    const { purpose, amountCents, tipCents } = sessionAmounts(session)
+    if (amountCents <= 0) return
     txn.set(
       ref,
-      { pendingPaymentAt: new Date().toISOString(), paymentFailedAt: null, checkoutSessionId: session.id },
+      {
+        pendingPayment: {
+          checkoutSessionId: session.id,
+          purpose,
+          amount: amountCents / 100,
+          tipAmount: tipCents / 100,
+          startedAt: new Date().toISOString(),
+        },
+        paymentFailedAt: null,
+        openCheckout: null,
+      },
       { merge: true }
     )
   })
+}
+
+// What a Checkout session was for, from the metadata 521 set when it
+// created it. Sessions without it (none should exist) count as one payment
+// of everything charged.
+function sessionAmounts(session: Stripe.Checkout.Session): { purpose: InvoicePaymentPurpose; amountCents: number; tipCents: number } {
+  const metadata = session.metadata ?? {}
+  const purpose = InvoicePaymentPurposeSchema.safeParse(metadata.purpose)
+  const tipCents = Number.parseInt(metadata.tipCents ?? "0", 10)
+  const amountCents = Number.parseInt(metadata.amountCents ?? "", 10)
+  const total = session.amount_total ?? 0
+  return {
+    purpose: purpose.success ? purpose.data : "full",
+    amountCents: Number.isFinite(amountCents) && amountCents > 0 ? amountCents : total - (Number.isFinite(tipCents) ? tipCents : 0),
+    tipCents: Number.isFinite(tipCents) && tipCents > 0 ? tipCents : 0,
+  }
 }
 
 // checkout.session.async_payment_succeeded: the bank transfer cleared.
@@ -183,12 +249,8 @@ export async function handleAsyncPaymentFailed(stripeAccountId: string, session:
     const snap = await txn.get(ref)
     if (!snap.exists) return null
     const current = InvoiceSchema.parse(snap.data())
-    if (current.status !== "sent" || current.checkoutSessionId !== session.id) return null
-    txn.set(
-      ref,
-      { pendingPaymentAt: null, paymentFailedAt: new Date().toISOString(), checkoutSessionId: null },
-      { merge: true }
-    )
+    if (current.status !== "sent" || current.pendingPayment?.checkoutSessionId !== session.id) return null
+    txn.set(ref, { pendingPayment: null, paymentFailedAt: new Date().toISOString(), openCheckout: null }, { merge: true })
     return current
   })
   if (!failed) return
@@ -237,127 +299,67 @@ async function bookPaidSession(
   const isBankTransfer = charge.payment_method_details?.type === "us_bank_account"
   const entryMethod = isBankTransfer ? ("other" as const) : ("pos" as const)
 
-  const ref = invoicesCol(workspaceId).doc(invoiceId)
-  const claim = await db.runTransaction(async (txn) => {
-    const snap = await txn.get(ref)
-    if (!snap.exists) return { outcome: "missing" as const }
-    const current = InvoiceSchema.parse(snap.data())
-    if (current.status === "paid" && current.paidStripePaymentIntentId === paymentIntentId) {
-      return { outcome: current.paidEntryId ? ("done" as const) : ("resume" as const), invoice: current }
-    }
-    if (current.status !== "sent") return { outcome: "duplicate" as const, invoice: current }
-    const next = InvoiceSchema.parse({
-      ...current,
-      status: "paid",
-      paidAt: new Date(paidSeconds * 1000).toISOString(),
-      paidVia: "online",
-      paidMethod: entryMethod,
-      pendingPaymentAt: null,
-      paymentFailedAt: null,
-      paidStripePaymentIntentId: paymentIntentId,
-      paidFeeAmount: feeCents / 100,
-      checkoutSessionId: session.id,
-      updatedAt: new Date().toISOString(),
-    })
-    txn.set(ref, next)
-    return { outcome: "claimed" as const, invoice: next, previousPendingAt: current.pendingPaymentAt }
-  })
+  const ownerSnap = await db.doc(`workspaces/${workspaceId}`).get()
+  const ownerUid = ownerSnap.data()?.ownerId as string | undefined
+  if (!ownerUid) throw new Error(`Workspace ${workspaceId} has no owner`)
 
-  if (claim.outcome === "done") return
-  if (claim.outcome === "missing" || claim.outcome === "duplicate") {
-    // Paid twice (two tabs), or paid after it was voided or settled another
-    // way: give the money back rather than book it against nothing.
+  // The amounts 521 asked for, checked against what Stripe actually took.
+  // If they don't add up, everything received is booked as the payment
+  // (no tip) rather than guessed at.
+  let { purpose, amountCents, tipCents } = sessionAmounts(session)
+  if (amountCents + tipCents !== receivedCents) {
+    console.warn("invoicePayments: received amount doesn't match the session's amounts", {
+      invoiceId,
+      receivedCents,
+      amountCents,
+      tipCents,
+    })
+    amountCents = receivedCents
+    tipCents = 0
+  }
+
+  const { applyInvoicePayment, PaymentRejectedError } = await import("./invoicePaymentEngine.js")
+  try {
+    await applyInvoicePayment(
+      workspaceId,
+      ownerUid,
+      {
+        invoiceId,
+        payment: {
+          id: `stripe_${paymentIntentId}`,
+          purpose,
+          amount: amountCents / 100,
+          tipAmount: tipCents / 100,
+          receivedOn: paidDate,
+          via: "online",
+          method: entryMethod,
+          plaidTransactionId: null,
+          stripePaymentIntentId: paymentIntentId,
+          checkoutSessionId: session.id,
+          feeAmount: feeCents / 100,
+        },
+        settlesCheckoutSessionId: session.id,
+      },
+      {
+        notes: [isBankTransfer ? "Paid by bank transfer (Stripe)" : "Paid online (Stripe)"],
+        fee: { vendor: "Stripe", description: `Stripe fee on Invoice #${session.metadata?.invoiceNumber ?? ""}`.trim() },
+      }
+    )
+  } catch (error) {
+    if (!(error instanceof PaymentRejectedError)) throw error // Stripe retries the webhook.
+    // Paid twice (two tabs), or after it was voided, closed or settled
+    // another way, or for more than is left: give the money back rather
+    // than book it against nothing.
     await stripe.refunds.create(
       { payment_intent: paymentIntentId, reason: "duplicate", metadata: { workspaceId, invoiceId } },
       { stripeAccount: stripeAccountId, idempotencyKey: `refund-${paymentIntentId}` }
     )
-    console.warn("invoicePayments: refunded a payment for an invoice that wasn't open", {
+    console.warn("invoicePayments: refunded a payment the invoice couldn't take", {
       workspaceId,
       invoiceId,
       paymentIntentId,
-      status: claim.outcome === "duplicate" ? claim.invoice.status : "missing",
+      reason: error.reason,
     })
-    return
-  }
-
-  const invoice = claim.invoice
-  const previousPendingAt = claim.outcome === "claimed" ? claim.previousPendingAt : null
-  try {
-    const workspaceSnap = await db.doc(`workspaces/${workspaceId}`).get()
-    const ownerUid = workspaceSnap.data()?.ownerId as string | undefined
-    if (!ownerUid) throw new Error(`Workspace ${workspaceId} has no owner`)
-
-    // The client paid the invoice total; if it was edited after Checkout
-    // opened (the session is expired on edit, so this is rare) book what was
-    // actually received under the invoice's main category.
-    const totalMatches = receivedCents === toCents(invoice.total)
-    const [topCategory] = [...invoiceCentsByCategory(invoice.lines)].sort((a, b) => b[1] - a[1])[0]
-    const incomeBreakdowns = totalMatches
-      ? [invoiceIncomeBreakdown(invoice.lines, entryMethod)]
-      : [{ paymentMethod: entryMethod, [topCategory]: receivedCents / 100 }]
-    const customIncome = !isBankTransfer
-      ? []
-      : totalMatches
-        ? [...invoiceCentsByCategory(invoice.lines)].map(([category, cents]) => ({
-            label: invoice.clientName,
-            amount: cents / 100,
-            category,
-          }))
-        : [{ label: invoice.clientName, amount: receivedCents / 100, category: topCategory }]
-    if (!totalMatches) {
-      console.warn("invoicePayments: received amount differs from invoice total", { invoiceId, receivedCents, total: invoice.total })
-    }
-
-    const entry = await entriesSvc.createEntry(workspaceId, ownerUid, {
-      workspace: "independent",
-      date: paidDate,
-      notes: [`Invoice #${invoice.number}`, invoice.clientName, isBankTransfer ? "Paid by bank transfer (Stripe)" : "Paid online (Stripe)"].join(" | "),
-      clientMutationId: `stripe_${paymentIntentId}`,
-      independent: {
-        hours: 0,
-        incomeBreakdowns,
-        unreportedCash: 0,
-        unreportedCashTips: 0,
-        customIncome,
-      },
-    })
-    if (feeCents > 0) {
-      await expensesSvc.createExpense(workspaceId, ownerUid, {
-        date: paidDate,
-        amount: feeCents / 100,
-        vendor: "Stripe",
-        description: `Stripe fee on Invoice #${invoice.number}`,
-        account: PROCESSING_FEE_EXPENSE_ACCOUNT,
-        clientMutationId: `stripe_${paymentIntentId}_fee`,
-      })
-    }
-    await ref.set({ paidEntryId: entry.id }, { merge: true })
-  } catch (error) {
-    // Reopen the invoice (only if this payment still holds it) and let
-    // Stripe retry the webhook; the client mutation ids make the retry
-    // reuse whatever was already created.
-    await db
-      .runTransaction(async (txn) => {
-        const snap = await txn.get(ref)
-        if (snap.data()?.paidStripePaymentIntentId !== paymentIntentId || snap.data()?.paidEntryId) return
-        txn.set(
-          ref,
-          {
-            status: "sent",
-            paidAt: null,
-            paidVia: null,
-            paidMethod: null,
-            paidStripePaymentIntentId: null,
-            paidFeeAmount: 0,
-            // A cleared bank transfer stays "processing" so it can't be paid twice.
-            pendingPaymentAt: previousPendingAt,
-            updatedAt: new Date().toISOString(),
-          },
-          { merge: true }
-        )
-      })
-      .catch((revertError) => console.error("invoicePayments: failed to reopen invoice", revertError))
-    throw error
   }
 }
 

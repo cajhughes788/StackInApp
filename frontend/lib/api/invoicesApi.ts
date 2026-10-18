@@ -89,8 +89,9 @@ export async function deleteInvoice(workspaceId: string, invoiceId: string): Pro
 }
 
 /**
- * send / void / mark_paid / share. mark_paid also books the income Entry and
- * returns its id; share returns the public link (and sends a draft).
+ * send / void / close / share / email / refund / record_payment.
+ * record_payment books the payment's income Entry and returns its id; share
+ * returns the public link (and sends a draft).
  */
 export async function updateInvoiceStatus(
   workspaceId: string,

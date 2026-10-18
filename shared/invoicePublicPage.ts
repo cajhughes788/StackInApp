@@ -5,7 +5,7 @@ import {
   textColorOnAccent,
   type InvoiceDisplayStatus,
 } from "./invoiceDisplay"
-import { invoiceBalanceDue } from "./invoicePayments"
+import { invoiceAmountPaid, invoiceBalanceDue } from "./invoicePayments"
 import { DEFAULT_INVOICE_ACCENT_COLOR, type InvoiceSettings, type InvoiceType } from "./schemas/invoice"
 
 // ---------------------------------------------------------------------------
@@ -38,6 +38,7 @@ const TONE_COLORS: Record<InvoiceDisplayStatus["tone"], { bg: string; fg: string
   overdue: { bg: "#FBE7E4", fg: "#A3261A" },
   draft: { bg: "#ECEBE6", fg: "#5B6166" },
   void: { bg: "#ECEBE6", fg: "#5B6166" },
+  closed: { bg: "#ECEBE6", fg: "#5B6166" },
 }
 
 function shell(title: string, body: string, accent: string): string {
@@ -134,6 +135,7 @@ export function renderPublicInvoicePage(
     .join(" · ")
 
   const showPay = !!options.payPath && invoice.status === "sent" && !invoice.pendingPayment
+  const paid = invoiceAmountPaid(invoice)
   const processing = invoice.status === "sent" && !!invoice.pendingPayment
   const banner =
     processing
@@ -142,6 +144,8 @@ export function renderPublicInvoicePage(
       ? `<div class="banner" style="background:${TONE_COLORS.paid.bg};color:${TONE_COLORS.paid.fg}">Thank you — your payment is being processed.</div>`
       : invoice.status === "void"
       ? `<div class="banner" style="background:${tone.bg};color:${tone.fg}">This invoice was voided — nothing is owed.</div>`
+      : invoice.status === "closed"
+      ? `<div class="banner" style="background:${tone.bg};color:${tone.fg}">This invoice is closed — nothing more is owed.</div>`
       : invoice.status === "paid"
         ? `<div class="banner" style="background:${tone.bg};color:${tone.fg}">${escapeHtml(status.label)} — thank you!</div>`
         : ""
@@ -179,6 +183,11 @@ export function renderPublicInvoicePage(
   <section class="section">
     <table class="lines"><tbody>${lines}</tbody></table>
     <div class="total"><span>Total</span><strong>${escapeHtml(formatInvoiceMoney(invoice.total))}</strong></div>
+    ${
+      paid > 0 && invoice.status !== "paid"
+        ? `<div class="total"><span>Paid so far</span><span>−${escapeHtml(formatInvoiceMoney(paid))}</span></div>`
+        : ""
+    }
   </section>
   <section class="section">
     <div class="label">Balance due</div>
@@ -193,7 +202,7 @@ export function renderPublicInvoicePage(
     }
   </section>
   ${
-    invoice.note && invoice.status !== "void"
+    invoice.note && invoice.status !== "void" && invoice.status !== "closed"
       ? `<section class="section"><div class="label" style="margin-bottom:8px">${invoice.status === "paid" ? "Note" : showPay ? "Other ways to pay" : "How to pay"}</div><div class="note">${escapeHtml(invoice.note)}</div></section>`
       : ""
   }

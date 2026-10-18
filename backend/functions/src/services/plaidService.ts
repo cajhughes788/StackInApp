@@ -42,13 +42,12 @@ import { matchStripePayout, type StripePayout } from "@shared/stripePayouts"
 import { InvoiceSchema, type InvoiceType } from "@shared/schemas/invoice"
 import {
   allocateInvoiceFee,
-  invoiceCentsByCategory,
   invoiceGroupFee,
-  invoiceIncomeBreakdown,
   matchInvoiceRefundPayment,
   resolveChosenInvoiceGroup,
   type RefundPaymentCandidate,
 } from "@shared/invoiceMatching"
+import { invoiceBalanceDue, invoiceCentsByCategory, invoicePaymentPurposeFor } from "@shared/invoicePayments"
 import { sendTransactionNotification } from "./pushNotificationService"
 import { suggestCategoriesWithAi, type AiCategoryRequest } from "./aiCategorySuggestion"
 import { PLAID_CLIENT_ID, PLAID_SECRET, PLAID_ENV, PLAID_TOKEN_ENCRYPTION_KEY } from "../secrets"
@@ -1876,15 +1875,16 @@ async function confirmIncomeTransaction(
 
 const PROCESSING_FEE_EXPENSE_ACCOUNT = "Payment Processing Fees"
 
-// A deposit that pays invoices (pending.invoiceMatch): one Entry per
-// invoice for its full amount, dated the day the money arrived, plus a
-// processing-fee Expense when the payout came in net of fees — gross income
-// and a separate fee, the way a processor's 1099-K reports it. Called with
-// the transaction already claimed, so every failure releases the claim.
+// A deposit that pays invoices (pending.invoiceMatch): one payment per
+// invoice through the payment engine, each its own Entry dated the day the
+// money arrived, plus one processing-fee Expense when the payout came in net
+// of fees — gross income and a separate fee, the way a processor's 1099-K
+// reports it. Called with the transaction already claimed, so every failure
+// releases the claim.
 //
-// The invoices are claimed first (sent → paid, in one transaction) so a
-// concurrent "mark paid" or a second deposit can't pay them too; if booking
-// fails after that, they're put back to "sent".
+// The payments are claimed together first, so a concurrent payment or a
+// second deposit can't pay the same invoices; if booking fails after that,
+// they're released.
 async function confirmInvoicePayment(
   workspaceId: string,
   uid: string,
@@ -1917,79 +1917,64 @@ async function confirmInvoicePayment(
   const paymentMethod =
     paymentMethodOverride ?? pending.suggestedPaymentMethod ?? suggestPlaidIncomePaymentMethod(pending.merchantName, pending.rawName)
   const feeShares = allocateInvoiceFee(group, feeAmount)
-  const invoiceRefs = group.map((invoiceRef) => invoicesCol(workspaceId).doc(invoiceRef.invoiceId))
+  const paymentId = `plaid_${pending.plaidTransactionId}`
+  const engine = await import("./invoicePaymentEngine.js")
 
-  let invoices: InvoiceType[]
+  // One payment per invoice, claimed together so a concurrent payment can't
+  // take any of them. The invoice is matched on what it had left to pay
+  // (findInvoiceMatchForDeposit), so each payment is that amount.
+  let claims: Awaited<ReturnType<typeof engine.claimInvoicePayments>>
   try {
-    invoices = await db.runTransaction(async (txn) => {
-      const snaps = await txn.getAll(...invoiceRefs)
-      const current = snaps.map((snap, index) => {
-        if (!snap.exists) throw new NotFoundError(`Invoice #${group[index].number} no longer exists.`)
-        const invoice = InvoiceSchema.parse(snap.data())
-        if (invoice.status !== "sent") throw new ConflictError(`Invoice #${invoice.number} is no longer open.`)
-        if (invoice.pendingPaymentAt) {
-          throw new ConflictError(`Invoice #${invoice.number} already has a bank payment clearing through Stripe.`)
+    const snaps = await db.getAll(...group.map((invoiceRef) => invoicesCol(workspaceId).doc(invoiceRef.invoiceId)))
+    claims = await engine.claimInvoicePayments(
+      workspaceId,
+      group.map((invoiceRef, index) => {
+        const parsed = snaps[index].exists ? InvoiceSchema.safeParse(snaps[index].data()) : null
+        const current = parsed?.success ? parsed.data : null
+        // (A payment from this deposit already on it is a resumed confirm.)
+        const resumed = current?.payments.some((p) => p.id === paymentId) ?? false
+        if (current && !resumed && current.status === "sent" && Math.round(invoiceBalanceDue(current) * 100) !== Math.round(invoiceRef.amount * 100)) {
+          throw new ConflictError(`Invoice #${invoiceRef.number} changed since this deposit was matched.`)
         }
-        if (Math.round(invoice.total * 100) !== Math.round(group[index].amount * 100)) {
-          throw new ConflictError(`Invoice #${invoice.number} changed since this deposit was matched.`)
-        }
-        return invoice
-      })
-      const nowIso = new Date().toISOString()
-      current.forEach((invoice, index) => {
-        txn.set(
-          invoiceRefs[index],
-          {
-            status: "paid",
-            // The day the money arrived, same as the Entry — not the day it
-            // was confirmed.
-            paidAt: `${pending.date}T12:00:00.000Z`,
-            paidVia: "bank_match",
-            paidMethod: paymentMethod,
-            paidPlaidTransactionId: pending.plaidTransactionId,
-            paidFeeAmount: feeShares[index],
-            updatedAt: nowIso,
+        return {
+          invoiceId: invoiceRef.invoiceId,
+          payment: {
+            id: paymentId,
+            purpose: current ? invoicePaymentPurposeFor(current, invoiceRef.amount) : "full",
+            amount: invoiceRef.amount,
+            tipAmount: 0,
+            // The day the money arrived, not the day it was confirmed.
+            receivedOn: pending.date,
+            via: "bank_match" as const,
+            method: paymentMethod,
+            plaidTransactionId: pending.plaidTransactionId,
+            stripePaymentIntentId: null,
+            checkoutSessionId: null,
+            feeAmount: feeShares[index],
           },
-          { merge: true }
-        )
+        }
       })
-      return current
-    })
+    )
   } catch (error) {
     await releasePending()
     throw error
   }
 
+  // Claims whose Entry exists: never released (see invoicePaymentEngine).
+  const booked = new Set<string>()
   try {
     const committedEntryIds: string[] = []
-    for (const invoice of invoices) {
-      // Named custom income for an "Other" deposit, like confirmIncomeTransaction —
-      // here the name is the invoice's client.
-      const customIncome =
-        paymentMethod === "other"
-          ? [...invoiceCentsByCategory(invoice.lines)].map(([category, cents]) => ({
-              label: invoice.clientName,
-              amount: cents / 100,
-              category,
-            }))
-          : []
-      const created = await entriesSvc.createEntry(workspaceId, uid, {
-        workspace: "independent",
-        date: pending.date,
-        notes: [`Invoice #${invoice.number}`, invoice.clientName, displayName, "Imported from bank"].join(" | "),
-        // One deterministic id per invoice, so a retry never double-books.
-        clientMutationId: `plaid:${pending.plaidTransactionId}:invoice:${invoice.id}`,
-        independent: {
-          hours: 0,
-          incomeBreakdowns: [invoiceIncomeBreakdown(invoice.lines, paymentMethod)],
-          unreportedCash: 0,
-          unreportedCashTips: 0,
-          customIncome,
-        },
-      })
-      committedEntryIds.push(created.id)
+    const invoices: InvoiceType[] = []
+    for (const claim of claims) {
+      const entryId =
+        claim.payment.entryId ??
+        (await engine.bookPaymentEntry(workspaceId, uid, claim.invoice, claim.payment, [displayName, "Imported from bank"]))
+      booked.add(claim.invoiceId)
+      invoices.push(await engine.attachPaymentEntry(workspaceId, claim.invoiceId, claim.payment.id, entryId))
+      committedEntryIds.push(entryId)
     }
 
+    // One fee for the whole deposit, split across the payments above.
     let feeExpenseId: string | undefined
     if (feeAmount > 0) {
       const created = await expensesSvc.createExpense(workspaceId, uid, {
@@ -2003,12 +1988,7 @@ async function confirmInvoicePayment(
       feeExpenseId = created.id
     }
 
-    const batch = db.batch()
-    invoices.forEach((_, index) => {
-      batch.set(invoiceRefs[index], { paidEntryId: committedEntryIds[index] }, { merge: true })
-    })
-    batch.set(
-      ref,
+    await ref.set(
       {
         status: "confirmed",
         committedEntryIds,
@@ -2017,7 +1997,6 @@ async function confirmInvoicePayment(
       },
       { merge: true }
     )
-    await batch.commit()
 
     // Best-effort, and only when one client paid: a combined check deposit
     // says nothing about who this payer key is.
@@ -2035,31 +2014,12 @@ async function confirmInvoicePayment(
     }
     return { committedEntryIds, feeExpenseId }
   } catch (error) {
-    // Hand the invoices back, but only ones this deposit still holds.
-    await db
-      .runTransaction(async (txn) => {
-        const snaps = await txn.getAll(...invoiceRefs)
-        snaps.forEach((snap, index) => {
-          if (snap.data()?.paidPlaidTransactionId !== pending.plaidTransactionId) return
-          txn.set(
-            invoiceRefs[index],
-            {
-              status: "sent",
-              paidAt: null,
-              paidVia: null,
-              paidMethod: null,
-              paidEntryId: null,
-              paidPlaidTransactionId: null,
-              paidFeeAmount: 0,
-              updatedAt: new Date().toISOString(),
-            },
-            { merge: true }
-          )
-        })
-      })
-      .catch((revertError) => {
-        console.error("plaidService.confirmInvoicePayment: failed to reopen invoices", revertError)
-      })
+    // Hand back the payments nothing was booked for. Booked ones stay; a
+    // second confirm of this deposit resumes them (same payment ids).
+    await engine.releasePaymentClaims(
+      workspaceId,
+      claims.filter((claim) => !booked.has(claim.invoiceId))
+    )
     await releasePending()
     throw error
   }
@@ -2359,34 +2319,17 @@ export async function restoreHiddenTransfer(
 }
 
 // Deleting one Entry of a bank-matched invoice payment undoes the whole
-// match, as if the deposit had never been confirmed: every invoice it paid
-// goes back to "sent", the other invoices' Entries and the processing-fee
+// match, as if the deposit had never been confirmed: its payment comes off
+// every invoice it paid, the other payments' Entries and the processing-fee
 // Expense are deleted, and the deposit returns to review with its match
 // suggestion. Best-effort, step by step — the Entry that started this is
-// already gone. The invoices reopen first, so deleting the sibling Entries
-// doesn't come back here.
+// already gone. The payments come off first, so deleting the sibling
+// Entries doesn't come back here.
 export async function undoInvoiceDepositMatch(workspaceId: string, uid: string, plaidTransactionId: string): Promise<void> {
-  const nowIso = new Date().toISOString()
-  const invoicesSnap = await invoicesCol(workspaceId).where("paidPlaidTransactionId", "==", plaidTransactionId).get()
-  if (!invoicesSnap.empty) {
-    const batch = db.batch()
-    for (const doc of invoicesSnap.docs) {
-      batch.set(
-        doc.ref,
-        {
-          status: "sent",
-          paidAt: null,
-          paidVia: null,
-          paidMethod: null,
-          paidEntryId: null,
-          paidPlaidTransactionId: null,
-          paidFeeAmount: 0,
-          updatedAt: nowIso,
-        },
-        { merge: true }
-      )
-    }
-    await batch.commit()
+  const { removeInvoicePayments } = await import("./invoicePaymentEngine.js")
+  const invoicesSnap = await invoicesCol(workspaceId).where("paymentPlaidTransactionIds", "array-contains", plaidTransactionId).get()
+  for (const doc of invoicesSnap.docs) {
+    await removeInvoicePayments(workspaceId, doc.id, [`plaid_${plaidTransactionId}`])
   }
 
   const ref = pendingTransactionsCol(workspaceId).doc(plaidTransactionId)

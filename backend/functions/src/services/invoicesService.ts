@@ -10,8 +10,8 @@ import {
   InvoiceSettingsSchema,
   InvoiceStatusActionSchema,
   invoiceTotalFromLines,
-  type InvoicePaidMethod,
   type InvoiceSettings,
+  type InvoiceStatusAction,
   type InvoiceType,
 } from "@shared/schemas/invoice"
 import type { PlaidInvoiceMatch } from "@shared/schemas/plaidPendingTransaction"
@@ -21,8 +21,6 @@ import {
   selectOpenInvoiceCandidates,
   MANUAL_PAID_LOOKBACK_DAYS,
   REFUND_PAYMENT_LOOKAHEAD_DAYS,
-  invoiceCentsByCategory,
-  invoiceIncomeBreakdown,
   matchInvoiceRefundPayment,
   selectUnmatchedManualRefunds,
   type InvoiceMatchDeposit,
@@ -30,7 +28,7 @@ import {
   type RefundPaymentCandidate,
 } from "@shared/invoiceMatching"
 import { publicInvoiceUrl } from "@shared/invoiceDisplay"
-import * as entriesSvc from "./entriesService"
+import { invoiceBalanceDue, invoicePaymentPurposeFor } from "@shared/invoicePayments"
 
 export function invoicesCol(workspaceId: string) {
   return db.collection("workspaces").doc(workspaceId).collection("invoices")
@@ -59,11 +57,13 @@ export async function findInvoiceMatchForDeposit(
   deposit: InvoiceMatchDeposit
 ): Promise<PlaidInvoiceMatch | null> {
   const openSnap = await invoicesCol(workspaceId).where("status", "==", "sent").get()
-  const openMatch = pickPaidInvoices(deposit, selectOpenInvoiceCandidates(parseInvoices(openSnap), deposit.date))
+  // A partly paid invoice is matched on what's left of it.
+  const open = parseInvoices(openSnap).map((invoice) => ({ ...invoice, total: invoiceBalanceDue(invoice) }))
+  const openMatch = pickPaidInvoices(deposit, selectOpenInvoiceCandidates(open, deposit.date))
   if (openMatch) return openMatch
 
   const recentlyPaidSnap = await invoicesCol(workspaceId)
-    .where("paidAt", ">=", isoDaysBefore(deposit.date, MANUAL_PAID_LOOKBACK_DAYS + 1))
+    .where("lastManualPaymentOn", ">=", isoDaysBefore(deposit.date, MANUAL_PAID_LOOKBACK_DAYS + 1).slice(0, 10))
     .get()
   const paidMatch = pickPaidInvoices(
     deposit,
@@ -123,10 +123,11 @@ export async function claimRefundForPayment(
 // ---------------------------------------------------------------------------
 // CRUD and status changes
 //
-// Lifecycle: draft → sent → paid, with void for a draft or sent invoice that
-// won't be paid. A paid invoice can't be voided or edited — its income is
-// already booked. Deleting that Entry reopens it instead (see
-// reopenInvoicesForDeletedEntry).
+// Lifecycle: draft → sent → paid, following the payments (a partly paid
+// invoice stays sent). Void ends one with nothing paid; close ends one early
+// and keeps what was paid. A paid invoice can't be voided or edited — its
+// income is booked; deleting a payment's Entry takes that payment off
+// (entriesService.deleteEntry).
 // ---------------------------------------------------------------------------
 
 function counterDoc(workspaceId: string) {
@@ -209,8 +210,8 @@ export async function updateInvoice(workspaceId: string, uid: string, invoiceId:
     if (!snap.exists) throw new NotFoundError("Invoice not found")
     const current = InvoiceSchema.parse(snap.data())
     if (current.status === "paid") throw new ConflictError("A paid invoice can't be edited.")
-    if (current.status === "void") throw new ConflictError("A void invoice can't be edited.")
-    if (current.pendingPaymentAt) {
+    if (current.status === "void" || current.status === "closed") throw new ConflictError(`A ${current.status} invoice can't be edited.`)
+    if (current.pendingPayment) {
       throw new ConflictError("A bank payment for this invoice is still clearing — it can be edited if that payment fails.")
     }
     const lines = patch.lines ?? current.lines
@@ -224,10 +225,16 @@ export async function updateInvoice(workspaceId: string, uid: string, invoiceId:
       updatedAt: new Date().toISOString(),
     }
     if (next.dueDate < next.issueDate) throw new BadRequestError("Due date can't be before the issue date.")
+    // Booked payments never change; the total just has to stay above them.
+    if (current.amountPaid > 0 && Math.round(next.total * 100) <= Math.round(current.amountPaid * 100)) {
+      throw new ConflictError(
+        `${current.amountPaid.toFixed(2)} is already paid — the total has to stay above that. Record the rest as a payment instead.`
+      )
+    }
     // A client's open Checkout would charge the old total.
     const totalChanged = Math.round(next.total * 100) !== Math.round(current.total * 100)
-    staleSessionId = totalChanged ? current.checkoutSessionId : null
-    const invoice = InvoiceSchema.parse(totalChanged ? { ...next, checkoutSessionId: null } : next)
+    staleSessionId = totalChanged ? current.openCheckout?.sessionId ?? null : null
+    const invoice = InvoiceSchema.parse(totalChanged ? { ...next, openCheckout: null } : next)
     txn.set(ref, invoice)
     return invoice
   })
@@ -262,8 +269,11 @@ export async function updateInvoiceStatus(
   const action = parsed.data
   const ref = invoicesCol(workspaceId).doc(invoiceId)
 
-  if (action.action === "mark_paid") {
-    return markInvoicePaidManually(workspaceId, uid, ref, action.paidDate, action.paymentMethod)
+  if (action.action === "record_payment") {
+    return recordManualPayment(workspaceId, uid, invoiceId, action)
+  }
+  if (action.action === "close") {
+    return closeInvoice(workspaceId, ref)
   }
   if (action.action === "share") {
     return shareInvoice(workspaceId, ref)
@@ -283,22 +293,28 @@ export async function updateInvoiceStatus(
     if (!snap.exists) throw new NotFoundError("Invoice not found")
     const current = InvoiceSchema.parse(snap.data())
     const target = action.action === "send" ? "sent" : "void"
-    voidedSessionId = current.checkoutSessionId
+    voidedSessionId = current.openCheckout?.sessionId ?? null
     // Repeating the same action (a client retry) is a no-op, not an error.
     if (current.status === target) return current
     if (action.action === "send" && current.status !== "draft") {
       throw new ConflictError(`A ${current.status} invoice can't be sent.`)
     }
-    if (action.action === "void" && current.pendingPaymentAt) {
+    if (action.action === "void" && current.pendingPayment) {
       throw new ConflictError("A bank payment for this invoice is still clearing — void it if that payment fails.")
     }
     if (action.action === "void" && current.status === "paid") {
       throw new ConflictError("A paid invoice can't be voided — delete its income entry first, which reopens it.")
     }
+    if (action.action === "void" && current.payments.length > 0) {
+      throw new ConflictError("Part of this invoice is paid — close it instead, which keeps what was paid.")
+    }
+    if (action.action === "void" && current.status === "closed") {
+      throw new ConflictError("A closed invoice can't be voided.")
+    }
     const next = InvoiceSchema.parse({
       ...current,
       status: target,
-      checkoutSessionId: target === "void" ? null : current.checkoutSessionId,
+      openCheckout: target === "void" ? null : current.openCheckout,
       updatedAt: new Date().toISOString(),
     })
     txn.set(ref, next)
@@ -310,128 +326,68 @@ export async function updateInvoiceStatus(
   return { invoice }
 }
 
-// Paid outside the bank feed. Same claim-then-book shape as
-// confirmInvoicePayment in plaidService: the invoice flips to paid first so
-// a matching deposit can't pay it too, then the Entry is booked, and the
-// invoice is reopened if that fails. paidAt is the payment date, which is
-// what the "already recorded?" check on later deposits keys off.
-async function markInvoicePaidManually(
+// Paid outside the bank feed (cash, check, Venmo): any amount up to the
+// balance, plus a tip, booked through the payment engine. The payment date
+// is what the "already recorded?" check on later deposits keys off.
+async function recordManualPayment(
   workspaceId: string,
   uid: string,
-  ref: FirebaseFirestore.DocumentReference,
-  paidDate: string,
-  paidMethod: InvoicePaidMethod
+  invoiceId: string,
+  action: Extract<InvoiceStatusAction, { action: "record_payment" }>
 ): Promise<{ invoice: InvoiceType; entryId: string }> {
   await assertIndependentWorkspace(workspaceId)
-  const claim = await db.runTransaction(async (txn) => {
+  const snap = await invoicesCol(workspaceId).doc(invoiceId).get()
+  if (!snap.exists) throw new NotFoundError("Invoice not found")
+  const current = InvoiceSchema.parse(snap.data())
+  if (action.paidDate < current.issueDate) throw new BadRequestError("The payment date can't be before the issue date.")
+  const { applyInvoicePayment } = await import("./invoicePaymentEngine.js")
+  const { invoice, entryId } = await applyInvoicePayment(
+    workspaceId,
+    uid,
+    {
+      invoiceId,
+      payment: {
+        id: `manual_${action.clientMutationId}`,
+        purpose: invoicePaymentPurposeFor(current, action.amount),
+        amount: action.amount,
+        tipAmount: action.tipAmount,
+        receivedOn: action.paidDate,
+        via: "manual",
+        method: action.paymentMethod,
+        plaidTransactionId: null,
+        stripePaymentIntentId: null,
+        checkoutSessionId: null,
+        feeAmount: 0,
+      },
+    },
+    { notes: [action.paymentMethod === "check" ? "Paid by check" : null] }
+  )
+  return { invoice, entryId }
+}
+
+// Ends a partly paid invoice early. What was paid stays income; nothing
+// more is owed, so it's no longer payable or matched.
+async function closeInvoice(workspaceId: string, ref: FirebaseFirestore.DocumentReference): Promise<{ invoice: InvoiceType }> {
+  let staleSessionId: string | null = null
+  const invoice = await db.runTransaction(async (txn) => {
     const snap = await txn.get(ref)
     if (!snap.exists) throw new NotFoundError("Invoice not found")
     const current = InvoiceSchema.parse(snap.data())
-    if (current.status === "paid") return { alreadyPaid: true as const, invoice: current, previousStatus: current.status }
-    if (current.status === "void") throw new ConflictError("A void invoice can't be marked paid.")
-    if (current.pendingPaymentAt) {
-      throw new ConflictError("A bank payment for this invoice is still clearing — it's marked paid when it lands.")
+    if (current.status === "closed") return current
+    if (current.status !== "sent" || current.payments.length === 0) {
+      throw new ConflictError("Only a partly paid invoice can be closed — void one with nothing paid.")
     }
-    if (paidDate < current.issueDate) throw new BadRequestError("The payment date can't be before the issue date.")
-    const next = InvoiceSchema.parse({
-      ...current,
-      status: "paid",
-      paidAt: `${paidDate}T12:00:00.000Z`,
-      paidVia: "manual",
-      paidMethod,
-      paidPlaidTransactionId: null,
-      paidFeeAmount: 0,
-      updatedAt: new Date().toISOString(),
-    })
+    if (current.pendingPayment) {
+      throw new ConflictError("A bank payment for this invoice is still clearing — close it once that settles.")
+    }
+    staleSessionId = current.openCheckout?.sessionId ?? null
+    const nowIso = new Date().toISOString()
+    const next = InvoiceSchema.parse({ ...current, status: "closed", closedAt: nowIso, openCheckout: null, updatedAt: nowIso })
     txn.set(ref, next)
-    return { alreadyPaid: false as const, invoice: next, previousStatus: current.status }
+    return next
   })
-  if (claim.alreadyPaid) {
-    if (claim.invoice.paidVia === "manual" && claim.invoice.paidEntryId) {
-      return { invoice: claim.invoice, entryId: claim.invoice.paidEntryId }
-    }
-    throw new ConflictError(`Invoice #${claim.invoice.number} is already paid.`)
-  }
-
-  const invoice = claim.invoice
-  // See InvoicePaidMethodSchema: a check is booked as named Other income.
-  const paymentMethod = paidMethod === "check" ? "other" : paidMethod
-  try {
-    const customIncome =
-      paymentMethod === "other"
-        ? [...invoiceCentsByCategory(invoice.lines)].map(([category, cents]) => ({
-            label: invoice.clientName,
-            amount: cents / 100,
-            category,
-          }))
-        : []
-    const created = await entriesSvc.createEntry(workspaceId, uid, {
-      workspace: "independent",
-      date: paidDate,
-      notes: [`Invoice #${invoice.number}`, invoice.clientName, paidMethod === "check" ? "Paid by check" : null]
-        .filter(Boolean)
-        .join(" | "),
-      clientMutationId: `invoice_${invoice.id}_paid`,
-      independent: {
-        hours: 0,
-        incomeBreakdowns: [invoiceIncomeBreakdown(invoice.lines, paymentMethod)],
-        unreportedCash: 0,
-        unreportedCashTips: 0,
-        customIncome,
-      },
-    })
-    const paid = InvoiceSchema.parse({ ...invoice, paidEntryId: created.id, updatedAt: new Date().toISOString() })
-    await ref.set(paid)
-    return { invoice: paid, entryId: created.id }
-  } catch (error) {
-    await ref
-      .set(
-        {
-          status: claim.previousStatus,
-          paidAt: null,
-          paidVia: null,
-          paidMethod: null,
-          paidEntryId: null,
-          updatedAt: new Date().toISOString(),
-        },
-        { merge: true }
-      )
-      .catch((revertError) => console.error("invoicesService.markInvoicePaidManually: failed to reopen invoice", revertError))
-    throw error
-  }
-}
-
-// Called after an Entry is deleted: an invoice whose payment that Entry
-// booked goes back to "sent", since its income no longer counts anywhere.
-// Best-effort — the Entry is already gone either way.
-export async function reopenInvoicesForDeletedEntry(workspaceId: string, entryId: string): Promise<void> {
-  const snap = await invoicesCol(workspaceId).where("paidEntryId", "==", entryId).get()
-  if (snap.empty) return
-  const batch = db.batch()
-  const nowIso = new Date().toISOString()
-  for (const doc of snap.docs) {
-    batch.set(
-      doc.ref,
-      {
-        status: "sent",
-        paidAt: null,
-        paidVia: null,
-        paidMethod: null,
-        paidEntryId: null,
-        paidPlaidTransactionId: null,
-        paidFeeAmount: 0,
-        updatedAt: nowIso,
-      },
-      { merge: true }
-    )
-  }
-  await batch.commit()
-  // A deposit hidden as this payment arriving has nothing booked for it now.
-  const manual = snap.docs.filter((doc) => doc.data()?.paidVia === "manual").map((doc) => doc.id)
-  if (manual.length > 0) {
-    const { returnDepositsForReopenedInvoices } = await import("./plaidService.js")
-    await returnDepositsForReopenedInvoices(workspaceId, manual)
-  }
+  if (staleSessionId) await expireCheckoutSession(workspaceId, staleSessionId)
+  return { invoice }
 }
 
 // ---------------------------------------------------------------------------
@@ -546,8 +502,8 @@ export async function deleteInvoiceSharesForWorkspace(workspaceId: string): Prom
 }
 
 // Best-effort: closes a client's open Stripe Checkout for an invoice whose
-// total changed or that was voided.
-async function expireCheckoutSession(workspaceId: string, sessionId: string): Promise<void> {
+// total or balance changed, or that was voided or closed.
+export async function expireCheckoutSession(workspaceId: string, sessionId: string): Promise<void> {
   try {
     const { getStripe, readPaymentAccount } = await import("./paymentAccountsService.js")
     const account = await readPaymentAccount(workspaceId)

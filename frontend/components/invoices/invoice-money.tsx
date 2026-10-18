@@ -8,8 +8,15 @@ import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
 import { updatePaymentAccount } from "@/lib/api/invoicesApi"
 import { formatInvoiceDate, formatInvoiceMoney } from "@shared/invoiceDisplay"
-import { invoiceAmountPaid, invoiceFeesPaid, invoiceLatestPayment, invoiceTipsReceived } from "@shared/invoicePayments"
-import { invoiceRefundedTotal, type InvoiceType } from "@shared/schemas/invoice"
+import { paymentHowLabel } from "@/components/invoices/invoice-ui"
+import {
+  invoiceAmountPaid,
+  invoiceBalanceDue,
+  invoiceFeesPaid,
+  invoicePaymentRefundable,
+  invoiceTipsReceived,
+} from "@shared/invoicePayments"
+import { invoiceRefundedTotal, type InvoicePayment, type InvoiceType } from "@shared/schemas/invoice"
 
 // What happened to a paid invoice's money: the payment, any refunds, a
 // dispute, Stripe's fee, and what the user keeps (invoice detail page).
@@ -33,23 +40,58 @@ export function invoiceKeptAmount(invoice: InvoiceType): number {
   return (received - Math.round(invoiceRefundedTotal(invoice) * 100) - Math.round(disputed * 100)) / 100
 }
 
+// Worth its own card once there's more to it than one plain payment in full.
 export function hasMoneyHistory(invoice: InvoiceType): boolean {
-  return invoice.status === "paid" && (invoice.refunds.length > 0 || !!invoice.dispute)
+  if (invoice.payments.length === 0) return false
+  return (
+    invoice.status !== "paid" ||
+    invoice.payments.length > 1 ||
+    invoice.refunds.length > 0 ||
+    !!invoice.dispute ||
+    invoiceTipsReceived(invoice) > 0
+  )
 }
 
-export function InvoiceMoneyBreakdown({ invoice }: { invoice: InvoiceType }) {
+function paymentLabel(payment: InvoicePayment): string {
+  const what =
+    payment.purpose === "deposit" ? "Deposit" : payment.purpose === "balance" ? "Balance" : payment.purpose === "partial" ? "Payment" : "Paid"
+  return `${what} ${shortDate(payment.receivedOn)} · ${paymentHowLabel(payment)}`
+}
+
+export function InvoiceMoneyBreakdown({
+  invoice,
+  onRefund,
+}: {
+  invoice: InvoiceType
+  // Refund one payment; shown per payment when there are several.
+  onRefund?: (paymentId: string) => void
+}) {
   const dispute = invoice.dispute
   const disputedOut = dispute && dispute.fundsWithdrawn && dispute.status !== "won"
   const fees = invoiceFeesPaid(invoice) + (dispute?.feeAmount ?? 0)
-  const latest = invoiceLatestPayment(invoice)
-  const received = invoiceAmountPaid(invoice) + invoiceTipsReceived(invoice)
   const keep = invoiceKeptAmount(invoice) - fees
+  const balance = invoiceBalanceDue(invoice)
   return (
     <section aria-label="Money" className="rounded-[18px] border border-card-border bg-card px-4 py-1 text-sm">
-      <div className="flex justify-between gap-3 border-b border-border py-3">
-        <span>Paid {latest ? shortDate(latest.receivedOn) : ""}</span>
-        <span className="shrink-0 whitespace-nowrap tabular-nums">{formatInvoiceMoney(received)}</span>
-      </div>
+      {invoice.payments.map((payment) => (
+        <div key={payment.id} className="border-b border-border py-3">
+          <div className="flex justify-between gap-3">
+            <span className="min-w-0">{paymentLabel(payment)}</span>
+            <span className="shrink-0 whitespace-nowrap tabular-nums">{formatInvoiceMoney(payment.amount)}</span>
+          </div>
+          {payment.tipAmount > 0 ? (
+            <div className="mt-1 flex justify-between gap-3 text-muted-foreground">
+              <span>Tip</span>
+              <span className="shrink-0 whitespace-nowrap tabular-nums">{formatInvoiceMoney(payment.tipAmount)}</span>
+            </div>
+          ) : null}
+          {onRefund && invoice.payments.length > 1 && invoicePaymentRefundable(invoice, payment.id) > 0 ? (
+            <button type="button" className="mt-1 text-xs font-medium text-primary" onClick={() => onRefund(payment.id)}>
+              {payment.via === "online" ? "Refund" : "Record a refund"}
+            </button>
+          ) : null}
+        </div>
+      ))}
       {invoice.refunds.map((refund) => (
         <div key={refund.id} className="flex justify-between gap-3 border-b border-border py-3">
           <span>
@@ -70,7 +112,7 @@ export function InvoiceMoneyBreakdown({ invoice }: { invoice: InvoiceType }) {
       ) : null}
       {fees > 0 ? (
         <div className="flex justify-between gap-3 border-b border-border py-3 text-muted-foreground">
-          <span>Stripe fees{invoice.refunds.length > 0 ? " (not returned)" : ""}</span>
+          <span>Processing fees{invoice.refunds.length > 0 ? " (not returned)" : ""}</span>
           <span className="shrink-0 whitespace-nowrap tabular-nums">−{formatInvoiceMoney(fees)}</span>
         </div>
       ) : null}
@@ -78,6 +120,12 @@ export function InvoiceMoneyBreakdown({ invoice }: { invoice: InvoiceType }) {
         <span>You keep</span>
         <span className="shrink-0 whitespace-nowrap tabular-nums">{formatInvoiceMoney(Math.max(0, keep))}</span>
       </div>
+      {balance > 0 ? (
+        <div className="flex justify-between gap-3 border-t border-border py-3 text-muted-foreground">
+          <span>Still due</span>
+          <span className="shrink-0 whitespace-nowrap tabular-nums">{formatInvoiceMoney(balance)}</span>
+        </div>
+      ) : null}
     </section>
   )
 }

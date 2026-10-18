@@ -3,16 +3,14 @@ import { DateTime } from "luxon"
 import { db } from "../admin"
 import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "../lib/httpErrors"
 import { assertWorkspaceMembership } from "../lib/workspaceMembership"
-import type { IncomeCategory, PaymentMethod, RefundInfo } from "@shared/schemas/entry"
+import type { RefundInfo } from "@shared/schemas/entry"
+import { InvoiceSchema, type InvoiceDispute, type InvoicePayment, type InvoiceRefund, type InvoiceType } from "@shared/schemas/invoice"
 import {
-  InvoiceSchema,
-  invoiceRefundableAmount,
-  type InvoiceDispute,
-  type InvoicePaidMethod,
-  type InvoiceRefund,
-  type InvoiceType,
-} from "@shared/schemas/invoice"
-import { invoiceCentsByCategory } from "@shared/invoiceMatching"
+  entryPaymentMethodFor,
+  invoicePaymentRefundable,
+  invoiceRefundTarget,
+  refundCentsByCategory,
+} from "@shared/invoicePayments"
 import { invoicesCol } from "./invoicesService"
 import { getStripe, readPaymentAccount } from "./paymentAccountsService"
 import * as entriesSvc from "./entriesService"
@@ -51,45 +49,24 @@ async function localDate(workspaceId: string, seconds: number): Promise<string> 
   return DateTime.fromSeconds(seconds).setZone(zone).toISODate() ?? new Date(seconds * 1000).toISOString().slice(0, 10)
 }
 
-// The Entry payment method the invoice's payment was booked under, so the
-// refund comes out of the same stream (Card / POS, Zelle, a named payer…).
-function entryMethodFor(invoice: InvoiceType): PaymentMethod {
-  const method: InvoicePaidMethod | null = invoice.paidMethod
-  if (!method) return invoice.paidVia === "online" ? "pos" : "other"
-  if (method === "check") return "other"
-  if (method === "card") return "pos"
-  return method
-}
-
-// Spreads a refund across the invoice's categories in proportion, largest
-// remainder last, so the parts add up to the cent.
-function refundCentsByCategory(invoice: InvoiceType, refundCents: number): Array<[IncomeCategory, number]> {
-  const byCategory = [...invoiceCentsByCategory(invoice.lines)].filter(([, cents]) => cents > 0)
-  const totalCents = byCategory.reduce((sum, [, cents]) => sum + cents, 0)
-  if (totalCents <= 0) return [["services", refundCents]]
-  let allocated = 0
-  return byCategory.map(([category, cents], index) => {
-    const share = index === byCategory.length - 1 ? refundCents - allocated : Math.floor((refundCents * cents) / totalCents)
-    allocated += share
-    return [category, share]
-  })
-}
-
-// One refund (or dispute) Entry against an invoice: negative amounts, or
-// positive for a reversed dispute. "Other" money gets matching named custom
-// income so the client's own stream nets out too.
+// One refund (or dispute) Entry against one payment: negative amounts, or
+// positive for a reversed dispute, out of the same stream and categories
+// the payment was booked under (its tip included, in proportion). "Other"
+// money gets matching named custom income so the client's own stream nets
+// out too.
 async function bookRefundEntry(params: {
   workspaceId: string
   invoice: InvoiceType
+  payment: InvoicePayment
   cents: number
   date: string
   clientMutationId: string
   info: Omit<RefundInfo, "invoiceId" | "invoiceNumber" | "clientName">
 }): Promise<string> {
-  const { workspaceId, invoice, cents, date, clientMutationId, info } = params
+  const { workspaceId, invoice, payment, cents, date, clientMutationId, info } = params
   const sign = info.reason === "dispute_reversed" ? 1 : -1
-  const method = entryMethodFor(invoice)
-  const parts = refundCentsByCategory(invoice, cents)
+  const method = entryPaymentMethodFor(payment.method)
+  const parts = refundCentsByCategory(invoice.lines, payment, cents)
   const breakdown: Record<string, unknown> = { paymentMethod: method }
   for (const [category, partCents] of parts) breakdown[category] = (sign * partCents) / 100
   const label =
@@ -135,7 +112,7 @@ async function bookRefundEntry(params: {
 async function recordInvoiceRefund(
   workspaceId: string,
   invoiceId: string,
-  refund: { key: string; cents: number; date: string; reason: ManualRefundReason; stripeRefundId: string | null }
+  refund: { key: string; paymentId: string; cents: number; date: string; reason: ManualRefundReason; stripeRefundId: string | null }
 ): Promise<InvoiceType> {
   const ref = invoicesCol(workspaceId).doc(invoiceId)
   const snap = await ref.get()
@@ -143,10 +120,13 @@ async function recordInvoiceRefund(
   const invoice = InvoiceSchema.parse(snap.data())
   const existing = invoice.refunds.find((r) => r.id === refund.key)
   if (existing?.entryId) return invoice
+  const payment = invoice.payments.find((p) => p.id === refund.paymentId)
+  if (!payment) throw new NotFoundError("That payment isn't on this invoice anymore.")
 
   const entryId = await bookRefundEntry({
     workspaceId,
     invoice,
+    payment,
     cents: refund.cents,
     date: refund.date,
     clientMutationId: `refund_${refund.key}`,
@@ -167,6 +147,8 @@ async function recordInvoiceRefund(
           date: refund.date,
           reason: refund.reason,
           stripeRefundId: refund.stripeRefundId,
+          plaidTransactionId: null,
+          paymentId: refund.paymentId,
         },
       ],
       updatedAt: new Date().toISOString(),
@@ -190,7 +172,7 @@ export async function refundInvoice(
   workspaceId: string,
   uid: string,
   invoiceId: string,
-  request: { amount: number; reason: ManualRefundReason; clientMutationId: string }
+  request: { paymentId?: string; amount: number; reason: ManualRefundReason; clientMutationId: string }
 ): Promise<InvoiceType> {
   await assertWorkspaceMembership(workspaceId, uid)
   // Refunds move or account for real money: owner only.
@@ -199,19 +181,24 @@ export async function refundInvoice(
   const snap = await invoicesCol(workspaceId).doc(invoiceId).get()
   if (!snap.exists) throw new NotFoundError("Invoice not found")
   const invoice = InvoiceSchema.parse(snap.data())
-  if (invoice.status !== "paid") throw new ConflictError("Only a paid invoice can be refunded.")
+  // Refunds come off one payment: the one named, or the latest with
+  // anything left to give back.
+  const payment = request.paymentId
+    ? invoice.payments.find((p) => p.id === request.paymentId) ?? null
+    : invoiceRefundTarget(invoice)
+  if (!payment) throw new ConflictError("There's no payment on this invoice to refund.")
   const cents = toCents(request.amount)
-  if (cents > toCents(invoiceRefundableAmount(invoice))) {
-    throw new BadRequestError("That's more than is left to refund on this invoice.")
+  if (cents > toCents(invoicePaymentRefundable(invoice, payment.id))) {
+    throw new BadRequestError("That's more than is left to refund on this payment.")
   }
   const today = await localDate(workspaceId, Math.floor(Date.now() / 1000))
 
-  if (invoice.paidVia === "online" && invoice.paidStripePaymentIntentId) {
+  if (payment.via === "online" && payment.stripePaymentIntentId) {
     const account = await readPaymentAccount(workspaceId)
     if (!account) throw new ConflictError("This workspace's Stripe account isn't connected anymore.")
     const refund = await getStripe().refunds.create(
       {
-        payment_intent: invoice.paidStripePaymentIntentId,
+        payment_intent: payment.stripePaymentIntentId,
         amount: cents,
         reason: STRIPE_REASON[request.reason],
         metadata: { workspaceId, invoiceId, source: "521" },
@@ -224,6 +211,7 @@ export async function refundInvoice(
     // Same key the charge.refunded webhook uses, so it books once.
     return recordInvoiceRefund(workspaceId, invoiceId, {
       key: refund.id,
+      paymentId: payment.id,
       cents,
       date: today,
       reason: request.reason,
@@ -238,6 +226,7 @@ export async function refundInvoice(
   const key = `manual_${request.clientMutationId}`
   const recorded = await recordInvoiceRefund(workspaceId, invoiceId, {
     key,
+    paymentId: payment.id,
     cents,
     date: today,
     reason: request.reason,
@@ -268,24 +257,21 @@ async function workspaceForStripeAccount(stripeAccountId: string): Promise<strin
   return (snap.data()?.workspaceId as string | undefined) ?? null
 }
 
-// The invoice an online payment paid — only the payment that actually paid
-// it (a duplicate payment 521 refunded itself was never booked, so its
-// refund mustn't be either).
+// The invoice payment an online payment became — only one that was booked
+// (a duplicate payment 521 refunded itself never was, so its refund
+// mustn't be either).
 async function invoiceForPayment(
   stripeAccountId: string,
   paymentIntentId: string | null
-): Promise<{ workspaceId: string; invoice: InvoiceType } | null> {
+): Promise<{ workspaceId: string; invoice: InvoiceType; payment: InvoicePayment } | null> {
   if (!paymentIntentId) return null
   const workspaceId = await workspaceForStripeAccount(stripeAccountId)
   if (!workspaceId) return null
-  const paymentIntent = await getStripe().paymentIntents.retrieve(paymentIntentId, {}, { stripeAccount: stripeAccountId })
-  const invoiceId = paymentIntent.metadata?.invoiceId
-  if (!invoiceId || paymentIntent.metadata?.workspaceId !== workspaceId) return null
-  const snap = await invoicesCol(workspaceId).doc(invoiceId).get()
-  if (!snap.exists) return null
-  const invoice = InvoiceSchema.parse(snap.data())
-  if (invoice.paidStripePaymentIntentId !== paymentIntentId) return null
-  return { workspaceId, invoice }
+  const snap = await invoicesCol(workspaceId).where("paymentIntentIds", "array-contains", paymentIntentId).limit(1).get()
+  const parsed = snap.docs[0] ? InvoiceSchema.safeParse(snap.docs[0].data()) : null
+  if (!parsed?.success) return null
+  const payment = parsed.data.payments.find((p) => p.stripePaymentIntentId === paymentIntentId)
+  return payment ? { workspaceId, invoice: parsed.data, payment } : null
 }
 
 function intentId(value: string | { id: string } | null | undefined): string | null {
@@ -303,6 +289,7 @@ export async function handleChargeRefunded(stripeAccountId: string, charge: Stri
     if (target.invoice.refunds.some((r) => r.id === refund.id)) continue
     target.invoice = await recordInvoiceRefund(target.workspaceId, target.invoice.id, {
       key: refund.id,
+      paymentId: target.payment.id,
       cents: refund.amount,
       date: await localDate(target.workspaceId, refund.created),
       reason: refund.reason === "duplicate" ? "duplicate" : refund.reason === "requested_by_customer" ? "requested_by_client" : "other",
@@ -334,7 +321,7 @@ function disputeStatus(status: Stripe.Dispute.Status): InvoiceDispute["status"] 
 export async function handleDisputeEvent(stripeAccountId: string, dispute: Stripe.Dispute, eventType: string): Promise<void> {
   const target = await invoiceForPayment(stripeAccountId, intentId(dispute.payment_intent))
   if (!target) return
-  const { workspaceId, invoice } = target
+  const { workspaceId, invoice, payment } = target
   const ownerUid = await workspaceOwner(workspaceId)
   const transactions = (dispute.balance_transactions ?? []).filter(
     (bt): bt is Stripe.BalanceTransaction => typeof bt === "object" && bt !== null
@@ -349,6 +336,7 @@ export async function handleDisputeEvent(stripeAccountId: string, dispute: Strip
     await bookRefundEntry({
       workspaceId,
       invoice,
+      payment,
       cents: dispute.amount,
       date,
       clientMutationId: `dispute_${dispute.id}`,
@@ -370,6 +358,7 @@ export async function handleDisputeEvent(stripeAccountId: string, dispute: Strip
     await bookRefundEntry({
       workspaceId,
       invoice,
+      payment,
       cents: dispute.amount,
       date,
       clientMutationId: `dispute_${dispute.id}_reversed`,
@@ -397,6 +386,7 @@ export async function handleDisputeEvent(stripeAccountId: string, dispute: Strip
       : null,
     fundsWithdrawn: withdrawn.length > 0,
     feeAmount: Math.max(0, withdrawnFeeCents - returnedFeeCents) / 100,
+    paymentId: payment.id,
     updatedAt: new Date().toISOString(),
   }
   const previousStatus = invoice.dispute?.stripeDisputeId === dispute.id ? invoice.dispute.status : null

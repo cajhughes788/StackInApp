@@ -7,7 +7,7 @@ import {
   invoiceDisplayStatus,
   invoiceFileName,
 } from "@shared/invoiceDisplay"
-import { invoiceBalanceDue } from "@shared/invoicePayments"
+import { invoiceAmountPaid, invoiceBalanceDue } from "@shared/invoicePayments"
 import { DEFAULT_INVOICE_ACCENT_COLOR, type InvoiceSettings, type InvoiceType } from "@shared/schemas/invoice"
 import { sharePdfBlob } from "@/lib/documentExport"
 
@@ -142,6 +142,13 @@ export async function buildInvoicePdf(invoice: InvoiceType, settings: InvoiceSet
   pdf.text("Total", right - 140, y)
   pdf.setFont("helvetica", "bold")
   pdf.text(formatInvoiceMoney(invoice.total), right, y, { align: "right" })
+  const paid = invoiceAmountPaid(invoice)
+  if (paid > 0 && invoice.status !== "paid") {
+    y += 18
+    pdf.setFont("helvetica", "normal")
+    pdf.text("Paid so far", right - 140, y)
+    pdf.text(`−${formatInvoiceMoney(paid)}`, right, y, { align: "right" })
+  }
   y += 30
   pdf.setFont("helvetica", "bold").setFontSize(8).setTextColor(...MUTED)
   pdf.text("BALANCE DUE", right, y, { align: "right" })

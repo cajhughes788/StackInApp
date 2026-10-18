@@ -10,6 +10,13 @@ const assert = require("node:assert/strict");
 
 const { InvoiceSchema } = require("../shared/schemas/invoice.ts");
 const {
+  entryPaymentMethodFor,
+  invoiceLedgerFields,
+  invoicePaymentEntryMutationId,
+  invoicePaymentPurposeFor,
+  invoiceRefundTarget,
+  invoiceWithPayments,
+  refundCentsByCategory,
   invoiceAmountPaid,
   invoiceBalanceDue,
   invoiceDueNow,
@@ -27,8 +34,11 @@ function run(name, fn) {
   process.stdout.write(`ok - ${name}\n`);
 }
 
-// A stored invoice doc as phase-1 write paths leave it: single-payment
-// fields only, no ledger.
+function payment(id, amount, extra = {}) {
+  return { id, purpose: "partial", amount, tipAmount: 0, receivedOn: "2026-10-05", via: "manual", method: "zelle", entryId: `e_${id}`, plaidTransactionId: null, stripePaymentIntentId: null, checkoutSessionId: null, feeAmount: 0, createdAt: "x", ...extra };
+}
+
+// A stored invoice doc: open, no payments yet.
 function doc(overrides = {}) {
   return {
     id: "inv1",
@@ -49,151 +59,120 @@ function doc(overrides = {}) {
   };
 }
 
-const paidManual = {
-  status: "paid",
-  paidAt: "2026-10-10T12:00:00.000Z",
-  paidVia: "manual",
-  paidMethod: "zelle",
-  paidEntryId: "e1",
-};
-
 /* --------------------------------------------------------
- * Legacy → ledger conversion
+ * Schema rules — payments are the source of truth
  * -------------------------------------------------------- */
 
-run("draft, sent and void invoices have no payments", () => {
-  for (const status of ["draft", "sent", "void"]) {
-    const invoice = InvoiceSchema.parse(doc({ status }));
-    assert.deepEqual(invoice.payments, []);
-    assert.equal(invoice.amountPaid, 0);
-    assert.deepEqual(invoice.paymentEntryIds, []);
-    assert.equal(invoice.pendingPayment, null);
-  }
-});
-
-run("a manually paid invoice becomes one legacy payment for the total", () => {
-  const invoice = InvoiceSchema.parse(doc(paidManual));
-  assert.equal(invoice.payments.length, 1);
-  const [payment] = invoice.payments;
-  assert.equal(payment.id, "legacy");
-  assert.equal(payment.purpose, "full");
-  assert.equal(payment.amount, 800);
-  assert.equal(payment.tipAmount, 0);
-  assert.equal(payment.receivedOn, "2026-10-10");
-  assert.equal(payment.via, "manual");
-  assert.equal(payment.method, "zelle");
-  assert.equal(payment.entryId, "e1");
-  assert.equal(invoice.amountPaid, 800);
-  assert.deepEqual(invoice.paymentEntryIds, ["e1"]);
-  assert.equal(invoice.lastManualPaymentOn, "2026-10-10");
-});
-
-run("a bank-matched payment keeps its deposit, fee and method", () => {
-  const invoice = InvoiceSchema.parse(
-    doc({
-      status: "paid",
-      paidAt: "2026-10-12T12:00:00.000Z",
-      paidVia: "bank_match",
-      paidMethod: "pos",
-      paidEntryId: "e2",
-      paidPlaidTransactionId: "txn_1",
-      paidFeeAmount: 24.1,
-    })
-  );
-  const [payment] = invoice.payments;
-  assert.equal(payment.via, "bank_match");
-  assert.equal(payment.plaidTransactionId, "txn_1");
-  assert.equal(payment.feeAmount, 24.1);
-  assert.deepEqual(invoice.paymentPlaidTransactionIds, ["txn_1"]);
-  assert.equal(invoice.lastManualPaymentOn, null);
-});
-
-run("an online payment keeps its PaymentIntent and Checkout session", () => {
-  const invoice = InvoiceSchema.parse(
-    doc({
-      status: "paid",
-      paidAt: "2026-10-12T18:30:00.000Z",
-      paidVia: "online",
-      paidMethod: null,
-      paidEntryId: "e3",
-      paidStripePaymentIntentId: "pi_1",
-      checkoutSessionId: "cs_1",
-      paidFeeAmount: 23.5,
-    })
-  );
-  const [payment] = invoice.payments;
-  assert.equal(payment.via, "online");
-  // No method recorded on older online payments: booked under Card / POS.
-  assert.equal(payment.method, "pos");
-  assert.equal(payment.stripePaymentIntentId, "pi_1");
-  assert.equal(payment.checkoutSessionId, "cs_1");
-  assert.deepEqual(invoice.paymentIntentIds, ["pi_1"]);
+run("an invoice with no payments parses with an empty ledger", () => {
+  const invoice = InvoiceSchema.parse(doc());
+  assert.deepEqual(invoice.payments, []);
+  assert.equal(invoice.amountPaid, 0);
+  assert.equal(invoice.pendingPayment, null);
   assert.equal(invoice.openCheckout, null);
 });
 
-run("an open Checkout and a clearing bank transfer map to their own fields", () => {
-  const open = InvoiceSchema.parse(doc({ checkoutSessionId: "cs_open" }));
-  assert.deepEqual(open.openCheckout, { sessionId: "cs_open", purpose: "full", amountCents: 80000, tipCents: 0 });
-  assert.equal(open.pendingPayment, null);
-
-  const clearing = InvoiceSchema.parse(doc({ checkoutSessionId: "cs_ach", pendingPaymentAt: "2026-10-15T09:00:00.000Z" }));
-  assert.equal(clearing.openCheckout, null);
-  assert.deepEqual(clearing.pendingPayment, {
-    checkoutSessionId: "cs_ach",
-    purpose: "full",
-    amount: 800,
-    tipAmount: 0,
-    startedAt: "2026-10-15T09:00:00.000Z",
-  });
+run("the old single-payment fields are gone", () => {
+  const invoice = InvoiceSchema.parse(doc({ paidAt: "2026-10-10T12:00:00.000Z", paidVia: "manual", paidEntryId: "e1" }));
+  assert.equal("paidAt" in invoice, false);
+  assert.equal("paidVia" in invoice, false);
+  assert.equal("paidEntryId" in invoice, false);
 });
 
-run("refunds point at the payment they return", () => {
-  const invoice = InvoiceSchema.parse(
-    doc({ ...paidManual, refunds: [{ id: "manual_r1", entryId: "r1", amount: 50, date: "2026-10-20", reason: "other" }] })
-  );
-  assert.equal(invoice.refunds[0].paymentId, "legacy");
-  assert.equal(invoicePaymentRefundable(invoice, "legacy"), 750);
+run("ledger fields must match the payments", () => {
+  const withPayment = invoiceWithPayments(InvoiceSchema.parse(doc()), [payment("a", 100)]);
+  assert.equal(InvoiceSchema.safeParse(withPayment).success, true);
+  assert.equal(InvoiceSchema.safeParse({ ...withPayment, amountPaid: 50 }).success, false);
+  assert.equal(InvoiceSchema.safeParse({ ...withPayment, paymentEntryIds: [] }).success, false);
 });
 
-run("a stale stored ledger never outlives the fields it came from", () => {
-  // Reopened by a merge write that only cleared the paid* fields.
-  const reopened = InvoiceSchema.parse(
-    doc({
-      status: "sent",
-      paidAt: null,
-      paidVia: null,
-      paidEntryId: null,
-      payments: [{ id: "legacy", purpose: "full", amount: 800, receivedOn: "2026-10-10", via: "manual", method: "zelle", entryId: "e1", createdAt: "x" }],
-      amountPaid: 800,
-      paymentEntryIds: ["e1"],
-    })
-  );
-  assert.deepEqual(reopened.payments, []);
-  assert.equal(reopened.amountPaid, 0);
-  assert.deepEqual(reopened.paymentEntryIds, []);
+run("status has to agree with the money", () => {
+  const open = InvoiceSchema.parse(doc());
+  const full = invoiceWithPayments(open, [payment("a", 800)]);
+  assert.equal(InvoiceSchema.safeParse(full).success, true);
+  assert.equal(InvoiceSchema.safeParse({ ...full, status: "sent" }).success, false);
+  const part = invoiceWithPayments(open, [payment("a", 100)]);
+  assert.equal(InvoiceSchema.safeParse({ ...part, status: "paid" }).success, false);
+  assert.equal(InvoiceSchema.safeParse({ ...part, status: "void" }).success, false);
+  assert.equal(InvoiceSchema.safeParse({ ...part, status: "draft" }).success, false);
+  assert.equal(InvoiceSchema.safeParse({ ...part, status: "closed", closedAt: "x" }).success, true);
 });
 
-run("a backfilled receivedOn is kept for the same entry", () => {
-  const stored = { id: "legacy", purpose: "full", amount: 800, receivedOn: "2026-10-11", via: "online", method: "pos", entryId: "e3", createdAt: "x" };
-  const online = { status: "paid", paidAt: "2026-10-12T03:00:00.000Z", paidVia: "online", paidEntryId: "e3" };
-  assert.equal(InvoiceSchema.parse(doc({ ...online, payments: [stored] })).payments[0].receivedOn, "2026-10-11");
-  // A different entry (paid again after a reopen) takes the new date.
-  assert.equal(
-    InvoiceSchema.parse(doc({ ...online, paidEntryId: "e4", payments: [stored] })).payments[0].receivedOn,
-    "2026-10-12"
-  );
+run("payments can't exceed the total or repeat an id", () => {
+  const open = InvoiceSchema.parse(doc());
+  assert.equal(InvoiceSchema.safeParse(invoiceWithPayments(open, [payment("a", 500), payment("b", 400)])).success, false);
+  assert.equal(InvoiceSchema.safeParse(invoiceWithPayments(open, [payment("a", 100), payment("a", 100)])).success, false);
 });
 
-run("parsing twice gives the same invoice", () => {
-  const once = InvoiceSchema.parse(doc(paidManual));
-  assert.deepEqual(InvoiceSchema.parse(once), once);
+run("a deposit must be less than the total", () => {
+  assert.equal(InvoiceSchema.safeParse(doc({ deposit: { amount: 100, dueDate: "2026-10-08" } })).success, true);
+  assert.equal(InvoiceSchema.safeParse(doc({ deposit: { amount: 800, dueDate: "2026-10-08" } })).success, false);
 });
 
-run("the closed status parses and displays", () => {
-  const closed = InvoiceSchema.parse(doc({ status: "closed", closedAt: "2026-10-20T00:00:00.000Z" }));
-  assert.equal(closed.status, "closed");
-  assert.equal(invoiceDisplayStatus(closed, "2026-10-21").label, "Closed");
-  assert.equal(invoiceBalanceDue(closed), 0);
+/* --------------------------------------------------------
+ * Ledger operations
+ * -------------------------------------------------------- */
+
+run("applying payments moves the status with the money", () => {
+  const open = InvoiceSchema.parse(doc());
+  const part = invoiceWithPayments(open, [payment("a", 100)]);
+  assert.equal(part.status, "sent");
+  assert.equal(part.amountPaid, 100);
+  assert.deepEqual(part.paymentEntryIds, ["e_a"]);
+  const paid = invoiceWithPayments(part, [...part.payments, payment("b", 700)]);
+  assert.equal(paid.status, "paid");
+  // Taking a payment off reopens it.
+  assert.equal(invoiceWithPayments(paid, [paid.payments[0]]).status, "sent");
+  // A draft that's paid in full is paid; partly paid, it's open.
+  assert.equal(invoiceWithPayments({ ...open, status: "draft" }, [payment("a", 800)]).status, "paid");
+  assert.equal(invoiceWithPayments({ ...open, status: "draft" }, [payment("a", 80)]).status, "sent");
+});
+
+run("a closed invoice stays closed while it keeps a payment", () => {
+  const closed = { ...invoiceWithPayments(InvoiceSchema.parse(doc()), [payment("d", 100)]), status: "closed", closedAt: "x" };
+  assert.equal(invoiceWithPayments(closed, closed.payments).status, "closed");
+  assert.equal(invoiceWithPayments(closed, []).status, "sent");
+});
+
+run("settling an invoice drops its open Checkout", () => {
+  const open = { ...InvoiceSchema.parse(doc()), openCheckout: { sessionId: "cs", purpose: "full", amountCents: 80000, tipCents: 0 } };
+  assert.equal(invoiceWithPayments(open, [payment("a", 100)]).openCheckout.sessionId, "cs");
+  assert.equal(invoiceWithPayments(open, [payment("a", 800)]).openCheckout, null);
+});
+
+run("index fields follow each payment's links", () => {
+  const ledger = invoiceLedgerFields([
+    payment("m1", 100, { receivedOn: "2026-10-03" }),
+    payment("b1", 200, { via: "bank_match", plaidTransactionId: "txn_1" }),
+    payment("s1", 300, { via: "online", stripePaymentIntentId: "pi_1", entryId: null }),
+    payment("m2", 50, { receivedOn: "2026-10-09" }),
+  ]);
+  assert.equal(ledger.amountPaid, 650);
+  assert.deepEqual(ledger.paymentEntryIds, ["e_m1", "e_b1", "e_m2"]);
+  assert.deepEqual(ledger.paymentPlaidTransactionIds, ["txn_1"]);
+  assert.deepEqual(ledger.paymentIntentIds, ["pi_1"]);
+  assert.equal(ledger.lastManualPaymentOn, "2026-10-09");
+});
+
+run("a payment's purpose is judged before it's applied", () => {
+  const open = InvoiceSchema.parse(doc());
+  assert.equal(invoicePaymentPurposeFor(open, 800), "full");
+  assert.equal(invoicePaymentPurposeFor(open, 300), "partial");
+  const withDeposit = { ...open, deposit: { amount: 100, dueDate: "2026-10-08", waivedAt: null } };
+  assert.equal(invoicePaymentPurposeFor(withDeposit, 100), "deposit");
+  assert.equal(invoicePaymentPurposeFor(withDeposit, 800), "full");
+  const afterDeposit = invoiceWithPayments(withDeposit, [payment("d", 100, { purpose: "deposit" })]);
+  assert.equal(invoicePaymentPurposeFor(afterDeposit, 700), "balance");
+  assert.equal(invoicePaymentPurposeFor(afterDeposit, 100), "partial");
+});
+
+run("a check is booked as Other income; everything else keeps its method", () => {
+  assert.equal(entryPaymentMethodFor("check"), "other");
+  assert.equal(entryPaymentMethodFor("zelle"), "zelle");
+  assert.equal(entryPaymentMethodFor("pos"), "pos");
+});
+
+run("each payment's Entry has its own retry-safe key", () => {
+  assert.equal(invoicePaymentEntryMutationId("inv1", "manual_abc"), "invoice_inv1_manual_abc");
 });
 
 /* --------------------------------------------------------
@@ -207,9 +186,6 @@ function ledger(overrides = {}) {
   return { ...InvoiceSchema.parse(doc()), ...overrides };
 }
 
-function payment(id, amount, extra = {}) {
-  return { id, purpose: "partial", amount, tipAmount: 0, receivedOn: "2026-10-05", via: "manual", method: "zelle", entryId: `e_${id}`, plaidTransactionId: null, stripePaymentIntentId: null, checkoutSessionId: null, feeAmount: 0, createdAt: "x", ...extra };
-}
 
 run("balance and amount paid follow the payments", () => {
   const invoice = ledger({ payments: [payment("a", 100), payment("b", 250.5)] });
@@ -280,6 +256,35 @@ run("refundable per payment includes its tip, less its own refunds", () => {
   assert.equal(invoicePaymentRefundable(invoice, "d"), 100);
   assert.equal(invoicePaymentRefundable(invoice, "b"), 800);
   assert.equal(invoicePaymentRefundable(invoice, "missing"), 0);
+});
+
+run("refunds come off the latest payment with anything left", () => {
+  const invoice = ledger({
+    status: "paid",
+    payments: [payment("d", 100), payment("b", 700)],
+    refunds: [{ id: "r1", entryId: "re1", amount: 700, date: "2026-10-20", reason: "other", stripeRefundId: null, plaidTransactionId: null, paymentId: "b" }],
+  });
+  assert.equal(invoiceRefundTarget(invoice).id, "d");
+  assert.equal(invoiceRefundTarget({ ...invoice, payments: [payment("b", 700)] }), null);
+});
+
+run("a dispute holds only the payment it's on", () => {
+  const invoice = ledger({
+    status: "paid",
+    payments: [payment("d", 100), payment("s", 700, { via: "online", stripePaymentIntentId: "pi" })],
+    dispute: { stripeDisputeId: "dp", status: "open", amount: 700, reason: null, evidenceDueBy: null, fundsWithdrawn: true, feeAmount: 15, paymentId: "s", updatedAt: "x" },
+  });
+  assert.equal(invoicePaymentRefundable(invoice, "s"), 0);
+  assert.equal(invoicePaymentRefundable(invoice, "d"), 100);
+});
+
+run("a refund splits over the payment's own categories, tip included", () => {
+  const lines = doc().lines; // services 600, products 200
+  // $700 balance + $140 tip → services 525, products 175, tips 140 (840 total).
+  const parts = refundCentsByCategory(lines, { amount: 700, tipAmount: 140 }, 8400);
+  assert.deepEqual(parts, [["services", 5250], ["products", 1750], ["tips", 1400]]);
+  const odd = refundCentsByCategory(lines, { amount: 700, tipAmount: 140 }, 1001);
+  assert.equal(odd.reduce((sum, [, cents]) => sum + cents, 0), 1001);
 });
 
 process.stdout.write("invoice payments checks passed\n");

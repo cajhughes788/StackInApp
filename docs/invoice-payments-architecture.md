@@ -153,16 +153,33 @@ Goal: the new data shape exists and everything reads through it, while every wri
 
 Goal: the payment engine is the only way money gets attached to an invoice, and manual payments support any amount plus a tip.
 
-1. **Engine.** Add `invoicePaymentEngine.ts`. Move `markInvoicePaidManually` onto it.
+**Built, with the Phase 5 cleanup folded in.** No real invoices existed yet (only test ones), so instead of carrying two data shapes until Phase 5:
+- The `paid*`, `pendingPaymentAt` and `checkoutSessionId` fields and `deriveLedgerFromLegacy` are gone, and `payments` is the source of truth.
+- The schema enforces the ledger rules:
+  - the ledger fields must match `payments`;
+  - `paid` means the payments cover the total, while `sent`/`draft` means they don't;
+  - draft and void invoices have no payments;
+  - payment ids are unique.
+- There's no compatibility shape for `mark_paid`.
+- Test invoices saved in the old shape are converted once by `scripts/convert-legacy-invoices.cjs` (dry run by default). Delete that script after it has run.
+- All three payment paths (manual, bank match and Stripe) moved onto the engine in this phase, because the fields they wrote no longer exist. Phases 4 and 5 add deposit/tip targets and the payment choice on top of it.
+
+1. **Engine.** `backend/functions/src/services/invoicePaymentEngine.ts`, with four parts:
+   - `claimInvoicePayments`: all-or-nothing across invoices; it rejects with `PaymentRejectedError` (missing, not open, clearing, over balance).
+   - `bookPaymentEntry`, then `attachPaymentEntry`.
+   - `releasePaymentClaims`.
+   - `applyInvoicePayment`, which does the claim, book and attach in one call.
+
+   The pure ledger operations it uses (`invoiceWithPayments`, `invoiceLedgerFields`, `invoicePaymentPurposeFor`) live in `shared/invoicePayments.ts`, so the app's instant updates apply payments the same way.
 2. **Mark paid becomes "Record payment".** The `InvoiceStatusActionSchema` `mark_paid` action becomes `record_payment { amount, tipAmount, paidDate, paymentMethod, clientMutationId }`.
    - `amount` is at most the balance due. It defaults to the amount due now, or the balance.
    - `purpose` is worked out on the server: it's `deposit` when it equals an unpaid deposit and the deposit hasn't been waived, `full`/`balance` when it clears the invoice, and `partial` otherwise.
-   - Keep accepting the old `mark_paid` shape for one release (mapped to the full balance) so older iOS builds keep working.
 3. **Per-payment undo.** `entriesService.deleteEntry`:
    - Finds the payment by `paymentEntryIds array-contains` and removes just that payment.
    - The invoice goes back to `sent` when a balance remains.
    - Blocked when that payment has refunds or a dispute, or came through Stripe (same rules as today, now per payment).
-   - Bank-matched payments still undo their whole deposit match, which Phase 4 adapts to payments.
+   - Bank-matched payments still undo their whole deposit match: `undoInvoiceDepositMatch` removes `plaid_<txn>` payments found by `paymentPlaidTransactionIds`.
+   - A removed manual payment returns any "already recorded" deposit to review.
 4. **Refunds per payment.** The refund action takes `paymentId`. The cap is `invoicePaymentRefundable`. `bookRefundEntry` spreads a refund across that payment's own categories, tip included, in proportion. `forgetRefundForDeletedEntry` and the refund-payment Plaid linking from commit e67dc1f carry over unchanged.
 5. **Edit rules** (`updateInvoice`):
    - The total can't drop below `amountPaid`.
@@ -238,11 +255,7 @@ Goal: the client pays the right amount online, picks a tip on 521's page, and 52
    - If the invoice can't take the payment (already paid by another method, closed, void, or the amount is now above the balance due), the payment is refunded automatically, as duplicates are today.
 5. **ACH per payment.** `pendingPayment` holds the purpose, amount and tip while it clears. Success books through the engine. Failure clears it, reopens that option and notifies the user (wording now says which payment failed).
 6. **Refunds and disputes by payment intent.** `invoiceForPayment` looks up `paymentIntentIds array-contains`. Refunds and disputes attach to that payment. Stripe-dashboard refunds still arrive through `charge.refunded`. Payouts and `stripePayouts` are unchanged: a payout is a lump of many payments either way.
-7. **Cleanup.**
-   - Drop the legacy `paid*` fields from writes.
-   - Remove `normalizeLegacyInvoice`'s write-back once the backfill is confirmed in production. Keep the read-side conversion for one more release.
-   - Remove the old `mark_paid` action shape.
-   - Update `docs/` and the in-code comments in `shared/schemas/invoice.ts`.
+7. **Cleanup.** Done in Phase 2. What's left: delete `scripts/convert-legacy-invoices.cjs` once it has run.
 8. **Tests.** Session amounts for each purpose, tip validation and caps, metadata round trip, the mismatch fallback, duplicate auto-refund, ACH clear and fail per payment, and refund or dispute on the second of two online payments.
 
 **Done when:** in Stripe test mode, the tattoo example paid as a deposit online, then balance + 20% tip online, books $100 service, then $700 service + $140 tip, with two fee expenses. The payouts are hidden from bank review, and refunding the tip alone works.
@@ -251,6 +264,6 @@ Goal: the client pays the right amount online, picks a tip on 521's page, and 52
 
 - **Idempotency.** Every booking keys off the payment `key`: entry `invoice_<id>_<key>`, fee `<key>_fee`, refund `refund_<refundKey>`. Webhook retries, double taps and Plaid re-syncs book once, as today.
 - **Transactions.** The claim step holds the invoice in one Firestore transaction, so a manual payment, a bank confirm and a Stripe webhook racing on the same invoice can't overpay it. The loser gets a conflict (manual or bank) or an automatic refund (Stripe).
-- **iOS and Android.** The app is a Capacitor wrapper (`frontend/`), so the UI ships with the web build. Older installed builds keep working through the one-release compatibility for `mark_paid` and the legacy fields.
+- **iOS and Android.** The app is a Capacitor wrapper (`frontend/`), so the UI ships with the web build. Invoicing hadn't shipped to any build when the ledger replaced the single-payment fields, so no compatibility layer was kept.
 - **Reports.** Tips land in the existing `tips` category, so the income streams and P&L show them without changes. Verify in Phase 2.
 - **Out of scope:** automatic payment reminders to clients (an outward-facing email; could come later as a user-triggered "Send reminder"), installment schedules beyond deposit + balance, and accrual-basis "unearned revenue" accounting.

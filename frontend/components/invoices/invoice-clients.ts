@@ -1,3 +1,4 @@
+import { invoiceBalanceDue } from "@shared/invoicePayments"
 import type { InvoiceType } from "@shared/schemas/invoice"
 
 import { invoiceKeptAmount } from "@/components/invoices/invoice-money"
@@ -14,9 +15,10 @@ export type InvoiceClient = {
   name: string
   // Newest first, voided ones included for the record.
   invoices: InvoiceType[]
-  // Paid, less refunds and disputed money not won back.
+  // Received (any payment, tips included), less refunds and disputed money
+  // not won back.
   earned: number
-  // Sent and not paid yet; overdue is the part past its due date.
+  // Still owed on open invoices; overdue is the part past its due date.
   open: number
   overdue: number
 }
@@ -37,11 +39,11 @@ export function groupInvoicesByClient(invoices: InvoiceType[], today: string): I
       byKey.set(key, client)
     }
     client.invoices.push(invoice)
-    if (invoice.status === "paid") {
-      client.earned = addMoney(client.earned, invoiceKeptAmount(invoice))
-    } else if (invoice.status === "sent") {
-      client.open = addMoney(client.open, invoice.total)
-      if (invoice.dueDate < today) client.overdue = addMoney(client.overdue, invoice.total)
+    if (invoice.payments.length > 0) client.earned = addMoney(client.earned, invoiceKeptAmount(invoice))
+    if (invoice.status === "sent") {
+      const balance = invoiceBalanceDue(invoice)
+      client.open = addMoney(client.open, balance)
+      if (invoice.dueDate < today) client.overdue = addMoney(client.overdue, balance)
     }
   }
   return [...byKey.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))

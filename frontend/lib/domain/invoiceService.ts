@@ -2,11 +2,12 @@
 
 // lib/domain/invoiceService.ts
 // Invoice changes that don't make the user wait. The invoice functions often
-// cold-start (~12s), so creates, edits, mark paid, void and delete update the
-// invoices store at once and reach the server in the background:
+// cold-start (~12s), so creates, edits, recorded payments, void, close and
+// delete update the invoices store at once and reach the server in the
+// background:
 //
-// • Each invoice's server calls run one after another (a quick edit then
-//   mark paid reaches the server in that order).
+// • Each invoice's server calls run one after another (a quick edit then a
+//   recorded payment reach the server in that order).
 // • A new invoice gets a temporary id ("tmp-<clientMutationId>") until the
 //   server answers with its real id and number. Work queued on the temporary
 //   id then runs against the real one.
@@ -26,12 +27,13 @@ import { toast } from "@/hooks/use-toast"
 import { createInvoice, deleteInvoice, editInvoice, updateInvoiceStatus } from "@/lib/api/invoicesApi"
 import { useEntriesStore } from "@/lib/stores/useEntriesStore"
 import { isTempInvoiceId, useInvoicesStore } from "@/lib/stores/useInvoicesStore"
+import { invoicePaymentPurposeFor, invoiceWithPayments } from "@shared/invoicePayments"
 import {
-  deriveLedgerFromLegacy,
   invoiceTotalFromLines,
   type InvoiceCreateInput,
   type InvoicePaidMethod,
   type InvoicePatch,
+  type InvoicePayment,
   type InvoiceType,
 } from "@shared/schemas/invoice"
 
@@ -149,18 +151,9 @@ export function createInvoiceInBackground(workspaceId: string, input: CreateInpu
     note: input.note ?? "",
     shareToken: null,
     status: "draft",
-    paidAt: null,
-    paidVia: null,
-    paidEntryId: null,
-    paidPlaidTransactionId: null,
-    checkoutSessionId: null,
-    paidStripePaymentIntentId: null,
-    pendingPaymentAt: null,
     refunds: [],
     dispute: null,
     paymentFailedAt: null,
-    paidFeeAmount: 0,
-    paidMethod: null,
     sharedAt: null,
     payments: [],
     deposit: null,
@@ -227,41 +220,60 @@ export function editInvoiceInBackground(workspaceId: string, invoice: InvoiceTyp
   }).catch((error) => onFailure(workspaceId, `Couldn't save invoice #${previous.number}`, error, previous))
 }
 
-export function markInvoicePaidInBackground(
-  workspaceId: string,
-  invoice: InvoiceType,
-  paidDate: string,
+export type RecordPaymentInput = {
+  amount: number
+  tipAmount: number
+  paidDate: string
   paymentMethod: InvoicePaidMethod
-) {
+  // One per sheet opening, so a retried save can't record it twice.
+  clientMutationId: string
+}
+
+/** A payment received outside 521 (cash, check, Zelle…): shown now, booked in the background. */
+export function recordPaymentInBackground(workspaceId: string, invoice: InvoiceType, input: RecordPaymentInput) {
   const previous = latestInvoice(workspaceId, invoice.id) ?? invoice
-  // As the server records a hand-marked payment, with the payment ledger
-  // worked out the same way (phase 1: from the paid* fields).
-  store().upsertInvoice(
-    workspaceId,
-    deriveLedgerFromLegacy({
-      ...previous,
-      status: "paid",
-      paidAt: `${paidDate}T12:00:00.000Z`,
-      paidVia: "manual",
-      paidMethod: paymentMethod,
-      pendingPaymentAt: null,
-      paymentFailedAt: null,
-      updatedAt: new Date().toISOString(),
-    }) as InvoiceType
-  )
+  // As the server's payment engine applies it (shared/invoicePayments.ts).
+  const payment: InvoicePayment = {
+    id: `manual_${input.clientMutationId}`,
+    purpose: invoicePaymentPurposeFor(previous, input.amount),
+    amount: input.amount,
+    tipAmount: input.tipAmount,
+    receivedOn: input.paidDate,
+    via: "manual",
+    method: input.paymentMethod,
+    entryId: null,
+    plaidTransactionId: null,
+    stripePaymentIntentId: null,
+    checkoutSessionId: null,
+    feeAmount: 0,
+    createdAt: new Date().toISOString(),
+  }
+  store().upsertInvoice(workspaceId, {
+    ...invoiceWithPayments(previous, [...previous.payments, payment]),
+    openCheckout: null,
+    paymentFailedAt: null,
+    updatedAt: new Date().toISOString(),
+  })
   enqueue(invoice.id, async (id) => {
-    const { invoice: paid } = await updateInvoiceStatus(workspaceId, requireSaved(id), {
-      action: "mark_paid",
-      paidDate,
-      paymentMethod,
-    })
-    applyServerCopy(workspaceId, invoice.id, paid)
+    const { invoice: saved } = await updateInvoiceStatus(workspaceId, requireSaved(id), { action: "record_payment", ...input })
+    applyServerCopy(workspaceId, invoice.id, saved)
     // The income entry was booked server-side; refresh whatever period the
     // home page has loaded.
     const entries = useEntriesStore.getState()
     const periodId = entries.byWorkspaceId[workspaceId]?.periodId
     if (periodId) void entries.refreshFromBackend(workspaceId, periodId, { force: true }).catch(() => {})
-  }).catch((error) => onFailure(workspaceId, `Couldn't mark #${previous.number} paid`, error, previous))
+  }).catch((error) => onFailure(workspaceId, `Couldn't record the payment on #${previous.number}`, error, previous))
+}
+
+/** Ends a partly paid invoice, keeping what was paid. */
+export function closeInvoiceInBackground(workspaceId: string, invoice: InvoiceType) {
+  const previous = latestInvoice(workspaceId, invoice.id) ?? invoice
+  const now = new Date().toISOString()
+  store().upsertInvoice(workspaceId, { ...previous, status: "closed", closedAt: now, openCheckout: null, updatedAt: now })
+  enqueue(invoice.id, async (id) => {
+    const { invoice: closed } = await updateInvoiceStatus(workspaceId, requireSaved(id), { action: "close" })
+    applyServerCopy(workspaceId, invoice.id, closed)
+  }).catch((error) => onFailure(workspaceId, `Couldn't close invoice #${previous.number}`, error, previous))
 }
 
 export function voidInvoiceInBackground(workspaceId: string, invoice: InvoiceType) {

@@ -8,17 +8,17 @@ import { useToast } from "@/hooks/use-toast"
 import { fieldLabelClass, softInputClass } from "@/components/invoices/invoice-ui"
 import { updateInvoiceStatus } from "@/lib/api/invoicesApi"
 import { invoiceSaved } from "@/lib/domain/invoiceService"
-import { invoiceLatestPayment } from "@shared/invoicePayments"
+import { invoicePaymentRefundable, invoiceRefundTarget } from "@shared/invoicePayments"
 import { useEntriesStore } from "@/lib/stores/useEntriesStore"
 import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
 import { cn } from "@/lib/utils"
 import { formatInvoiceDate, formatInvoiceMoney } from "@shared/invoiceDisplay"
-import { invoiceRefundableAmount, type InvoiceRefund, type InvoiceType } from "@shared/schemas/invoice"
+import type { InvoiceRefund, InvoiceType } from "@shared/schemas/invoice"
 
-// Money back on a paid invoice. An online payment is refunded through Stripe
+// Money back on one payment. An online payment is refunded through Stripe
 // (to the client's card or bank); anything else is recorded only — the user
 // sends the money themselves. Either way the refund is its own entry dated
-// today, so the month the invoice was paid stays as it was.
+// today, so the month the payment arrived stays as it was.
 
 const REASONS: Array<{ value: InvoiceRefund["reason"]; label: string }> = [
   { value: "requested_by_client", label: "Requested by client" },
@@ -49,17 +49,19 @@ export default function RefundSheet({
   onOpenChange,
   invoice,
   workspaceId,
+  paymentId,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   invoice: InvoiceType
   workspaceId: string
+  // The payment to refund; the latest with anything left when omitted.
+  paymentId?: string | null
 }) {
   const { toast } = useToast()
   const upsertInvoice = useInvoicesStore((state) => state.upsertInvoice)
-  const refundable = invoiceRefundableAmount(invoice)
-  // Phase 1: one payment per invoice; refunds come off the latest.
-  const payment = invoiceLatestPayment(invoice)
+  const payment = (paymentId ? invoice.payments.find((p) => p.id === paymentId) : null) ?? invoiceRefundTarget(invoice)
+  const refundable = payment ? invoicePaymentRefundable(invoice, payment.id) : 0
   const throughStripe = payment?.via === "online" && !!payment.stripePaymentIntentId
   const [mode, setMode] = useState<"full" | "part">("full")
   const [amountText, setAmountText] = useState("")
@@ -82,13 +84,14 @@ export default function RefundSheet({
   const valid = amount !== null && !tooMuch
 
   async function submit() {
-    if (!valid || amount === null) return
+    if (!valid || amount === null || !payment) return
     setSaving(true)
     try {
       // A mark-paid still saving goes first.
       const id = await invoiceSaved(invoice.id)
       const { invoice: updated } = await updateInvoiceStatus(workspaceId, id, {
         action: "refund",
+        paymentId: payment.id,
         amount,
         reason,
         clientMutationId: mutationId.current,
@@ -124,7 +127,9 @@ export default function RefundSheet({
         <SheetHeader className="px-0 pb-4 pt-1 text-left">
           <SheetTitle className="text-xl">{throughStripe ? `Refund ${invoice.clientName}` : "Record a refund"}</SheetTitle>
           <SheetDescription>
-            Invoice #{invoice.number} · {formatInvoiceMoney(refundable)} left to refund
+            Invoice #{invoice.number}
+            {invoice.payments.length > 1 && payment ? ` · ${paidDate} payment` : ""} · {formatInvoiceMoney(refundable)} left to
+            refund
           </SheetDescription>
         </SheetHeader>
 

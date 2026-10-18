@@ -1,7 +1,5 @@
 import { isPeerToPeerDescriptor, suggestPlaidIncomePaymentMethod } from "./plaidClassification"
-import { invoiceCentsByCategory, invoicePaymentBreakdown } from "./invoicePayments"
-import type { IncomeBreakdown, PaymentMethod } from "./schemas/entry"
-import type { InvoiceLine, InvoiceType } from "./schemas/invoice"
+import type { InvoiceType } from "./schemas/invoice"
 import type { PlaidInvoiceMatch, PlaidInvoiceRef } from "./schemas/plaidPendingTransaction"
 
 // ---------------------------------------------------------------------------
@@ -242,13 +240,6 @@ export function invoiceGroupFee(match: PlaidInvoiceMatch, group: PlaidInvoiceRef
   return feeCents / 100
 }
 
-// An invoice's lines as one Entry income breakdown, summed per category —
-// a payment of the whole total (shared/invoicePayments.ts).
-export function invoiceIncomeBreakdown(lines: InvoiceLine[], paymentMethod: PaymentMethod): IncomeBreakdown {
-  return invoicePaymentBreakdown(lines, lines.reduce((sum, line) => sum + toCents(line.amount), 0) / 100, 0, paymentMethod)
-}
-
-export { invoiceCentsByCategory }
 
 // Splits a payout's fee across the invoices it paid, in proportion to each
 // invoice's amount, with leftover cents on the last one so the parts add up

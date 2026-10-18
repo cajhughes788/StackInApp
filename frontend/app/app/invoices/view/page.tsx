@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { useToast } from "@/hooks/use-toast"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import MarkPaidSheet from "@/components/invoices/mark-paid-sheet"
+import RecordPaymentSheet from "@/components/invoices/record-payment-sheet"
 import RefundSheet from "@/components/invoices/refund-sheet"
 import SendInvoiceSheet from "@/components/invoices/send-invoice-sheet"
 import {
@@ -52,6 +52,7 @@ import {
   latestInvoice,
   useInvoiceSaving,
   voidInvoiceInBackground,
+  closeInvoiceInBackground,
 } from "@/lib/domain/invoiceService"
 import { shareLink } from "@/lib/documentExport"
 import { shareInvoicePdf } from "@/lib/invoicePdf"
@@ -64,8 +65,15 @@ import {
   formatInvoiceMoney,
   publicInvoiceUrl,
 } from "@shared/invoiceDisplay"
-import { invoiceBalanceDue, invoiceHasPayments, invoiceLatestPayment } from "@shared/invoicePayments"
-import { invoiceRefundableAmount, type InvoiceTerms, type InvoiceType } from "@shared/schemas/invoice"
+import {
+  invoiceAmountPaid,
+  invoiceBalanceDue,
+  invoiceHasPayments,
+  invoiceLatestPayment,
+  invoiceRefundable,
+  invoiceRefundTarget,
+} from "@shared/invoicePayments"
+import type { InvoiceTerms, InvoiceType } from "@shared/schemas/invoice"
 
 function formatMoment(iso: string): string {
   return new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
@@ -99,6 +107,9 @@ function metaLine(invoice: InvoiceType): string {
       if (invoice.pendingPayment) {
         return `Bank payment processing · started ${formatInvoiceDate(invoice.pendingPayment.startedAt.slice(0, 10))}`
       }
+      if (invoiceHasPayments(invoice)) {
+        return `${formatInvoiceMoney(invoiceAmountPaid(invoice))} paid · ${formatInvoiceMoney(invoiceBalanceDue(invoice))} due`
+      }
       return [invoice.sharedAt ? `Shared ${formatInvoiceDate(invoice.sharedAt.slice(0, 10))}` : "Sent", termsLabel(invoice)]
         .filter(Boolean)
         .join(" · ")
@@ -126,12 +137,14 @@ function InvoiceDetailPage() {
   const invoice = invoiceId ? invoices.find((i) => i.id === currentInvoiceId(invoiceId)) ?? null : null
   const saving = useInvoiceSaving(invoice?.id ?? null)
   const [busy, setBusy] = useState<null | "link" | "pdf">(null)
-  const [markPaidOpen, setMarkPaidOpen] = useState(false)
+  const [paymentOpen, setPaymentOpen] = useState(false)
   const [refundOpen, setRefundOpen] = useState(false)
+  // The payment a refund comes off; null means the latest with anything left.
+  const [refundPaymentId, setRefundPaymentId] = useState<string | null>(null)
   const [sendOpen, setSendOpen] = useState(false)
   // The link, when neither a share sheet nor the clipboard was available.
   const [manualLink, setManualLink] = useState<string | null>(null)
-  const [confirm, setConfirm] = useState<null | "void" | "delete">(null)
+  const [confirm, setConfirm] = useState<null | "void" | "delete" | "close">(null)
   // Deleted here: it's gone from the store before the list page opens.
   const [leaving, setLeaving] = useState(false)
   const today = localToday()
@@ -213,13 +226,21 @@ function InvoiceDetailPage() {
     }
   }
 
-  function onConfirmAction(action: "void" | "delete") {
+  function openRefund(paymentId: string | null) {
+    setRefundPaymentId(paymentId)
+    setRefundOpen(true)
+  }
+
+  function onConfirmAction(action: "void" | "delete" | "close") {
     if (!invoice || !workspaceId) return
     setConfirm(null)
     // Saved in the background (invoiceService).
     if (action === "void") {
       voidInvoiceInBackground(workspaceId, invoice)
       toast({ title: `Invoice #${invoice.number} voided` })
+    } else if (action === "close") {
+      closeInvoiceInBackground(workspaceId, invoice)
+      toast({ title: `Invoice #${invoice.number} closed`, description: `${formatInvoiceMoney(invoiceAmountPaid(invoice))} stays in your income.` })
     } else {
       setLeaving(true)
       deleteInvoiceInBackground(workspaceId, invoice)
@@ -256,20 +277,23 @@ function InvoiceDetailPage() {
                   <Link href={`/app/invoices/edit?id=${encodeURIComponent(invoice.id)}`}>Edit</Link>
                 </DropdownMenuItem>
               ) : null}
-              {invoice.status === "sent" || invoice.status === "draft" ? (
+              {(invoice.status === "sent" || invoice.status === "draft") && !invoiceHasPayments(invoice) ? (
                 <DropdownMenuItem onSelect={() => setConfirm("void")}>Void invoice</DropdownMenuItem>
+              ) : null}
+              {invoice.status === "sent" && invoiceHasPayments(invoice) && !invoice.pendingPayment ? (
+                <DropdownMenuItem onSelect={() => setConfirm("close")}>Close invoice</DropdownMenuItem>
               ) : null}
               {invoice.status === "draft" ? (
                 <DropdownMenuItem className="text-destructive" onSelect={() => setConfirm("delete")}>
                   Delete draft
                 </DropdownMenuItem>
               ) : null}
-              {invoice.status === "paid" && invoiceRefundableAmount(invoice) > 0 ? (
-                <DropdownMenuItem onSelect={() => setRefundOpen(true)}>
-                  {invoiceLatestPayment(invoice)?.via === "online" ? "Refund" : "Record a refund"}
+              {invoiceRefundable(invoice) > 0 ? (
+                <DropdownMenuItem onSelect={() => openRefund(null)}>
+                  {invoiceRefundTarget(invoice)?.via === "online" ? "Refund" : "Record a refund"}
                 </DropdownMenuItem>
               ) : null}
-              {invoice.status === "paid" ? (
+              {invoiceHasPayments(invoice) ? (
                 <DropdownMenuItem disabled>To undo a payment, delete its income entry</DropdownMenuItem>
               ) : null}
             </DropdownMenuContent>
@@ -363,14 +387,14 @@ function InvoiceDetailPage() {
             <InvoiceDisputeCard invoice={invoice} workspaceId={workspaceId} onSharePdf={() => void onSharePdf()} />
           ) : null}
 
-          {hasMoneyHistory(invoice) ? <InvoiceMoneyBreakdown invoice={invoice} /> : null}
+          {hasMoneyHistory(invoice) ? <InvoiceMoneyBreakdown invoice={invoice} onRefund={openRefund} /> : null}
 
-          {invoice.refunds.length > 0 && invoiceRefundableAmount(invoice) > 0 ? (
+          {invoice.refunds.length > 0 && invoice.payments.length === 1 && invoiceRefundable(invoice) > 0 ? (
             <Button
               type="button"
               variant="outline"
               className="h-12 w-full rounded-full border-card-border bg-transparent font-semibold"
-              onClick={() => setRefundOpen(true)}
+              onClick={() => openRefund(null)}
             >
               Refund more
             </Button>
@@ -396,10 +420,10 @@ function InvoiceDetailPage() {
               variant="outline"
               className="h-12 w-full rounded-full border-card-border bg-transparent font-semibold"
               disabled={busy !== null}
-              onClick={() => setMarkPaidOpen(true)}
+              onClick={() => setPaymentOpen(true)}
             >
               <Check className="size-[18px]" aria-hidden="true" />
-              Mark as paid
+              {invoiceHasPayments(invoice) ? "Record a payment" : "Mark as paid"}
             </Button>
           ) : null}
 
@@ -463,7 +487,7 @@ function InvoiceDetailPage() {
           </section>
 
           {workspaceId ? (
-            <MarkPaidSheet open={markPaidOpen} onOpenChange={setMarkPaidOpen} invoice={invoice} workspaceId={workspaceId} />
+            <RecordPaymentSheet open={paymentOpen} onOpenChange={setPaymentOpen} invoice={invoice} workspaceId={workspaceId} />
           ) : null}
           {workspaceId && (invoice.status === "draft" || invoice.status === "sent") ? (
             <SendInvoiceSheet
@@ -474,8 +498,14 @@ function InvoiceDetailPage() {
               workspaceId={workspaceId}
             />
           ) : null}
-          {workspaceId && invoice.status === "paid" ? (
-            <RefundSheet open={refundOpen} onOpenChange={setRefundOpen} invoice={invoice} workspaceId={workspaceId} />
+          {workspaceId && invoiceHasPayments(invoice) ? (
+            <RefundSheet
+              open={refundOpen}
+              onOpenChange={setRefundOpen}
+              invoice={invoice}
+              workspaceId={workspaceId}
+              paymentId={refundPaymentId}
+            />
           ) : null}
 
           <Dialog open={manualLink !== null} onOpenChange={(open) => !open && setManualLink(null)}>
@@ -522,18 +552,24 @@ function InvoiceDetailPage() {
             <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogTitle>
-                  {confirm === "delete" ? `Delete draft #${invoice.number}?` : `Void invoice #${invoice.number}?`}
+                  {confirm === "delete"
+                    ? `Delete draft #${invoice.number}?`
+                    : confirm === "close"
+                      ? `Close invoice #${invoice.number}?`
+                      : `Void invoice #${invoice.number}?`}
                 </AlertDialogTitle>
                 <AlertDialogDescription>
                   {confirm === "delete"
                     ? "The draft is removed for good."
-                    : "It stays in your list marked Void, and its link tells the client nothing is owed. This can't be undone."}
+                    : confirm === "close"
+                      ? `The ${formatInvoiceMoney(invoiceAmountPaid(invoice))} already paid stays in your income, and the ${formatInvoiceMoney(invoiceBalanceDue(invoice))} left is no longer owed. Its link tells the client nothing more is due. This can't be undone.`
+                      : "It stays in your list marked Void, and its link tells the client nothing is owed. This can't be undone."}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Keep it</AlertDialogCancel>
                 <AlertDialogAction onClick={() => confirm && onConfirmAction(confirm)}>
-                  {confirm === "delete" ? "Delete draft" : "Void invoice"}
+                  {confirm === "delete" ? "Delete draft" : confirm === "close" ? "Close invoice" : "Void invoice"}
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>

@@ -17,7 +17,7 @@ import {
   invoiceDisplayStatus,
   type InvoiceDisplayStatus,
 } from "@shared/invoiceDisplay"
-import { invoiceBalanceDue, invoiceLatestPayment } from "@shared/invoicePayments"
+import { invoiceAmountPaid, invoiceBalanceDue, invoiceLatestPayment } from "@shared/invoicePayments"
 import {
   DEFAULT_INVOICE_ACCENT_COLOR,
   type InvoicePaidMethod,
@@ -148,6 +148,8 @@ const TONE_CLASSES: Record<InvoiceDisplayStatus["tone"], string> = {
   overdue: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300",
   draft: "border border-dashed border-input text-muted-foreground",
   void: "bg-secondary text-muted-foreground line-through",
+  // Ended early, money kept: muted, but not struck through like void.
+  closed: "bg-secondary text-muted-foreground",
 }
 
 // List rows use the short form ("Due Nov 14"); the detail page the full date.
@@ -157,6 +159,8 @@ export function shortStatusLabel(invoice: InvoiceType, today: string): string {
   // Refund and dispute states are already short.
   if (status.label === "Disputed" || status.label === "Refunded") return status.label
   if (status.label === "Paid · partly refunded") return "Partly refunded"
+  if (status.label.startsWith("Partly paid")) return status.tone === "overdue" ? "Partly paid · overdue" : "Partly paid"
+  if (invoice.status === "closed") return "Closed"
   if (status.tone === "overdue") {
     const days = Math.round(
       (Date.parse(`${today}T12:00:00Z`) - Date.parse(`${invoice.dueDate}T12:00:00Z`)) / 86400000
@@ -200,6 +204,7 @@ function rowDetail(invoice: InvoiceType): string {
     const latest = invoiceLatestPayment(invoice)
     if (latest) parts.push(`Paid ${shortDate(latest.receivedOn)}`, paymentHowLabel(latest))
   } else if (invoice.pendingPayment) parts.push("bank payment clearing")
+  else if (invoice.payments.length > 0) parts.push(`${formatInvoiceMoney(invoiceAmountPaid(invoice))} paid`)
   else if (invoice.lastEmailedAt) parts.push(`Emailed ${shortDate(invoice.lastEmailedAt.slice(0, 10))}`)
   else parts.push(`Sent ${shortDate((invoice.sharedAt ?? invoice.createdAt).slice(0, 10))}`)
   return parts.join(" · ")

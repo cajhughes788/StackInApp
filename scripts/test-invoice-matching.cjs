@@ -16,7 +16,6 @@ const {
   resolveChosenInvoiceGroup,
   invoiceGroupFee,
   allocateInvoiceFee,
-  invoiceIncomeBreakdown,
   matchInvoiceRefundPayment,
   selectUnmatchedManualRefunds,
 } = require("../shared/invoiceMatching.ts");
@@ -34,8 +33,35 @@ const {
   invoiceFileName,
   textColorOnAccent,
 } = require("../shared/invoiceDisplay.ts");
-const { invoiceBalanceDue } = require("../shared/invoicePayments.ts");
-const { deriveLedgerFromLegacy: legacy } = require("../shared/schemas/invoice.ts");
+const { invoiceBalanceDue, invoiceLedgerFields, invoicePaymentBreakdown } = require("../shared/invoicePayments.ts");
+
+// Test shorthand: an invoice written with paidAt / paidVia / paidMethod /
+// pendingPaymentAt, turned into the payment ledger the app stores (one
+// payment for the total when paid).
+function legacy(doc) {
+  const { paidAt, paidVia, paidMethod, pendingPaymentAt, paidEntryId, paidPlaidTransactionId, paidFeeAmount, ...rest } = doc;
+  const payments =
+    doc.status === "paid"
+      ? [{
+          id: "p1", purpose: "full", amount: doc.total, tipAmount: 0,
+          receivedOn: (paidAt ?? "2026-10-01").slice(0, 10), via: paidVia ?? "manual", method: paidMethod ?? "other",
+          entryId: paidEntryId ?? "e1", plaidTransactionId: paidPlaidTransactionId ?? null, stripePaymentIntentId: null,
+          checkoutSessionId: null, feeAmount: paidFeeAmount ?? 0, createdAt: "x",
+        }]
+      : [];
+  return {
+    ...rest,
+    ...invoiceLedgerFields(payments),
+    payments,
+    refunds: (doc.refunds ?? []).map((refund) => ({ paymentId: "p1", ...refund })),
+    deposit: doc.deposit ?? null,
+    openCheckout: null,
+    closedAt: null,
+    pendingPayment: pendingPaymentAt
+      ? { checkoutSessionId: "cs", purpose: "full", amount: doc.total, tipAmount: 0, startedAt: pendingPaymentAt }
+      : null,
+  };
+}
 const { renderPublicInvoicePage, escapeHtml } = require("../shared/invoicePublicPage.ts");
 const { InvoiceSettingsSchema, InvoiceSettingsPatchSchema } = require("../shared/schemas/invoice.ts");
 const { PlaidPendingTransactionSchema } = require("../shared/schemas/plaidPendingTransaction.ts");
@@ -278,13 +304,15 @@ run("fee split across invoices adds up to the fee exactly", () => {
   assert.equal(Math.round(uneven.reduce((a, b) => a + b, 0) * 100), 1307);
 });
 
-run("invoice lines become one breakdown, summed per category", () => {
-  const breakdown = invoiceIncomeBreakdown(
+run("a full payment becomes one breakdown, summed per category", () => {
+  const breakdown = invoicePaymentBreakdown(
     [
       { description: "Design", amount: 0.1, category: "services" },
       { description: "Revisions", amount: 0.2, category: "services" },
       { description: "Prints", amount: 40, category: "products" },
     ],
+    40.3,
+    0,
     "zelle"
   );
   assert.deepEqual(breakdown, { paymentMethod: "zelle", services: 0.3, products: 40 });
@@ -313,13 +341,20 @@ run("patch input: partial, but dates still checked when both are given", () => {
   assert.equal(InvoicePatchSchema.safeParse({ issueDate: "2026-10-05", dueDate: "2026-10-01" }).success, false);
 });
 
-run("status actions: mark_paid needs a date and payment method", () => {
+run("status actions: record_payment needs an amount, date, method and mutation id", () => {
   assert.equal(InvoiceStatusActionSchema.safeParse({ action: "send" }).success, true);
-  assert.equal(InvoiceStatusActionSchema.safeParse({ action: "mark_paid" }).success, false);
-  assert.equal(
-    InvoiceStatusActionSchema.safeParse({ action: "mark_paid", paidDate: "2026-10-10", paymentMethod: "zelle" }).success,
-    true
-  );
+  assert.equal(InvoiceStatusActionSchema.safeParse({ action: "close" }).success, true);
+  assert.equal(InvoiceStatusActionSchema.safeParse({ action: "record_payment" }).success, false);
+  const payment = { action: "record_payment", amount: 100, paidDate: "2026-10-10", paymentMethod: "zelle", clientMutationId: "m1" };
+  const parsed = InvoiceStatusActionSchema.safeParse(payment);
+  assert.equal(parsed.success, true);
+  assert.equal(parsed.data.tipAmount, 0);
+  assert.equal(InvoiceStatusActionSchema.safeParse({ ...payment, amount: 0 }).success, false);
+  assert.equal(InvoiceStatusActionSchema.safeParse({ ...payment, amount: 10.005 }).success, false);
+  assert.equal(InvoiceStatusActionSchema.safeParse({ ...payment, tipAmount: -1 }).success, false);
+  assert.equal(InvoiceStatusActionSchema.safeParse({ ...payment, clientMutationId: undefined }).success, false);
+  // The old single-payment action is gone.
+  assert.equal(InvoiceStatusActionSchema.safeParse({ action: "mark_paid", paidDate: "2026-10-10", paymentMethod: "zelle" }).success, false);
   assert.equal(InvoiceStatusActionSchema.safeParse({ action: "delete" }).success, false);
 });
 
@@ -489,7 +524,8 @@ run("public page: Pay button only when payable, and not after returning paid", (
 const { EntrySchema } = require("../shared/schemas/entry.ts");
 const { computeEntry } = require("../shared/computeEntry.ts");
 const { computeIncomeGaugeForEntries } = require("../shared/computeIncomeGauge.ts");
-const { invoiceRefundableAmount, invoiceRefundedTotal } = require("../shared/schemas/invoice.ts");
+const { invoiceRefundedTotal } = require("../shared/schemas/invoice.ts");
+const { invoiceRefundable } = require("../shared/invoicePayments.ts");
 
 function indEntry(over) {
   return {
@@ -536,13 +572,15 @@ run("named-payer refunds net their own custom income", () => {
   assert.equal(getNonCustomOtherIncome(independent).total, 0);
 });
 
-run("refundable amount: total less refunds and disputed money", () => {
-  const base = { status: "paid", total: 1042.5, refunds: [{ amount: 200 }], dispute: null };
+run("refundable amount: payments less refunds and disputed money", () => {
+  const base = legacy({ status: "paid", total: 1042.5, refunds: [{ amount: 200 }], dispute: null });
   assert.equal(invoiceRefundedTotal(base), 200);
-  assert.equal(invoiceRefundableAmount(base), 842.5);
-  assert.equal(invoiceRefundableAmount({ ...base, dispute: { fundsWithdrawn: true, status: "open", amount: 842.5 } }), 0);
-  assert.equal(invoiceRefundableAmount({ ...base, dispute: { fundsWithdrawn: true, status: "won", amount: 842.5 } }), 842.5);
-  assert.equal(invoiceRefundableAmount({ ...base, status: "sent" }), 0);
+  assert.equal(invoiceRefundable(base), 842.5);
+  const held = { fundsWithdrawn: true, status: "open", amount: 842.5, paymentId: "p1" };
+  assert.equal(invoiceRefundable({ ...base, dispute: held }), 0);
+  assert.equal(invoiceRefundable({ ...base, dispute: { ...held, status: "won" } }), 842.5);
+  // Nothing paid, nothing to refund.
+  assert.equal(invoiceRefundable(legacy({ status: "sent", total: 1042.5 })), 0);
 });
 
 run("display status: partly refunded, refunded, disputed", () => {

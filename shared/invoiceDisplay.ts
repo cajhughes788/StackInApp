@@ -51,7 +51,7 @@ export function formatInvoiceDate(date: string): string {
 
 export type InvoiceDisplayStatus = {
   label: string
-  tone: "paid" | "overdue" | "open" | "draft" | "void"
+  tone: "paid" | "overdue" | "open" | "draft" | "void" | "closed"
 }
 
 // `today` is a YYYY-MM-DD in the business's local time; the caller decides.
@@ -75,7 +75,7 @@ export function invoiceDisplayStatus(
     case "void":
       return { label: "Void", tone: "void" }
     case "closed":
-      return { label: invoiceAmountPaid(invoice) > 0 ? `Closed · ${formatInvoiceMoney(invoiceAmountPaid(invoice))} kept` : "Closed", tone: "void" }
+      return { label: invoiceAmountPaid(invoice) > 0 ? `Closed · ${formatInvoiceMoney(invoiceAmountPaid(invoice))} kept` : "Closed", tone: "closed" }
     case "draft":
       return { label: "Draft", tone: "draft" }
     case "sent":
