@@ -18,12 +18,11 @@ import {
   softInputClass,
   useInvoicesWorkspace,
 } from "@/components/invoices/invoice-ui"
-import { createInvoice, editInvoice } from "@/lib/api/invoicesApi"
-import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
+import { createInvoiceInBackground, currentInvoiceId, editInvoiceInBackground } from "@/lib/domain/invoiceService"
 import { cn } from "@/lib/utils"
 import { dueDateForTerms, formatInvoiceDate, formatInvoiceMoney, INVOICE_TERMS_LABELS } from "@shared/invoiceDisplay"
 import type { IncomeCategory } from "@shared/schemas/entry"
-import type { InvoiceTerms, InvoiceType } from "@shared/schemas/invoice"
+import type { InvoiceTerms } from "@shared/schemas/invoice"
 
 type DraftLine = { key: number; description: string; amount: string; category: IncomeCategory }
 
@@ -65,11 +64,11 @@ function InvoiceFormPage() {
   const router = useRouter()
   const { toast } = useToast()
   const { ready, workspaceId, invoices, settings, loadStatus } = useInvoicesWorkspace()
-  const upsertInvoice = useInvoicesStore((state) => state.upsertInvoice)
   const invoiceId = useQueryParam("id")
   // "New invoice for <client>" from a client's page.
   const prefillClient = useQueryParam("client")
-  const existing = invoiceId ? invoices.find((invoice) => invoice.id === invoiceId) ?? null : null
+  // A new invoice keeps working by its temporary id once it has a real one.
+  const existing = invoiceId ? invoices.find((invoice) => invoice.id === currentInvoiceId(invoiceId)) ?? null : null
   // One id per form, so a retried create can't make a second invoice.
   const clientMutationId = useRef(
     typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -154,7 +153,7 @@ function InvoiceFormPage() {
     setLines((current) => current.map((line) => (line.key === key ? { ...line, ...patch } : line)))
   }
 
-  async function save(mode: "draft" | "share") {
+  function save(mode: "draft" | "share") {
     if (!workspaceId) return
     if (!valid) {
       setShowErrors(true)
@@ -173,29 +172,25 @@ function InvoiceFormPage() {
       dueDate,
       note: note.trim(),
     }
+    // Saved in the background (invoiceService) — the next screen shows it now.
     setSaving(mode)
-    try {
-      let saved: InvoiceType
-      if (existing) {
-        saved = await editInvoice(workspaceId, existing.id, body)
-      } else {
-        saved = await createInvoice(workspaceId, { ...body, clientMutationId: clientMutationId.current })
-      }
-      upsertInvoice(workspaceId, saved)
+    if (existing) {
+      editInvoiceInBackground(workspaceId, existing, body)
       if (mode === "share") {
-        // A new invoice lands on its share step; an edit just goes back.
-        router.replace(`/app/invoices/view?id=${encodeURIComponent(saved.id)}${existing ? "" : "&share=1"}`)
+        router.replace(`/app/invoices/view?id=${encodeURIComponent(existing.id)}`)
       } else {
-        toast({ title: existing ? "Invoice saved" : `Draft #${saved.number} saved` })
+        toast({ title: "Invoice saved" })
         router.replace("/app/invoices")
       }
-    } catch (error) {
-      toast({
-        title: "Couldn't save the invoice",
-        description: error instanceof Error ? error.message : "Check your connection and try again.",
-        variant: "destructive",
-      })
-      setSaving(null)
+    } else {
+      const created = createInvoiceInBackground(workspaceId, { ...body, clientMutationId: clientMutationId.current })
+      if (mode === "share") {
+        // A new invoice lands on its send step.
+        router.replace(`/app/invoices/view?id=${encodeURIComponent(created.id)}&share=1`)
+      } else {
+        toast({ title: `Draft for ${created.clientName} saved` })
+        router.replace("/app/invoices")
+      }
     }
   }
 

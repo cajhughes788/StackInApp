@@ -7,6 +7,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { useToast } from "@/hooks/use-toast"
 import { fieldLabelClass, softInputClass } from "@/components/invoices/invoice-ui"
 import { updateInvoiceStatus } from "@/lib/api/invoicesApi"
+import { invoiceSaved } from "@/lib/domain/invoiceService"
 import { useEntriesStore } from "@/lib/stores/useEntriesStore"
 import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
 import { cn } from "@/lib/utils"
@@ -81,7 +82,9 @@ export default function RefundSheet({
     if (!valid || amount === null) return
     setSaving(true)
     try {
-      const { invoice: updated } = await updateInvoiceStatus(workspaceId, invoice.id, {
+      // A mark-paid still saving goes first.
+      const id = await invoiceSaved(invoice.id)
+      const { invoice: updated } = await updateInvoiceStatus(workspaceId, id, {
         action: "refund",
         amount,
         reason,

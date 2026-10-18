@@ -6,9 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { useToast } from "@/hooks/use-toast"
 import { fieldLabelClass, localToday, softInputClass } from "@/components/invoices/invoice-ui"
-import { updateInvoiceStatus } from "@/lib/api/invoicesApi"
-import { useEntriesStore } from "@/lib/stores/useEntriesStore"
-import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
+import { markInvoicePaidInBackground } from "@/lib/domain/invoiceService"
 import { cn } from "@/lib/utils"
 import { formatInvoiceDate, formatInvoiceMoney } from "@shared/invoiceDisplay"
 import type { InvoicePaidMethod, InvoiceType } from "@shared/schemas/invoice"
@@ -35,45 +33,23 @@ export default function MarkPaidSheet({
   workspaceId: string
 }) {
   const { toast } = useToast()
-  const upsertInvoice = useInvoicesStore((state) => state.upsertInvoice)
   const today = localToday()
   const [paidDate, setPaidDate] = useState(today)
   const [method, setMethod] = useState<InvoicePaidMethod | null>(null)
-  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (open) {
       setPaidDate(localToday())
       setMethod(null)
-      setSaving(false)
     }
   }, [open])
 
-  async function submit() {
+  function submit() {
     if (!method) return
-    setSaving(true)
-    try {
-      const { invoice: paid } = await updateInvoiceStatus(workspaceId, invoice.id, {
-        action: "mark_paid",
-        paidDate,
-        paymentMethod: method,
-      })
-      upsertInvoice(workspaceId, paid)
-      // The income entry was booked server-side; refresh whatever period the
-      // home page has loaded.
-      const entries = useEntriesStore.getState()
-      const periodId = entries.byWorkspaceId[workspaceId]?.periodId
-      if (periodId) void entries.refreshFromBackend(workspaceId, periodId, { force: true }).catch(() => {})
-      toast({ title: `Invoice #${invoice.number} paid`, description: `${formatInvoiceMoney(invoice.total)} added to your income.` })
-      onOpenChange(false)
-    } catch (error) {
-      toast({
-        title: "Couldn't mark it paid",
-        description: error instanceof Error ? error.message : "Check your connection and try again.",
-        variant: "destructive",
-      })
-      setSaving(false)
-    }
+    // Saved in the background (invoiceService); the income entry follows.
+    markInvoicePaidInBackground(workspaceId, invoice, paidDate, method)
+    toast({ title: `Invoice #${invoice.number} paid`, description: `${formatInvoiceMoney(invoice.total)} added to your income.` })
+    onOpenChange(false)
   }
 
   return (
@@ -146,10 +122,10 @@ export default function MarkPaidSheet({
             <Button
               type="button"
               className="h-[52px] flex-[2] rounded-full text-base font-semibold"
-              disabled={!method || saving}
+              disabled={!method}
               onClick={() => void submit()}
             >
-              {saving ? "Saving..." : "Mark paid"}
+              Mark paid
             </Button>
           </div>
         </div>

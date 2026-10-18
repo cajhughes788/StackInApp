@@ -11,6 +11,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { useToast } from "@/hooks/use-toast"
 import { fieldLabelClass, softInputClass } from "@/components/invoices/invoice-ui"
 import { updateInvoiceStatus } from "@/lib/api/invoicesApi"
+import { invoiceSaved, latestInvoice } from "@/lib/domain/invoiceService"
 import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
 import { formatInvoiceDate, formatInvoiceMoney, invoiceBalanceDue, publicInvoiceUrl } from "@shared/invoiceDisplay"
 import type { InvoiceSettings, InvoiceType } from "@shared/schemas/invoice"
@@ -65,7 +66,9 @@ export default function SendInvoiceSheet({
     if (!emailValid) return
     setBusy("email")
     try {
-      const { invoice: sent } = await updateInvoiceStatus(workspaceId, invoice.id, {
+      // A new invoice may still be saving; it's emailed once it is.
+      const id = await invoiceSaved(invoice.id)
+      const { invoice: sent } = await updateInvoiceStatus(workspaceId, id, {
         action: "email",
         to: to.trim(),
         ...(message.trim() ? { message: message.trim() } : {}),
@@ -87,10 +90,12 @@ export default function SendInvoiceSheet({
     if (!phone.trim()) return
     setBusy("text")
     try {
-      // The text needs the link, which sharing creates.
-      let url = invoice.shareToken && invoice.status !== "draft" ? publicInvoiceUrl(invoice.shareToken) : null
+      // The text needs the link, which sharing creates (on the saved invoice).
+      const id = await invoiceSaved(invoice.id)
+      const current = latestInvoice(workspaceId, id) ?? invoice
+      let url = current.shareToken && current.status !== "draft" ? publicInvoiceUrl(current.shareToken) : null
       if (!url) {
-        const result = await updateInvoiceStatus(workspaceId, invoice.id, { action: "share" })
+        const result = await updateInvoiceStatus(workspaceId, id, { action: "share" })
         upsertInvoice(workspaceId, result.invoice)
         url = result.shareUrl ?? publicInvoiceUrl(result.invoice.shareToken!)
       }

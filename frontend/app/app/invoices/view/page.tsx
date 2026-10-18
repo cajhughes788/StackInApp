@@ -44,10 +44,18 @@ import {
   useQueryParam,
   useInvoicesWorkspace,
 } from "@/components/invoices/invoice-ui"
-import { deleteInvoice, updateInvoiceStatus } from "@/lib/api/invoicesApi"
+import { updateInvoiceStatus } from "@/lib/api/invoicesApi"
+import {
+  currentInvoiceId,
+  deleteInvoiceInBackground,
+  invoiceSaved,
+  latestInvoice,
+  useInvoiceSaving,
+  voidInvoiceInBackground,
+} from "@/lib/domain/invoiceService"
 import { shareLink } from "@/lib/documentExport"
 import { shareInvoicePdf } from "@/lib/invoicePdf"
-import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
+import { isTempInvoiceId, useInvoicesStore } from "@/lib/stores/useInvoicesStore"
 import { cn } from "@/lib/utils"
 import {
   INVOICE_TERMS_LABELS,
@@ -108,17 +116,20 @@ function InvoiceDetailPage() {
   const paymentAccount = useInvoicesStore((state) => (workspaceId ? state.byWorkspaceId[workspaceId]?.paymentAccount ?? null : null))
   const payableOnline = !!paymentAccount?.chargesEnabled && !!paymentAccount.acceptOnline
   const upsertInvoice = useInvoicesStore((state) => state.upsertInvoice)
-  const removeInvoice = useInvoicesStore((state) => state.removeInvoice)
   const invoiceId = useQueryParam("id")
   const justCreated = useQueryParam("share") === "1"
-  const invoice = invoices.find((i) => i.id === invoiceId) ?? null
-  const [busy, setBusy] = useState<null | "link" | "pdf" | "void" | "delete">(null)
+  // A just-created invoice is found under its real id as soon as it has one.
+  const invoice = invoiceId ? invoices.find((i) => i.id === currentInvoiceId(invoiceId)) ?? null : null
+  const saving = useInvoiceSaving(invoice?.id ?? null)
+  const [busy, setBusy] = useState<null | "link" | "pdf">(null)
   const [markPaidOpen, setMarkPaidOpen] = useState(false)
   const [refundOpen, setRefundOpen] = useState(false)
   const [sendOpen, setSendOpen] = useState(false)
   // The link, when neither a share sheet nor the clipboard was available.
   const [manualLink, setManualLink] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<null | "void" | "delete">(null)
+  // Deleted here: it's gone from the store before the list page opens.
+  const [leaving, setLeaving] = useState(false)
   const today = localToday()
 
   // A just-created invoice opens straight into the send sheet, once.
@@ -130,12 +141,28 @@ function InvoiceDetailPage() {
     setSendOpen(true)
   }, [justCreated, canSend])
 
+  // Once a new invoice has its real id, the URL gets it too; one whose
+  // create failed (or a stale temporary link) goes back to the list.
+  useEffect(() => {
+    if (!invoiceId || !isTempInvoiceId(invoiceId) || loadStatus !== "ready") return
+    if (invoice && !isTempInvoiceId(invoice.id)) {
+      router.replace(`/app/invoices/view?id=${encodeURIComponent(invoice.id)}${justCreated ? "&share=1" : ""}`, {
+        scroll: false,
+      })
+    } else if (!invoice) {
+      router.replace("/app/invoices")
+    }
+  }, [invoice, invoiceId, justCreated, loadStatus, router])
+
   // Creates the link the first time (and sends a draft). Returns the latest invoice.
-  async function ensureShared(current: InvoiceType): Promise<{ invoice: InvoiceType; url: string }> {
+  async function ensureShared(shown: InvoiceType): Promise<{ invoice: InvoiceType; url: string }> {
+    // Changes still saving go first; the link needs the saved invoice.
+    const id = await invoiceSaved(shown.id)
+    const current = latestInvoice(workspaceId!, id) ?? shown
     if (current.shareToken && current.status !== "draft") {
       return { invoice: current, url: publicInvoiceUrl(current.shareToken) }
     }
-    const result = await updateInvoiceStatus(workspaceId!, current.id, { action: "share" })
+    const result = await updateInvoiceStatus(workspaceId!, id, { action: "share" })
     upsertInvoice(workspaceId!, result.invoice)
     return { invoice: result.invoice, url: result.shareUrl ?? publicInvoiceUrl(result.invoice.shareToken!) }
   }
@@ -182,29 +209,18 @@ function InvoiceDetailPage() {
     }
   }
 
-  async function onConfirmAction(action: "void" | "delete") {
+  function onConfirmAction(action: "void" | "delete") {
     if (!invoice || !workspaceId) return
     setConfirm(null)
-    setBusy(action)
-    try {
-      if (action === "void") {
-        const { invoice: voided } = await updateInvoiceStatus(workspaceId, invoice.id, { action: "void" })
-        upsertInvoice(workspaceId, voided)
-        toast({ title: `Invoice #${invoice.number} voided` })
-      } else {
-        await deleteInvoice(workspaceId, invoice.id)
-        removeInvoice(workspaceId, invoice.id)
-        toast({ title: `Draft #${invoice.number} deleted` })
-        router.replace("/app/invoices")
-      }
-    } catch (error) {
-      toast({
-        title: action === "void" ? "Couldn't void the invoice" : "Couldn't delete the draft",
-        description: error instanceof Error ? error.message : "Please try again.",
-        variant: "destructive",
-      })
-    } finally {
-      setBusy(null)
+    // Saved in the background (invoiceService).
+    if (action === "void") {
+      voidInvoiceInBackground(workspaceId, invoice)
+      toast({ title: `Invoice #${invoice.number} voided` })
+    } else {
+      setLeaving(true)
+      deleteInvoiceInBackground(workspaceId, invoice)
+      toast({ title: `Draft #${invoice.number} deleted` })
+      router.replace("/app/invoices")
     }
   }
 
@@ -258,7 +274,8 @@ function InvoiceDetailPage() {
       }
     >
       {!invoice ? (
-        loadStatus === "loading" ? (
+        // On its way to the list: just deleted, or a new invoice whose save failed.
+        loadStatus === "loading" || leaving || (invoiceId && isTempInvoiceId(invoiceId)) ? (
           <div className="space-y-3" aria-hidden="true">
             <Skeleton className="h-32 w-full rounded-[18px]" />
             <Skeleton className="h-14 w-full rounded-full" />
@@ -276,7 +293,7 @@ function InvoiceDetailPage() {
         <>
           {justCreated && invoice.status === "draft" ? (
             <div className="rounded-[14px] bg-accent px-3.5 py-3 text-sm text-foreground">
-              Saved as #{invoice.number}. Send it to {invoice.clientName} by email or text, or share a link or PDF.
+              {isTempInvoiceId(invoice.id) ? "Saving your invoice." : `Saved as #${invoice.number}.`} Send it to {invoice.clientName} by email or text, or share a link or PDF.
             </div>
           ) : null}
 
@@ -295,7 +312,10 @@ function InvoiceDetailPage() {
                 formatInvoiceMoney(invoice.total)
               )}
             </div>
-            <div className="text-sm text-muted-foreground">{metaLine(invoice)}</div>
+            <div className="text-sm text-muted-foreground">
+              {metaLine(invoice)}
+              {saving ? <span className="ml-1.5 text-xs">· Saving…</span> : null}
+            </div>
           </section>
 
           {invoice.status === "draft" || invoice.status === "sent" ? (
@@ -508,7 +528,7 @@ function InvoiceDetailPage() {
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Keep it</AlertDialogCancel>
-                <AlertDialogAction onClick={() => confirm && void onConfirmAction(confirm)}>
+                <AlertDialogAction onClick={() => confirm && onConfirmAction(confirm)}>
                   {confirm === "delete" ? "Delete draft" : "Void invoice"}
                 </AlertDialogAction>
               </AlertDialogFooter>
