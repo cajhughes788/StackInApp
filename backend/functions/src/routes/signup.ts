@@ -24,7 +24,8 @@ const LegalConsentSchema = z.object({
     message: "acceptedAt must be a valid ISO timestamp",
   }),
   userAgent: z.string().trim().min(1).max(2000),
-  source: z.literal("web-signup"),
+  // "ios-app" is the in-app signup form (frontend/app/signup/page.tsx).
+  source: z.enum(["web-signup", "ios-app"]),
 })
 
 const SignupSchema = z.object({

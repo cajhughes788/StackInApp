@@ -15,82 +15,11 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useToast } from "@/hooks/use-toast";
 import { Toaster } from "@/components/ui/toaster";
 import { Capacitor } from "@capacitor/core";
+import { detectNativeSignupCountryEligibility } from "@/lib/mobile/nativeSignupEligibility";
 
 const STACKIN_WEBSITE_SIGNUP_URL =
     process.env.NEXT_PUBLIC_STACKIN_WEBSITE_SIGNUP_URL?.trim() ||
     "https://stackin-app.com/signup";
-const NATIVE_SIGNUP_SOURCE_PARAM = "source";
-const NATIVE_SIGNUP_SOURCE_VALUE = "ios-app";
-const NATIVE_SIGNUP_ALLOWED_COUNTRIES = new Set((process.env.NEXT_PUBLIC_NATIVE_SIGNUP_ALLOWED_COUNTRIES ?? "US")
-    .split(",")
-    .map((value) => value.trim().toUpperCase())
-    .filter(Boolean));
-const US_TIMEZONE_HINTS = new Set([
-    "America/Adak",
-    "America/Anchorage",
-    "America/Boise",
-    "America/Chicago",
-    "America/Denver",
-    "America/Detroit",
-    "America/Indiana/Indianapolis",
-    "America/Juneau",
-    "America/Kentucky/Louisville",
-    "America/Los_Angeles",
-    "America/Menominee",
-    "America/Metlakatla",
-    "America/New_York",
-    "America/Nome",
-    "America/North_Dakota/Beulah",
-    "America/North_Dakota/Center",
-    "America/North_Dakota/New_Salem",
-    "America/Phoenix",
-    "America/Sitka",
-    "America/Yakutat",
-    "Pacific/Honolulu",
-]);
-
-function getLocaleRegion(locale: string): string | null {
-    try {
-        if (typeof Intl !== "undefined" && "Locale" in Intl) {
-            const region = new Intl.Locale(locale).region;
-            if (region) {
-                return region.toUpperCase();
-            }
-        }
-    }
-    catch {
-    }
-    const segments = locale
-        .split(/[-_]/)
-        .map((segment) => segment.trim())
-        .filter(Boolean);
-    for (let index = segments.length - 1; index >= 0; index -= 1) {
-        const segment = segments[index];
-        if (/^[A-Za-z]{2}$/.test(segment)) {
-            return segment.toUpperCase();
-        }
-    }
-    return null;
-}
-
-function detectNativeSignupCountryEligibility() {
-    if (typeof window === "undefined") {
-        return false;
-    }
-    const locales = Array.from(new Set([
-        ...(navigator.languages ?? []),
-        navigator.language,
-        Intl.DateTimeFormat().resolvedOptions().locale,
-    ].filter(Boolean)));
-    for (const locale of locales) {
-        const region = getLocaleRegion(locale);
-        if (region && NATIVE_SIGNUP_ALLOWED_COUNTRIES.has(region)) {
-            return true;
-        }
-    }
-    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    return US_TIMEZONE_HINTS.has(timeZone);
-}
 
 function getLoginErrorCopy(error: unknown) {
     if (error instanceof FirebaseError) {
@@ -157,21 +86,6 @@ function getSignupOpenErrorCopy(error: unknown) {
     };
 }
 
-function buildSignupUrl(isNativeApp: boolean) {
-    if (!isNativeApp) {
-        return STACKIN_WEBSITE_SIGNUP_URL;
-    }
-    try {
-        const signupUrl = new URL(STACKIN_WEBSITE_SIGNUP_URL);
-        signupUrl.searchParams.set(NATIVE_SIGNUP_SOURCE_PARAM, NATIVE_SIGNUP_SOURCE_VALUE);
-        return signupUrl.toString();
-    }
-    catch {
-        const separator = STACKIN_WEBSITE_SIGNUP_URL.includes("?") ? "&" : "?";
-        return `${STACKIN_WEBSITE_SIGNUP_URL}${separator}${NATIVE_SIGNUP_SOURCE_PARAM}=${encodeURIComponent(NATIVE_SIGNUP_SOURCE_VALUE)}`;
-    }
-}
-
 export default function LoginPage() {
     const router = useRouter();
     const { toast } = useToast();
@@ -182,7 +96,6 @@ export default function LoginPage() {
     const [openingSignup, setOpeningSignup] = useState(false);
     const [showNativeHelp, setShowNativeHelp] = useState(false);
     const isNativeApp = Capacitor.isNativePlatform();
-    const signupUrl = buildSignupUrl(isNativeApp);
     const [nativeSignupAllowed, setNativeSignupAllowed] = useState(() => !isNativeApp);
     const showCreateAccount = !isNativeApp || nativeSignupAllowed;
     const showNativeWebsiteFirstMessage = isNativeApp && !nativeSignupAllowed;
@@ -196,18 +109,16 @@ export default function LoginPage() {
     }, [isNativeApp]);
 
     const handleCreateAccount = async () => {
+        if (isNativeApp) {
+            // App Review 4: accounts are created in the app. Only the
+            // subscription purchase links out to the default browser
+            // (see app/welcome/page.tsx).
+            router.push("/signup");
+            return;
+        }
         try {
             setOpeningSignup(true);
-            if (isNativeApp) {
-                // Purchases happen on the website, which App Review only allows
-                // (US storefront) when it opens in the default browser — not an
-                // in-app SFSafariViewController. Capacitor hands top-level
-                // navigations to external hosts to UIApplication.open, which
-                // launches Safari.
-                window.location.href = signupUrl;
-                return;
-            }
-            window.open(signupUrl, "_blank", "noopener,noreferrer");
+            window.open(STACKIN_WEBSITE_SIGNUP_URL, "_blank", "noopener,noreferrer");
         }
         catch (err: any) {
             const copy = getSignupOpenErrorCopy(err);

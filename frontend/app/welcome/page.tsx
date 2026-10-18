@@ -11,10 +11,19 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { useAccountAuthorityState } from "@/contexts/account-authority-context"
 import { useToast } from "@/hooks/use-toast"
-import { createWorkspaceAPI } from "@/lib/api"
+import { API_ENDPOINTS, apiFetch, createWorkspaceAPI } from "@/lib/api"
+import { detectNativeSignupCountryEligibility } from "@/lib/mobile/nativeSignupEligibility"
 import { useAuth } from "@/contexts/auth-context"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import type { WorkspaceType } from "@shared/contracts/workspace"
+import type { SubscriptionTier } from "@shared/contracts/subscription"
+
+// Customer-facing plan names, matching app/app/account/page.tsx.
+const PLAN_OPTIONS: { tier: SubscriptionTier; name: string; description: string }[] = [
+  { tier: "w2_basic", name: "Essential", description: "For W-2 and hourly work" },
+  { tier: "independent_basic", name: "Pro", description: "For independent and self-employed work" },
+  { tier: "hybrid_plus", name: "Complete", description: "For both W-2 and self-employed work" },
+]
 
 function isWelcomeDeepLink(url: string): boolean {
   try {
@@ -43,6 +52,13 @@ export default function WelcomePage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [requestedAddWorkspaceMode, setRequestedAddWorkspaceMode] = useState(false)
   const lastBillingRefreshAtRef = useRef(0)
+  const [nativeCheckoutAllowed, setNativeCheckoutAllowed] = useState(false)
+  const [selectedTier, setSelectedTier] = useState<SubscriptionTier | null>(null)
+  const [openingCheckout, setOpeningCheckout] = useState(false)
+
+  useEffect(() => {
+    setNativeCheckoutAllowed(isNativeApp && detectNativeSignupCountryEligibility())
+  }, [isNativeApp])
 
   const loadAccountAuthority = useCallback(
     async (options: { silent?: boolean; showActivatedToast?: boolean } = {}) => {
@@ -138,6 +154,44 @@ export default function WelcomePage() {
     }
   }, [loadAccountAuthority, router])
 
+  const handleOpenCheckout = async () => {
+    if (!selectedTier) {
+      toast({
+        title: "Choose a plan",
+        description: "Pick the plan that fits your work to continue.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      setOpeningCheckout(true)
+      const result = await apiFetch<{ ok: boolean; url?: string; error?: string }>(
+        API_ENDPOINTS.subscription.createCheckoutSession,
+        {
+          method: "POST",
+          body: JSON.stringify({ tier: selectedTier, source: "ios-app" }),
+        }
+      )
+      if (!result?.url) {
+        throw new Error(result?.error || "Checkout is unavailable right now.")
+      }
+      // Purchases link out to the default browser (US storefront external
+      // purchase link). Capacitor hands top-level navigations to external
+      // hosts to UIApplication.open, which launches Safari. The resume
+      // listener above refreshes access when the person comes back.
+      window.location.href = result.url
+    } catch (err: any) {
+      toast({
+        title: "Couldn't open checkout",
+        description: err?.message || "Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setOpeningCheckout(false)
+    }
+  }
+
   const allowedWorkspaceTypes = authority?.allowedWorkspaceTypes ?? []
 
   const hasExistingWorkspace = workspaceState.status === "ready"
@@ -150,6 +204,8 @@ export default function WelcomePage() {
   const canCreateWorkspace = allowedWorkspaceTypes.length > 0
   const canCreateAnotherWorkspace = canCreateWorkspace && !hasReachedWorkspaceLimit
   const hasSingleWorkspaceType = allowedWorkspaceTypes.length === 1
+  const showNativePlanPicker =
+    nativeCheckoutAllowed && !authority?.isSubscriptionActive && !hasReachedWorkspaceLimit
   const accessUnavailableMessage = hasReachedWorkspaceLimit
     ? isNativeApp
       ? "This 521 account has reached its current workspace limit."
@@ -285,10 +341,51 @@ export default function WelcomePage() {
             <CardDescription>
               {isAddWorkspaceMode
                 ? "Create another workspace for a new job or business."
-                : "Choose a workspace name and type to continue."}
+                : showNativePlanPicker
+                  ? "Pick a plan to get started. Then you'll name your first workspace."
+                  : "Choose a workspace name and type to continue."}
             </CardDescription>
           </CardHeader>
 
+          {showNativePlanPicker ? (
+            <CardContent className="space-y-6">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Choose your plan</label>
+                <div className="grid grid-cols-1 gap-3">
+                  {PLAN_OPTIONS.map((plan) => (
+                    <button
+                      key={plan.tier}
+                      type="button"
+                      onClick={() => setSelectedTier(plan.tier)}
+                      disabled={openingCheckout}
+                      className={`rounded-xl border px-4 py-3 text-left transition ${
+                        selectedTier === plan.tier
+                          ? "border-primary bg-primary/10"
+                          : "border-border bg-card"
+                      }`}
+                    >
+                      <div className="text-sm font-semibold">{plan.name}</div>
+                      <div className="text-xs text-muted-foreground">{plan.description}</div>
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Checkout opens in your web browser. Come back to the app when you're done to set up
+                  your workspace.
+                </p>
+              </div>
+
+              <div className="pt-4 border-t">
+                <Button
+                  onClick={handleOpenCheckout}
+                  disabled={openingCheckout || !selectedTier}
+                  className="w-full"
+                >
+                  {openingCheckout ? "Opening checkout..." : "Continue to checkout"}
+                </Button>
+              </div>
+            </CardContent>
+          ) : (
           <CardContent className="space-y-6">
             <div className="space-y-2">
               <label className="text-sm font-medium">Workspace Name</label>
@@ -362,6 +459,7 @@ export default function WelcomePage() {
               </Button>
             </div>
           </CardContent>
+          )}
         </Card>
       </div>
     </div>

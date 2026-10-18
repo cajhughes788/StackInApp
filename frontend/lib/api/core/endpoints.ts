@@ -101,6 +101,7 @@ export const API_ENDPOINTS = {
 
   subscription: {
     get: "https://getsubscription-3lc2fwdgwq-uc.a.run.app",
+    createCheckoutSession: "https://createcheckoutsession-3lc2fwdgwq-uc.a.run.app",
   },
 
   user: {
