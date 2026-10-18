@@ -178,6 +178,57 @@ export function InvoiceStatusPill({ invoice, today, short }: { invoice: InvoiceT
   )
 }
 
+function shortDate(date: string): string {
+  return formatInvoiceDate(date).replace(/, \d{4}$/, "")
+}
+
+// "#0014 · Sent Sep 28", "#0015 · Paid Oct 9 · bank match"
+function rowDetail(invoice: InvoiceType): string {
+  const parts = [`#${invoice.number}`]
+  if (invoice.status === "draft") parts.push("Not sent")
+  else if (invoice.status === "void") parts.push("Voided")
+  else if (invoice.status === "paid") {
+    if (invoice.paidAt) parts.push(`Paid ${shortDate(invoice.paidAt.slice(0, 10))}`)
+    if (invoice.paidVia === "bank_match") parts.push("bank match")
+    else if (invoice.paidVia === "online") parts.push(invoice.paidMethod === "other" ? "bank transfer" : "paid online")
+    else if (invoice.paidMethod) parts.push(PAID_METHOD_LABELS[invoice.paidMethod])
+  } else if (invoice.pendingPaymentAt) parts.push("bank payment clearing")
+  else if (invoice.lastEmailedAt) parts.push(`Emailed ${shortDate(invoice.lastEmailedAt.slice(0, 10))}`)
+  else parts.push(`Sent ${shortDate((invoice.sharedAt ?? invoice.createdAt).slice(0, 10))}`)
+  return parts.join(" · ")
+}
+
+// One invoice in a list: the title (client name, or the date on a client's
+// page) over its number and latest event, amount and status on the right.
+export function InvoiceRow({ invoice, title, today }: { invoice: InvoiceType; title: string; today: string }) {
+  return (
+    <li className="border-b border-border last:border-0">
+      <Link
+        href={`/app/invoices/view?id=${encodeURIComponent(invoice.id)}`}
+        className="flex items-center gap-3 px-4 py-3.5 hover:bg-muted/50"
+      >
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-semibold text-foreground">{title}</div>
+          <div className="truncate text-sm text-muted-foreground">{rowDetail(invoice)}</div>
+        </div>
+        <div className="shrink-0 text-right">
+          <div
+            className={cn(
+              "font-semibold tabular-nums",
+              invoice.status === "draft" || invoice.status === "void" ? "text-muted-foreground" : "text-foreground"
+            )}
+          >
+            {formatInvoiceMoney(invoice.total)}
+          </div>
+          <div className="mt-0.5">
+            <InvoiceStatusPill invoice={invoice} today={today} short />
+          </div>
+        </div>
+      </Link>
+    </li>
+  )
+}
+
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean)
   return (parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")

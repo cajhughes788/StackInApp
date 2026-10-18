@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useToast } from "@/hooks/use-toast"
+import { clientKey } from "@/components/invoices/invoice-clients"
 import {
   InvoicesPage,
   cardClass,
@@ -66,6 +67,8 @@ function InvoiceFormPage() {
   const { ready, workspaceId, invoices, settings, loadStatus } = useInvoicesWorkspace()
   const upsertInvoice = useInvoicesStore((state) => state.upsertInvoice)
   const invoiceId = useQueryParam("id")
+  // "New invoice for <client>" from a client's page.
+  const prefillClient = useQueryParam("client")
   const existing = invoiceId ? invoices.find((invoice) => invoice.id === invoiceId) ?? null : null
   // One id per form, so a retried create can't make a second invoice.
   const clientMutationId = useRef(
@@ -98,11 +101,20 @@ function InvoiceFormPage() {
       setIssueDate(existing.issueDate)
       setDueDate(existing.dueDate)
       setNote(existing.note)
-    } else if (settings) {
-      setDueDate(dueDateForTerms(localToday(), settings.defaultTerms))
-      setNote(settings.defaultNote)
+    } else {
+      if (settings) {
+        setDueDate(dueDateForTerms(localToday(), settings.defaultTerms))
+        setNote(settings.defaultNote)
+      }
+      if (prefillClient) {
+        // Their contact details from the latest invoice to them.
+        const last = invoices.find((invoice) => clientKey(invoice.clientName) === clientKey(prefillClient))
+        setClientName(last?.clientName ?? prefillClient)
+        setClientEmail(last?.clientEmail ?? "")
+        setClientPhone(last?.clientPhone ?? "")
+      }
     }
-  }, [existing, invoiceId, loadStatus, settings])
+  }, [existing, invoiceId, invoices, loadStatus, prefillClient, settings])
 
   // Paid and void invoices can't be edited.
   useEffect(() => {

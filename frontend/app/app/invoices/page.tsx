@@ -1,20 +1,22 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { Suspense, useMemo, useState } from "react"
 import Link from "next/link"
-import { FileText, Plus, Settings2 } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { ChevronRight, FileText, Plus, Settings2 } from "lucide-react"
 
 import { Skeleton } from "@/components/ui/skeleton"
 import {
+  InvoiceRow,
   InvoicesPage,
-  InvoiceStatusPill,
-  PAID_METHOD_LABELS,
   cardClass,
   localToday,
   useInvoicesWorkspace,
+  useQueryParam,
 } from "@/components/invoices/invoice-ui"
+import { groupInvoicesByClient } from "@/components/invoices/invoice-clients"
 import { cn } from "@/lib/utils"
-import { formatInvoiceDate, formatInvoiceMoney } from "@shared/invoiceDisplay"
+import { formatInvoiceMoney } from "@shared/invoiceDisplay"
 import type { InvoiceType } from "@shared/schemas/invoice"
 
 type Filter = "all" | "open" | "overdue" | "paid" | "draft"
@@ -42,29 +44,27 @@ function matchesFilter(invoice: InvoiceType, filter: Filter, today: string): boo
   }
 }
 
-function shortDate(date: string): string {
-  return formatInvoiceDate(date).replace(/, \d{4}$/, "")
+type View = "invoices" | "clients"
+
+const VIEWS: Array<{ id: View; label: string }> = [
+  { id: "invoices", label: "Invoices" },
+  { id: "clients", label: "Clients" },
+]
+
+export default function InvoicesListPageRoute() {
+  return (
+    <Suspense fallback={null}>
+      <InvoicesListPage />
+    </Suspense>
+  )
 }
 
-// "#0014 · Sent Sep 28", "#0015 · Paid Oct 9 · bank match"
-function rowDetail(invoice: InvoiceType): string {
-  const parts = [`#${invoice.number}`]
-  if (invoice.status === "draft") parts.push("Not sent")
-  else if (invoice.status === "void") parts.push("Voided")
-  else if (invoice.status === "paid") {
-    if (invoice.paidAt) parts.push(`Paid ${shortDate(invoice.paidAt.slice(0, 10))}`)
-    if (invoice.paidVia === "bank_match") parts.push("bank match")
-    else if (invoice.paidVia === "online") parts.push(invoice.paidMethod === "other" ? "bank transfer" : "paid online")
-    else if (invoice.paidMethod) parts.push(PAID_METHOD_LABELS[invoice.paidMethod])
-  } else if (invoice.pendingPaymentAt) parts.push("bank payment clearing")
-  else if (invoice.lastEmailedAt) parts.push(`Emailed ${shortDate(invoice.lastEmailedAt.slice(0, 10))}`)
-  else parts.push(`Sent ${shortDate((invoice.sharedAt ?? invoice.createdAt).slice(0, 10))}`)
-  return parts.join(" · ")
-}
-
-export default function InvoicesListPage() {
+function InvoicesListPage() {
   const { ready, invoices, loadStatus } = useInvoicesWorkspace()
+  const router = useRouter()
   const [filter, setFilter] = useState<Filter>("all")
+  // In the URL, so coming back from a client's page lands on Clients again.
+  const view: View = useQueryParam("view") === "clients" ? "clients" : "invoices"
   const today = localToday()
 
   const summary = useMemo(() => {
@@ -86,6 +86,7 @@ export default function InvoicesListPage() {
   }, [invoices, today])
 
   const visible = invoices.filter((invoice) => matchesFilter(invoice, filter, today))
+  const clients = useMemo(() => groupInvoicesByClient(invoices, today), [invoices, today])
 
   return (
     <InvoicesPage
@@ -151,57 +152,92 @@ export default function InvoicesListPage() {
             </div>
           </section>
 
-          <nav aria-label="Filter invoices" className="-mx-4 flex gap-2 overflow-x-scroll px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {FILTERS.map((option) => {
-              const active = filter === option.id
+          <div role="group" aria-label="Show" className="grid grid-cols-2 gap-1 rounded-full bg-muted p-1">
+            {VIEWS.map((option) => {
+              const active = view === option.id
               return (
                 <button
                   key={option.id}
                   type="button"
                   aria-pressed={active}
-                  onClick={() => setFilter(option.id)}
+                  onClick={() =>
+                    router.replace(option.id === "clients" ? "/app/invoices?view=clients" : "/app/invoices", { scroll: false })
+                  }
                   className={cn(
-                    "h-9 shrink-0 rounded-full px-3.5 text-sm transition-colors",
-                    active
-                      ? "bg-foreground font-semibold text-background"
-                      : "border border-card-border bg-card text-foreground hover:bg-muted"
+                    "h-9 rounded-full text-sm transition-colors",
+                    active ? "bg-card font-semibold text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
                   )}
                 >
                   {option.label}
                 </button>
               )
             })}
-          </nav>
+          </div>
 
-          {visible.length === 0 ? (
-            <div className={cn(cardClass, "text-sm text-muted-foreground")}>No invoices here.</div>
+          {view === "invoices" ? (
+            <>
+              <nav aria-label="Filter invoices" className="-mx-4 flex gap-2 overflow-x-scroll px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                {FILTERS.map((option) => {
+                  const active = filter === option.id
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => setFilter(option.id)}
+                      className={cn(
+                        "h-9 shrink-0 rounded-full px-3.5 text-sm transition-colors",
+                        active
+                          ? "bg-foreground font-semibold text-background"
+                          : "border border-card-border bg-card text-foreground hover:bg-muted"
+                      )}
+                    >
+                      {option.label}
+                    </button>
+                  )
+                })}
+              </nav>
+
+              {visible.length === 0 ? (
+                <div className={cn(cardClass, "text-sm text-muted-foreground")}>No invoices here.</div>
+              ) : (
+                <ul className="overflow-hidden rounded-[18px] border border-card-border bg-card">
+                  {visible.map((invoice) => (
+                    <InvoiceRow key={invoice.id} invoice={invoice} title={invoice.clientName} today={today} />
+                  ))}
+                </ul>
+              )}
+            </>
           ) : (
             <ul className="overflow-hidden rounded-[18px] border border-card-border bg-card">
-              {visible.map((invoice) => (
-                <li key={invoice.id} className="border-b border-border last:border-0">
+              {clients.map((client) => (
+                <li key={client.key} className="border-b border-border last:border-0">
                   <Link
-                    href={`/app/invoices/view?id=${encodeURIComponent(invoice.id)}`}
+                    href={`/app/invoices/client?name=${encodeURIComponent(client.name)}`}
                     className="flex items-center gap-3 px-4 py-3.5 hover:bg-muted/50"
                   >
                     <div className="min-w-0 flex-1">
-                      <div className="truncate font-semibold text-foreground">{invoice.clientName}</div>
-                      <div className="truncate text-sm text-muted-foreground">{rowDetail(invoice)}</div>
+                      <div className="truncate font-semibold text-foreground">{client.name}</div>
+                      <div className="truncate text-sm text-muted-foreground">
+                        {client.invoices.length} invoice{client.invoices.length === 1 ? "" : "s"}
+                      </div>
                     </div>
                     <div className="shrink-0 text-right">
-                      <div
-                        className={cn(
-                          "font-semibold tabular-nums",
-                          invoice.status === "draft" || invoice.status === "void"
-                            ? "text-muted-foreground"
-                            : "text-foreground"
-                        )}
-                      >
-                        {formatInvoiceMoney(invoice.total)}
+                      <div className="font-semibold tabular-nums text-foreground">
+                        {formatInvoiceMoney(client.earned)}{" "}
+                        <span className="text-xs font-medium text-muted-foreground">earned</span>
                       </div>
-                      <div className="mt-0.5">
-                        <InvoiceStatusPill invoice={invoice} today={today} short />
-                      </div>
+                      {client.overdue > 0 ? (
+                        <div className="text-xs font-semibold text-red-700 dark:text-red-400">
+                          {formatInvoiceMoney(client.overdue)} overdue
+                        </div>
+                      ) : client.open > 0 ? (
+                        <div className="text-xs text-muted-foreground">{formatInvoiceMoney(client.open)} open</div>
+                      ) : (
+                        <div className="text-xs text-muted-foreground">Nothing open</div>
+                      )}
                     </div>
+                    <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                   </Link>
                 </li>
               ))}
