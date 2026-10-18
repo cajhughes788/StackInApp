@@ -58,7 +58,6 @@ type GenericExpenseFields = {
 type VehicleMileageFields = {
   vendor: string
   businessMiles: string
-  fuel: string
   parkingAndTolls: string
   description: string
   descriptionIsManual: boolean
@@ -97,7 +96,6 @@ function createEmptyFormState(vehicleMode: VehicleExpenseMode): FormState {
       mileage: {
         vendor: "",
         businessMiles: "",
-        fuel: "",
         parkingAndTolls: "",
         description: "",
         descriptionIsManual: false,
@@ -119,7 +117,6 @@ function isFreshFormState(form: FormState): boolean {
     form.generic.description === "" &&
     form.vehicle.mileage.vendor === "" &&
     form.vehicle.mileage.businessMiles === "" &&
-    form.vehicle.mileage.fuel === "" &&
     form.vehicle.mileage.parkingAndTolls === "" &&
     form.vehicle.mileage.description === "" &&
     form.vehicle.directExpense.amount === "" &&
@@ -310,7 +307,6 @@ export default function ExpenseForm() {
     [form.date]
   )
   const businessMiles = parseOptionalNumber(form.vehicle.mileage.businessMiles) ?? 0
-  const fuelAmount = parseOptionalNumber(form.vehicle.mileage.fuel) ?? 0
   const parkingAndTollsAmount =
     parseOptionalNumber(form.vehicle.mileage.parkingAndTolls) ?? 0
   const calculatedVehicleAmount = useMemo(
@@ -318,19 +314,17 @@ export default function ExpenseForm() {
       calculateVehicleExpenseAmount(
         businessMiles,
         mileageRate,
-        fuelAmount,
         parkingAndTollsAmount
       ),
-    [businessMiles, fuelAmount, mileageRate, parkingAndTollsAmount]
+    [businessMiles, mileageRate, parkingAndTollsAmount]
   )
   const suggestedMileageDescription = useMemo(
     () =>
       buildVehicleMileageDescription(
         businessMiles,
-        fuelAmount,
         parkingAndTollsAmount
       ),
-    [businessMiles, fuelAmount, parkingAndTollsAmount]
+    [businessMiles, parkingAndTollsAmount]
   )
 
   useEffect(() => {
@@ -665,7 +659,7 @@ export default function ExpenseForm() {
       const vendor = form.vehicle.mileage.vendor.trim()
 
       if (calculatedVehicleAmount <= 0) {
-        throw new Error("Add business miles, fuel, or parking and tolls.")
+        throw new Error("Add business miles or parking and tolls.")
       }
 
       if (!description) {
@@ -684,7 +678,6 @@ export default function ExpenseForm() {
         businessMiles: businessMiles > 0 ? businessMiles : undefined,
         milesDriven: businessMiles > 0 ? businessMiles : undefined,
         mileageRate: businessMiles > 0 ? mileageRate : undefined,
-        fuel: fuelAmount > 0 ? fuelAmount : undefined,
         parkingAndTolls:
           parkingAndTollsAmount > 0 ? parkingAndTollsAmount : undefined,
         receiptAssetId: attachedReceiptAsset?.id,
@@ -731,7 +724,6 @@ export default function ExpenseForm() {
     calculatedVehicleAmount,
     customExpenseCategories,
     form,
-    fuelAmount,
     isVehicleDirectMode,
     isVehicleMileageMode,
     mileageRate,
@@ -1030,6 +1022,11 @@ export default function ExpenseForm() {
                       Direct Expense
                     </ToggleGroupItem>
                   </ToggleGroup>
+                  <p className="text-xs text-muted-foreground">
+                    {isVehicleMileageMode
+                      ? "The mileage rate already covers gas and maintenance. Only add parking and tolls."
+                      : "Enter what you actually paid, like gas, repairs, or insurance."}
+                  </p>
                 </div>
 
                 {isVehicleMileageMode ? (
@@ -1092,22 +1089,6 @@ export default function ExpenseForm() {
                       </div>
 
                       <div>
-                        <Label htmlFor="fuel" className={FIELD_LABEL_CLASS}>Fuel</Label>
-                        <Input
-                          className={FIELD_INPUT_CLASS}
-                          id="fuel"
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          placeholder="0.00"
-                          value={form.vehicle.mileage.fuel}
-                          onChange={(event) =>
-                            updateVehicleMileageField("fuel", event.target.value)
-                          }
-                        />
-                      </div>
-
-                      <div className="sm:col-span-2">
                         <Label htmlFor="parkingAndTolls" className={FIELD_LABEL_CLASS}>Parking & Tolls</Label>
                         <Input
                           className={FIELD_INPUT_CLASS}

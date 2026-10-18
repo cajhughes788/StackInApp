@@ -22,28 +22,26 @@ export function isVehicleExpenseTrackingEnabled(
   return settings?.trackBusinessMileage === true
 }
 
+// The standard mileage rate already covers gas and other operating costs, so
+// only parking and tolls are added on top of miles × rate.
 export function calculateVehicleExpenseAmount(
   businessMiles: number,
   mileageRate: number,
-  fuel = 0,
   parkingAndTolls = 0
 ): number {
   const miles = Number.isFinite(businessMiles) ? businessMiles : 0
   const rate = Number.isFinite(mileageRate) ? mileageRate : 0
-  const fuelAmount = Number.isFinite(fuel) ? fuel : 0
   const extras = Number.isFinite(parkingAndTolls) ? parkingAndTolls : 0
 
-  return Math.round((miles * rate + fuelAmount + extras) * 100) / 100
+  return Math.round((miles * rate + extras) * 100) / 100
 }
 
 export function buildVehicleMileageDescription(
   businessMiles: number,
-  fuel: number,
   parkingAndTolls: number
 ): string {
   const parts: VehicleDescriptionPart[] = [
     { label: "Mileage", value: businessMiles },
-    { label: "Fuel", value: fuel },
     { label: "Parking & Tolls", value: parkingAndTolls },
   ]
 
