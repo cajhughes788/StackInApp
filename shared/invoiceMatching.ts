@@ -1,4 +1,4 @@
-import { suggestPlaidIncomePaymentMethod } from "./plaidClassification"
+import { isPeerToPeerDescriptor, suggestPlaidIncomePaymentMethod } from "./plaidClassification"
 import type { IncomeBreakdown, IncomeCategory, PaymentMethod } from "./schemas/entry"
 import type { InvoiceLine, InvoiceType } from "./schemas/invoice"
 import type { PlaidInvoiceMatch, PlaidInvoiceRef } from "./schemas/plaidPendingTransaction"
@@ -265,4 +265,90 @@ export function allocateInvoiceFee(group: Array<{ amount: number }>, feeAmount: 
     allocated += share
     return share / 100
   })
+}
+
+// ---------------------------------------------------------------------------
+// Refunds the user sent a client themselves (Zelle, Venmo, a check) and
+// recorded on the invoice. The refund Entry already takes the money out of
+// income, so the outgoing bank payment that is that refund must not also be
+// booked as an expense. A payment matches when:
+//   • it's the exact amount of a recorded refund not already matched,
+//   • it left within a few days of the refund's date, either side, and
+//   • it looks like money sent to a person — it names the client, or it's a
+//     peer-to-peer app, a check or a transfer — never a card purchase that
+//     happens to cost the same.
+// Closest date wins. Matches are hidden in Hidden transfers, where a wrong
+// one can be restored.
+// ---------------------------------------------------------------------------
+
+export const REFUND_PAYMENT_LOOKBACK_DAYS = 3
+export const REFUND_PAYMENT_LOOKAHEAD_DAYS = 10
+
+export type RefundPaymentCandidate = {
+  invoiceId: string
+  invoiceNumber: string
+  clientName: string
+  refundId: string
+  amount: number
+  date: string
+}
+
+export type RefundMatchPayment = {
+  date: string
+  amount: number
+  merchantName: string | null
+  rawName: string
+  personalFinanceCategoryPrimary: string | null
+}
+
+// Refunds recorded by hand on these invoices that no payment holds yet
+// (or that `plaidTransactionId` itself already holds — a re-sync).
+export function selectUnmatchedManualRefunds(
+  invoices: Array<Pick<InvoiceType, "id" | "number" | "clientName" | "refunds">>,
+  plaidTransactionId?: string
+): RefundPaymentCandidate[] {
+  return invoices.flatMap((invoice) =>
+    (invoice.refunds ?? [])
+      .filter(
+        (refund) =>
+          !refund.stripeRefundId &&
+          !!refund.entryId &&
+          (!refund.plaidTransactionId || refund.plaidTransactionId === plaidTransactionId)
+      )
+      .map((refund) => ({
+        invoiceId: invoice.id,
+        invoiceNumber: invoice.number,
+        clientName: invoice.clientName,
+        refundId: refund.id,
+        amount: refund.amount,
+        date: refund.date,
+      }))
+  )
+}
+
+function looksLikeMoneySentToPerson(payment: RefundMatchPayment, clientName: string): boolean {
+  const descriptor = normalizeName(`${payment.merchantName ?? ""} ${payment.rawName}`)
+  const client = normalizeName(clientName)
+  if (client.length >= 3 && ` ${descriptor} `.includes(` ${client} `)) return true
+  if (isPeerToPeerDescriptor(payment.merchantName, payment.rawName)) return true
+  if (/\b(check|chk|zelle|wire|transfer|xfer|ach)\b/.test(descriptor)) return true
+  return payment.personalFinanceCategoryPrimary === "TRANSFER_OUT"
+}
+
+export function matchInvoiceRefundPayment(
+  payment: RefundMatchPayment,
+  refunds: RefundPaymentCandidate[]
+): RefundPaymentCandidate | null {
+  const cents = toCents(payment.amount)
+  if (cents <= 0) return null
+  let best: RefundPaymentCandidate | null = null
+  for (const refund of refunds) {
+    if (toCents(refund.amount) !== cents) continue
+    // Positive: the payment left after the refund was recorded.
+    const gap = dayDiff(payment.date, refund.date)
+    if (gap < -REFUND_PAYMENT_LOOKBACK_DAYS || gap > REFUND_PAYMENT_LOOKAHEAD_DAYS) continue
+    if (!looksLikeMoneySentToPerson(payment, refund.clientName)) continue
+    if (!best || Math.abs(gap) < Math.abs(dayDiff(payment.date, best.date))) best = refund
+  }
+  return best
 }

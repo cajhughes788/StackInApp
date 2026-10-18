@@ -62,7 +62,11 @@ export default function InvoicesListPageRoute() {
 function InvoicesListPage() {
   const { ready, invoices, loadStatus } = useInvoicesWorkspace()
   const router = useRouter()
-  const [filter, setFilter] = useState<Filter>("all")
+  // ?filter=overdue opens straight on that filter (the Needs you row).
+  const filterParam = useQueryParam("filter")
+  const [filter, setFilter] = useState<Filter>(() =>
+    FILTERS.some((option) => option.id === filterParam) ? (filterParam as Filter) : "all"
+  )
   // In the URL, so coming back from a client's page lands on Clients again.
   const view: View = useQueryParam("view") === "clients" ? "clients" : "invoices"
   const today = localToday()

@@ -60,7 +60,8 @@ export type PlaidPendingTransaction = {
   /** Income direction only — the invoice(s) this deposit most likely pays. */
   invoiceMatch?: PlaidInvoiceMatch | null
   /** Why it was dismissed without a plain "not income/personal" decision. */
-  dismissReason?: "transfer" | "invoice_already_paid" | "stripe_payout"
+  dismissReason?: "transfer" | "invoice_already_paid" | "stripe_payout" | "invoice_refund"
+  invoiceRefund?: { invoiceId: string; refundId: string }
   /** The other half of a matched transfer, when it was hidden by pairing. */
   transferPairId?: string
 }

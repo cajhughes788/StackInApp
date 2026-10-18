@@ -32,6 +32,10 @@ export const InvoiceRefundSchema = z.object({
   date: z.string(),
   reason: z.enum(["requested_by_client", "duplicate", "other"]),
   stripeRefundId: z.string().nullable().default(null),
+  // A refund the user sent themselves (stripeRefundId null): the outgoing
+  // bank payment that is that money leaving, hidden from expense review as
+  // "invoice_refund" so it isn't booked a second time (matchInvoiceRefundPayment).
+  plaidTransactionId: z.string().nullable().default(null),
 })
 
 // A chargeback on an online payment (Stripe dispute).

@@ -17,6 +17,7 @@ import * as entriesService from "@/lib/domain/entriesService";
 import { CUSTOM_POSITION_ID, CUSTOM_POSITION_TITLE } from "@shared/hourlyRates";
 import { aggregateIncomeBreakdowns, getCustomIncomeMirrors, getNonCustomOtherIncome, } from "@shared/independentIncome";
 import { toast } from "@/hooks/use-toast";
+import { ApiError } from "@/lib/api";
 
 export const paymentFieldConfig = {
     venmo: {
@@ -555,11 +556,14 @@ export async function deleteEntryWithConfirm(workspaceId: string | null, entryId
         await entriesService.removeEntry(workspaceId, entryId);
     } catch (error) {
         const isAuthError = error instanceof Error && error.message.includes("401");
+        // A 409 is the server explaining why this entry can't go (an invoice
+        // payment paid through Stripe, or one with refunds).
+        const conflictMessage = error instanceof ApiError && error.status === 409 ? error.message : null;
         toast({
             title: "Entry not deleted",
             description: isAuthError
                 ? "Your session expired. Please sign in again."
-                : "We could not delete this entry. Please try again.",
+                : conflictMessage ?? "We could not delete this entry. Please try again.",
             variant: "destructive",
         });
     }

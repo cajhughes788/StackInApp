@@ -232,14 +232,31 @@ export async function refundInvoice(
   }
 
   // Paid outside Stripe: the user sends the money back themselves; this
-  // only records it.
-  return recordInvoiceRefund(workspaceId, invoiceId, {
-    key: `manual_${request.clientMutationId}`,
+  // only records it. If that payment already reached the bank feed, it's
+  // hidden from expense review now (otherwise when it arrives — see
+  // upsertPendingTransactionFromPlaid).
+  const key = `manual_${request.clientMutationId}`
+  const recorded = await recordInvoiceRefund(workspaceId, invoiceId, {
+    key,
     cents,
     date: today,
     reason: request.reason,
     stripeRefundId: null,
   })
+  const refund = recorded.refunds.find((r) => r.id === key)
+  if (refund && !refund.plaidTransactionId) {
+    const { dismissPaymentMatchingInvoiceRefund } = await import("./plaidService.js")
+    await dismissPaymentMatchingInvoiceRefund(workspaceId, {
+      invoiceId,
+      invoiceNumber: recorded.number,
+      clientName: recorded.clientName,
+      refundId: refund.id,
+      amount: refund.amount,
+      date: refund.date,
+    }).catch((error) => console.error("refundsService.refundInvoice: couldn't match the refund payment", error))
+    return InvoiceSchema.parse((await invoicesCol(workspaceId).doc(invoiceId).get()).data())
+  }
+  return recorded
 }
 
 // ---------------------------------------------------------------------------
@@ -415,11 +432,18 @@ export async function handleDisputeEvent(stripeAccountId: string, dispute: Strip
 export async function forgetRefundForDeletedEntry(workspaceId: string, entryId: string, invoiceId: string | null) {
   if (!invoiceId) return
   const ref = invoicesCol(workspaceId).doc(invoiceId)
-  await db.runTransaction(async (txn) => {
+  const removed = await db.runTransaction(async (txn) => {
     const snap = await txn.get(ref)
-    if (!snap.exists) return
+    if (!snap.exists) return null
     const invoice = InvoiceSchema.parse(snap.data())
-    if (!invoice.refunds.some((r) => r.entryId === entryId)) return
+    const refund = invoice.refunds.find((r) => r.entryId === entryId)
+    if (!refund) return null
     txn.set(ref, { refunds: invoice.refunds.filter((r) => r.entryId !== entryId), updatedAt: new Date().toISOString() }, { merge: true })
+    return refund
   })
+  // The bank payment hidden as this refund now has nothing booked for it.
+  if (removed?.plaidTransactionId) {
+    const { returnPaymentForDeletedRefund } = await import("./plaidService.js")
+    await returnPaymentForDeletedRefund(workspaceId, removed.plaidTransactionId)
+  }
 }

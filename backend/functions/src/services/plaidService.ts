@@ -36,7 +36,7 @@ import type { RecurringCadence } from "@shared/schemas/recurringRule"
 import type { IncomeCategory, PaymentMethod } from "@shared/schemas/entry"
 import * as expensesSvc from "./expensesService"
 import * as entriesSvc from "./entriesService"
-import { findInvoiceMatchForDeposit, invoicesCol } from "./invoicesService"
+import { claimRefundForPayment, findInvoiceMatchForDeposit, findInvoiceRefundForPayment, invoicesCol, readRefundClaim } from "./invoicesService"
 import { findMatchingStripePayout, markStripePayoutMatched } from "./stripePayoutsStore"
 import { matchStripePayout, type StripePayout } from "@shared/stripePayouts"
 import { InvoiceSchema, type InvoiceType } from "@shared/schemas/invoice"
@@ -45,7 +45,9 @@ import {
   invoiceCentsByCategory,
   invoiceGroupFee,
   invoiceIncomeBreakdown,
+  matchInvoiceRefundPayment,
   resolveChosenInvoiceGroup,
+  type RefundPaymentCandidate,
 } from "@shared/invoiceMatching"
 import { sendTransactionNotification } from "./pushNotificationService"
 import { suggestCategoriesWithAi, type AiCategoryRequest } from "./aiCategorySuggestion"
@@ -748,7 +750,33 @@ async function upsertPendingTransactionFromPlaid(
           return null
         })
       : null
-  const autoDismiss = memoryDismiss || isTransfer || stripePayout !== null
+  // A refund the user sent a client and recorded on the invoice: the refund
+  // Entry already took it out of income, so it's hidden rather than booked
+  // as an expense too (shared/invoiceMatching.ts). Claimed before the write
+  // so two payments can't take one refund. Restoring it sets transferOverride.
+  const refundCandidate =
+    direction === "expense" && !isTransfer && !existing?.transferOverride
+      ? await findInvoiceRefundForPayment(workspaceId, {
+          plaidTransactionId: transaction.transaction_id,
+          date: transaction.date,
+          amount,
+          merchantName,
+          rawName,
+          personalFinanceCategoryPrimary,
+        }).catch((error) => {
+          console.error("plaidService.upsertPendingTransactionFromPlaid: invoice refund lookup failed", error)
+          return null
+        })
+      : null
+  const invoiceRefund =
+    refundCandidate &&
+    (await claimRefundForPayment(workspaceId, refundCandidate, transaction.transaction_id).catch((error) => {
+      console.error("plaidService.upsertPendingTransactionFromPlaid: couldn't claim invoice refund", error)
+      return false
+    }))
+      ? { invoiceId: refundCandidate.invoiceId, refundId: refundCandidate.refundId }
+      : null
+  const autoDismiss = memoryDismiss || isTransfer || stripePayout !== null || invoiceRefund !== null
 
   // Recomputed on every sync of a still-pending deposit, so an invoice
   // paid or voided in the meantime drops out of the suggestion. Best-effort:
@@ -805,7 +833,9 @@ async function upsertPendingTransactionFromPlaid(
       ? { dismissReason: "transfer" as const }
       : stripePayout
         ? { dismissReason: "stripe_payout" as const, stripePayoutId: stripePayout.id }
-        : {}),
+        : invoiceRefund
+          ? { dismissReason: "invoice_refund" as const, invoiceRefund }
+          : {}),
     ...(transferPairId ? { transferPairId } : {}),
     createdAt: existing?.createdAt ?? nowIso,
     updatedAt: nowIso,
@@ -1911,7 +1941,9 @@ async function confirmInvoicePayment(
           invoiceRefs[index],
           {
             status: "paid",
-            paidAt: nowIso,
+            // The day the money arrived, same as the Entry — not the day it
+            // was confirmed.
+            paidAt: `${pending.date}T12:00:00.000Z`,
             paidVia: "bank_match",
             paidMethod: paymentMethod,
             paidPlaidTransactionId: pending.plaidTransactionId,
@@ -2233,7 +2265,7 @@ export async function listHiddenTransfers(workspaceId: string, uid: string): Pro
   // Equality-only query (no orderBy) so no composite index is needed;
   // sorted in memory instead.
   const snap = await pendingTransactionsCol(workspaceId)
-    .where("dismissReason", "in", ["transfer", "stripe_payout"])
+    .where("dismissReason", "in", ["transfer", "stripe_payout", "invoice_refund"])
     .limit(HIDDEN_TRANSFERS_LIMIT)
     .get()
   return snap.docs
@@ -2264,7 +2296,10 @@ export async function restoreHiddenTransfer(
       // A retry of a restore that already went through.
       return { restoredIds: [target.id] }
     }
-    if (target.status !== "dismissed" || (target.dismissReason !== "transfer" && target.dismissReason !== "stripe_payout")) {
+    if (
+      target.status !== "dismissed" ||
+      (target.dismissReason !== "transfer" && target.dismissReason !== "stripe_payout" && target.dismissReason !== "invoice_refund")
+    ) {
       throw new BadRequestError("This transaction isn't a hidden transfer.")
     }
 
@@ -2272,6 +2307,9 @@ export async function restoreHiddenTransfer(
     const counterpartRef = target.transferPairId ? pendingTransactionsCol(workspaceId).doc(target.transferPairId) : null
     const counterpartSnap = counterpartRef ? await txn.get(counterpartRef) : null
     const counterpart = counterpartSnap?.exists ? PlaidPendingTransactionSchema.parse(counterpartSnap.data()) : null
+    const refundInvoiceRef = target.invoiceRefund ? invoicesCol(workspaceId).doc(target.invoiceRefund.invoiceId) : null
+    const refundInvoiceSnap = refundInvoiceRef ? await txn.get(refundInvoiceRef) : null
+    const refundInvoice = refundInvoiceSnap?.exists ? InvoiceSchema.safeParse(refundInvoiceSnap.data()) : null
 
     const nowIso = new Date().toISOString()
     const restorePatch = {
@@ -2279,10 +2317,23 @@ export async function restoreHiddenTransfer(
       dismissReason: FieldValue.delete(),
       transferPairId: FieldValue.delete(),
       stripePayoutId: FieldValue.delete(),
+      invoiceRefund: FieldValue.delete(),
       transferOverride: true,
       updatedAt: nowIso,
     }
     txn.set(ref, restorePatch, { merge: true })
+    // "Not this refund": free the refund to match the payment it really is.
+    if (refundInvoiceRef && refundInvoice?.success) {
+      txn.set(
+        refundInvoiceRef,
+        {
+          refunds: refundInvoice.data.refunds.map((r) =>
+            r.plaidTransactionId === target.id ? { ...r, plaidTransactionId: null } : r
+          ),
+        },
+        { merge: true }
+      )
+    }
     // "Not a payout": free the payout to match the deposit it really is.
     if (target.stripePayoutId) {
       txn.set(
@@ -2304,6 +2355,138 @@ export async function restoreHiddenTransfer(
       }
     }
     return { restoredIds }
+  })
+}
+
+// Deleting one Entry of a bank-matched invoice payment undoes the whole
+// match, as if the deposit had never been confirmed: every invoice it paid
+// goes back to "sent", the other invoices' Entries and the processing-fee
+// Expense are deleted, and the deposit returns to review with its match
+// suggestion. Best-effort, step by step — the Entry that started this is
+// already gone. The invoices reopen first, so deleting the sibling Entries
+// doesn't come back here.
+export async function undoInvoiceDepositMatch(workspaceId: string, uid: string, plaidTransactionId: string): Promise<void> {
+  const nowIso = new Date().toISOString()
+  const invoicesSnap = await invoicesCol(workspaceId).where("paidPlaidTransactionId", "==", plaidTransactionId).get()
+  if (!invoicesSnap.empty) {
+    const batch = db.batch()
+    for (const doc of invoicesSnap.docs) {
+      batch.set(
+        doc.ref,
+        {
+          status: "sent",
+          paidAt: null,
+          paidVia: null,
+          paidMethod: null,
+          paidEntryId: null,
+          paidPlaidTransactionId: null,
+          paidFeeAmount: 0,
+          updatedAt: nowIso,
+        },
+        { merge: true }
+      )
+    }
+    await batch.commit()
+  }
+
+  const ref = pendingTransactionsCol(workspaceId).doc(plaidTransactionId)
+  const snap = await ref.get()
+  const parsed = snap.exists ? PlaidPendingTransactionSchema.safeParse(snap.data()) : null
+  if (!parsed?.success || parsed.data.status !== "confirmed") return
+  const pending = parsed.data
+
+  for (const entryId of pending.committedEntryIds ?? []) {
+    await entriesSvc.deleteEntry(workspaceId, uid, entryId).catch((error) => {
+      console.error("plaidService.undoInvoiceDepositMatch: couldn't delete entry", entryId, error)
+    })
+  }
+  if (pending.feeExpenseId) {
+    await expensesSvc.deleteExpense(workspaceId, uid, pending.feeExpenseId).catch((error) => {
+      if (!(error instanceof NotFoundError)) console.error("plaidService.undoInvoiceDepositMatch: couldn't delete fee", error)
+    })
+  }
+  await ref.set(
+    { status: "pending", committedEntryIds: FieldValue.delete(), feeExpenseId: FieldValue.delete(), updatedAt: new Date().toISOString() },
+    { merge: true }
+  )
+}
+
+// Invoices marked paid by hand were reopened (their Entry was deleted): a
+// deposit hidden as "already recorded" for them is now money with nothing
+// booked against it, so it goes back to review. When every invoice it was
+// matched to is open again it keeps the match, offered as a payment.
+export async function returnDepositsForReopenedInvoices(workspaceId: string, invoiceIds: string[]): Promise<void> {
+  if (invoiceIds.length === 0) return
+  const reopened = new Set(invoiceIds)
+  const snap = await pendingTransactionsCol(workspaceId).where("dismissReason", "==", "invoice_already_paid").limit(200).get()
+  const batch = db.batch()
+  let writes = 0
+  for (const doc of snap.docs) {
+    const parsed = PlaidPendingTransactionSchema.safeParse(doc.data())
+    if (!parsed.success || parsed.data.status !== "dismissed" || !parsed.data.invoiceMatch) continue
+    const match = parsed.data.invoiceMatch
+    const ids = match.invoices.map((ref) => ref.invoiceId)
+    if (!ids.some((id) => reopened.has(id))) continue
+    batch.set(
+      doc.ref,
+      {
+        status: "pending",
+        dismissReason: FieldValue.delete(),
+        invoiceMatch: ids.every((id) => reopened.has(id)) ? { ...match, alreadyPaid: false, alternatives: [] } : null,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    )
+    writes++
+  }
+  if (writes > 0) await batch.commit()
+}
+
+// A refund recorded by hand after the payment that sent it was already
+// ingested (the user sent the Zelle, then recorded the refund): hide that
+// still-pending payment now, and tie the two together.
+export async function dismissPaymentMatchingInvoiceRefund(
+  workspaceId: string,
+  refund: RefundPaymentCandidate
+): Promise<void> {
+  const snap = await pendingTransactionsCol(workspaceId).where("amount", "==", refund.amount).limit(25).get()
+  const candidates = snap.docs
+    .map((doc) => PlaidPendingTransactionSchema.parse(doc.data()))
+    .filter((t) => t.status === "pending" && t.direction === "expense" && !t.transferOverride)
+    .sort((a, b) => Math.abs(Date.parse(a.date) - Date.parse(refund.date)) - Math.abs(Date.parse(b.date) - Date.parse(refund.date)))
+  const match = candidates.find((t) => matchInvoiceRefundPayment(t, [refund]) !== null)
+  if (!match) return
+  const ref = pendingTransactionsCol(workspaceId).doc(match.id)
+  await db.runTransaction(async (txn) => {
+    const fresh = await txn.get(ref)
+    const claim = await readRefundClaim(txn, workspaceId, refund, match.id)
+    if (!fresh.exists || fresh.data()?.status !== "pending" || !claim) return
+    txn.set(claim.ref, { refunds: claim.refunds }, { merge: true })
+    txn.set(
+      ref,
+      {
+        status: "dismissed",
+        dismissReason: "invoice_refund",
+        invoiceRefund: { invoiceId: refund.invoiceId, refundId: refund.refundId },
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    )
+  })
+}
+
+// The refund Entry a hidden payment stood for was deleted: the payment is
+// money that left with nothing booked against it, so it goes back to review.
+export async function returnPaymentForDeletedRefund(workspaceId: string, plaidTransactionId: string): Promise<void> {
+  const ref = pendingTransactionsCol(workspaceId).doc(plaidTransactionId)
+  await db.runTransaction(async (txn) => {
+    const snap = await txn.get(ref)
+    if (!snap.exists || snap.data()?.dismissReason !== "invoice_refund" || snap.data()?.status !== "dismissed") return
+    txn.set(
+      ref,
+      { status: "pending", dismissReason: FieldValue.delete(), invoiceRefund: FieldValue.delete(), updatedAt: new Date().toISOString() },
+      { merge: true }
+    )
   })
 }
 

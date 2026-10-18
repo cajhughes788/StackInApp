@@ -398,6 +398,7 @@ export async function deleteEntry(workspaceId: string, uid: string, entryId: str
     const ref = db.doc(`workspaces/${workspaceId}/entries/${entryId}`);
     let deleted = false;
     let deletedEntry: EntryType | null = null;
+    let undoDepositMatch: string | null = null;
     await db.runTransaction(async (tx) => {
         const snap = await tx.get(ref);
         // Idempotent delete — no error if entry doesn't exist
@@ -416,10 +417,26 @@ export async function deleteEntry(workspaceId: string, uid: string, entryId: str
             throw new ConflictError("This refund went through Stripe, so it can't be deleted.");
         }
         if (deletedEntry.workspace === "independent") {
-            const paidInvoices = await tx.get(db.collection(`workspaces/${workspaceId}/invoices`).where("paidEntryId", "==", entryId).limit(1));
-            if (paidInvoices.docs.some((doc) => doc.data()?.paidVia === "online")) {
+            const invoicesRef = db.collection(`workspaces/${workspaceId}/invoices`);
+            const paidInvoices = await tx.get(invoicesRef.where("paidEntryId", "==", entryId).limit(1));
+            const paidInvoice = paidInvoices.docs[0]?.data();
+            if (paidInvoice?.paidVia === "online") {
                 throw new ConflictError("This payment came through Stripe — refund it from the invoice instead of deleting it.");
             }
+            // Deleting a bank-matched payment undoes the whole deposit match
+            // (plaidService.undoInvoiceDepositMatch), so every invoice that
+            // deposit paid is checked, not just this one.
+            const plaidTransactionId = paidInvoice?.paidVia === "bank_match" ? (paidInvoice.paidPlaidTransactionId as string | null) : null;
+            const affected = plaidTransactionId
+                ? (await tx.get(invoicesRef.where("paidPlaidTransactionId", "==", plaidTransactionId))).docs.map((doc) => doc.data())
+                : paidInvoice ? [paidInvoice] : [];
+            // Refunds are booked against the payment: without it they'd be
+            // negative income for money that was never received.
+            const refunded = affected.find((invoice) => (invoice.refunds?.length ?? 0) > 0 || invoice.dispute);
+            if (refunded) {
+                throw new ConflictError(`Invoice #${refunded.number} has refunds recorded against this payment. Delete those refund entries first.`);
+            }
+            undoDepositMatch = plaidTransactionId;
         }
         // Perform deletion
         tx.delete(ref);
@@ -437,11 +454,21 @@ export async function deleteEntry(workspaceId: string, uid: string, entryId: str
     let payStubs: PayStub.Type[] | null | undefined;
     if (removedEntry?.workspace === "independent") {
         await syncIndependentProfitLossDates(workspaceId, [removedEntry.date]);
-        // An invoice this Entry was the payment for goes back to open.
-        // Dynamic import: invoicesService imports this module.
-        await import("./invoicesService.js")
-            .then(({ reopenInvoicesForDeletedEntry }) => reopenInvoicesForDeletedEntry(workspaceId, entryId))
-            .catch((error) => console.error("entriesService.deleteEntry: failed to reopen invoice", error));
+        // An invoice this Entry was the payment for goes back to open. A
+        // bank-matched one takes its whole deposit match with it: the other
+        // invoices' entries, the fee, and the deposit back into review.
+        // Dynamic imports: both services import this module.
+        const depositToUndo = undoDepositMatch as string | null;
+        if (depositToUndo) {
+            await import("./plaidService.js")
+                .then(({ undoInvoiceDepositMatch }) => undoInvoiceDepositMatch(workspaceId, uid, depositToUndo))
+                .catch((error) => console.error("entriesService.deleteEntry: failed to undo deposit match", error));
+        }
+        else {
+            await import("./invoicesService.js")
+                .then(({ reopenInvoicesForDeletedEntry }) => reopenInvoicesForDeletedEntry(workspaceId, entryId))
+                .catch((error) => console.error("entriesService.deleteEntry: failed to reopen invoice", error));
+        }
         // A refund deleted by hand comes off its invoice's refund list.
         const refundInvoiceId = removedEntry.kind === "refund" ? removedEntry.refund?.invoiceId ?? null : null;
         if (refundInvoiceId && removedEntry.refund?.reason !== "dispute" && removedEntry.refund?.reason !== "dispute_reversed") {

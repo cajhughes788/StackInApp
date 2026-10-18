@@ -30,6 +30,9 @@ function hiddenReason(
   pair: PlaidPendingTransaction | undefined,
   pairAccount: PlaidLinkedAccount | undefined
 ): string {
+  if (transaction.dismissReason === "invoice_refund") {
+    return "Refund you sent a client — it was already taken out of income on the invoice"
+  }
   if (transaction.dismissReason === "stripe_payout") {
     return "Payout from your Stripe account — the invoice payments in it were already added to income"
   }

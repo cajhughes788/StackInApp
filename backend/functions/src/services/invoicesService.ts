@@ -20,9 +20,14 @@ import {
   selectManuallyPaidInvoiceCandidates,
   selectOpenInvoiceCandidates,
   MANUAL_PAID_LOOKBACK_DAYS,
+  REFUND_PAYMENT_LOOKAHEAD_DAYS,
   invoiceCentsByCategory,
   invoiceIncomeBreakdown,
+  matchInvoiceRefundPayment,
+  selectUnmatchedManualRefunds,
   type InvoiceMatchDeposit,
+  type RefundMatchPayment,
+  type RefundPaymentCandidate,
 } from "@shared/invoiceMatching"
 import { publicInvoiceUrl } from "@shared/invoiceDisplay"
 import * as entriesSvc from "./entriesService"
@@ -65,6 +70,54 @@ export async function findInvoiceMatchForDeposit(
     selectManuallyPaidInvoiceCandidates(parseInvoices(recentlyPaidSnap), deposit.date)
   )
   return paidMatch ? { ...paidMatch, alreadyPaid: true } : null
+}
+
+// The refund the user sent a client by hand that an outgoing bank payment
+// is, if any (shared/invoiceMatching.ts). A refund is recorded on the day
+// it's entered, which bumps the invoice's updatedAt, so recently updated
+// invoices are the only ones that can hold it.
+export async function findInvoiceRefundForPayment(
+  workspaceId: string,
+  payment: RefundMatchPayment & { plaidTransactionId: string }
+): Promise<RefundPaymentCandidate | null> {
+  const snap = await invoicesCol(workspaceId)
+    .where("updatedAt", ">=", isoDaysBefore(payment.date, REFUND_PAYMENT_LOOKAHEAD_DAYS + 1))
+    .get()
+  return matchInvoiceRefundPayment(payment, selectUnmatchedManualRefunds(parseInvoices(snap), payment.plaidTransactionId))
+}
+
+// Ties a refund to the payment that sent it. False when the refund is gone
+// or another payment already holds it. Inside a caller's transaction when
+// one is given (its reads must come first, so this only reads).
+export async function readRefundClaim(
+  txn: FirebaseFirestore.Transaction,
+  workspaceId: string,
+  match: { invoiceId: string; refundId: string },
+  plaidTransactionId: string
+): Promise<{ ref: FirebaseFirestore.DocumentReference; refunds: InvoiceType["refunds"] } | null> {
+  const ref = invoicesCol(workspaceId).doc(match.invoiceId)
+  const snap = await txn.get(ref)
+  const parsed = InvoiceSchema.safeParse(snap.data())
+  if (!parsed.success) return null
+  const refund = parsed.data.refunds.find((r) => r.id === match.refundId)
+  if (!refund || (refund.plaidTransactionId && refund.plaidTransactionId !== plaidTransactionId)) return null
+  return {
+    ref,
+    refunds: parsed.data.refunds.map((r) => (r.id === match.refundId ? { ...r, plaidTransactionId } : r)),
+  }
+}
+
+export async function claimRefundForPayment(
+  workspaceId: string,
+  match: { invoiceId: string; refundId: string },
+  plaidTransactionId: string
+): Promise<boolean> {
+  return db.runTransaction(async (txn) => {
+    const claim = await readRefundClaim(txn, workspaceId, match, plaidTransactionId)
+    if (!claim) return false
+    txn.set(claim.ref, { refunds: claim.refunds }, { merge: true })
+    return true
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -373,6 +426,12 @@ export async function reopenInvoicesForDeletedEntry(workspaceId: string, entryId
     )
   }
   await batch.commit()
+  // A deposit hidden as this payment arriving has nothing booked for it now.
+  const manual = snap.docs.filter((doc) => doc.data()?.paidVia === "manual").map((doc) => doc.id)
+  if (manual.length > 0) {
+    const { returnDepositsForReopenedInvoices } = await import("./plaidService.js")
+    await returnDepositsForReopenedInvoices(workspaceId, manual)
+  }
 }
 
 // ---------------------------------------------------------------------------

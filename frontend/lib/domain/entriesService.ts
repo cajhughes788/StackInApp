@@ -909,6 +909,15 @@ export async function removeEntry(workspaceId: string, entryId: string): Promise
             scheduleGeofenceEntryStatusResync(workspaceId, settings);
             return;
         }
+        // The server refused (e.g. an invoice payment that has refunds): the
+        // entry still exists, so put it back.
+        await persistEntriesForPeriod(
+            workspaceId,
+            visiblePeriodId,
+            scopedKey,
+            (current) => current.some((e) => e.id === entryId) ? current : [removedEntry, ...current]
+        ).catch(() => {});
+        await entryDeletionGuards.clearDeletedEntryGuard(workspaceId, removedEntry).catch(() => {});
         throw error;
     }
     scheduleGeofenceEntryStatusResync(workspaceId, settings);

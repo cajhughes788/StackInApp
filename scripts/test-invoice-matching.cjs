@@ -17,6 +17,8 @@ const {
   invoiceGroupFee,
   allocateInvoiceFee,
   invoiceIncomeBreakdown,
+  matchInvoiceRefundPayment,
+  selectUnmatchedManualRefunds,
 } = require("../shared/invoiceMatching.ts");
 const {
   InvoiceSchema,
@@ -617,6 +619,54 @@ run("email status action validates the address", () => {
   assert.equal(InvoiceStatusActionSchema.safeParse({ action: "email", to: "a@b.co" }).success, true);
   assert.equal(InvoiceStatusActionSchema.safeParse({ action: "email", to: "nope" }).success, false);
   assert.equal(InvoiceStatusActionSchema.safeParse({ action: "email", to: "a@b.co", message: "x".repeat(1001) }).success, false);
+});
+
+function refundCandidate(overrides = {}) {
+  return { invoiceId: "inv1", invoiceNumber: "0012", clientName: "Acme Corp", refundId: "manual_a", amount: 150, date: "2026-10-10", ...overrides };
+}
+
+function payment(overrides = {}) {
+  return { date: "2026-10-11", amount: 150, merchantName: null, rawName: "ZELLE TO ACME CORP", personalFinanceCategoryPrimary: null, ...overrides };
+}
+
+run("refund payment matches by amount, date window and a person-like descriptor", () => {
+  assert.equal(matchInvoiceRefundPayment(payment(), [refundCandidate()]).refundId, "manual_a");
+  // Named client without a P2P word.
+  assert.ok(matchInvoiceRefundPayment(payment({ rawName: "ONLINE PMT ACME CORP" }), [refundCandidate()]));
+  assert.ok(matchInvoiceRefundPayment(payment({ rawName: "CHECK 1043" }), [refundCandidate()]));
+  assert.ok(matchInvoiceRefundPayment(payment({ rawName: "Venmo" }), [refundCandidate()]));
+  assert.ok(matchInvoiceRefundPayment(payment({ rawName: "X", personalFinanceCategoryPrimary: "TRANSFER_OUT" }), [refundCandidate()]));
+});
+
+run("refund payment ignores card purchases, wrong amounts and out-of-window dates", () => {
+  assert.equal(matchInvoiceRefundPayment(payment({ rawName: "HOME DEPOT #123", merchantName: "Home Depot" }), [refundCandidate()]), null);
+  assert.equal(matchInvoiceRefundPayment(payment({ amount: 150.01 }), [refundCandidate()]), null);
+  assert.equal(matchInvoiceRefundPayment(payment({ date: "2026-10-06" }), [refundCandidate()]), null); // 4 days before
+  assert.ok(matchInvoiceRefundPayment(payment({ date: "2026-10-07" }), [refundCandidate()])); // 3 days before
+  assert.ok(matchInvoiceRefundPayment(payment({ date: "2026-10-20" }), [refundCandidate()])); // 10 days after
+  assert.equal(matchInvoiceRefundPayment(payment({ date: "2026-10-21" }), [refundCandidate()]), null);
+});
+
+run("refund payment picks the closest-dated refund", () => {
+  const far = refundCandidate({ refundId: "far", date: "2026-10-03" });
+  const near = refundCandidate({ refundId: "near", date: "2026-10-12" });
+  assert.equal(matchInvoiceRefundPayment(payment(), [far, near]).refundId, "near");
+});
+
+run("only unmatched manual refunds are candidates", () => {
+  const inv = {
+    id: "inv1",
+    number: "0012",
+    clientName: "Acme",
+    refunds: [
+      { id: "manual_a", entryId: "e1", amount: 10, date: "2026-10-10", reason: "other", stripeRefundId: null, plaidTransactionId: null },
+      { id: "re_1", entryId: "e2", amount: 10, date: "2026-10-10", reason: "other", stripeRefundId: "re_1", plaidTransactionId: null },
+      { id: "manual_b", entryId: "e3", amount: 10, date: "2026-10-10", reason: "other", stripeRefundId: null, plaidTransactionId: "txn_9" },
+    ],
+  };
+  assert.deepEqual(selectUnmatchedManualRefunds([inv]).map((r) => r.refundId), ["manual_a"]);
+  // A re-sync of the payment that holds a refund still sees it.
+  assert.deepEqual(selectUnmatchedManualRefunds([inv], "txn_9").map((r) => r.refundId), ["manual_a", "manual_b"]);
 });
 
 process.stdout.write("invoice matching checks passed\n");
