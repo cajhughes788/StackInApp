@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useState } from "react"
+import { Suspense, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Check, FileText, Landmark, Link2, Mail, MoreHorizontal } from "lucide-react"
@@ -120,6 +120,15 @@ function InvoiceDetailPage() {
   const [manualLink, setManualLink] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<null | "void" | "delete">(null)
   const today = localToday()
+
+  // A just-created invoice opens straight into the send sheet, once.
+  const autoOpenedSend = useRef(false)
+  const canSend = !!workspaceId && (invoice?.status === "draft" || invoice?.status === "sent")
+  useEffect(() => {
+    if (!justCreated || !canSend || autoOpenedSend.current) return
+    autoOpenedSend.current = true
+    setSendOpen(true)
+  }, [justCreated, canSend])
 
   // Creates the link the first time (and sends a draft). Returns the latest invoice.
   async function ensureShared(current: InvoiceType): Promise<{ invoice: InvoiceType; url: string }> {

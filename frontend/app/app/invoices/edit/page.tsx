@@ -442,7 +442,7 @@ function InvoiceFormPage() {
               disabled={saving !== null}
               className="h-[52px] flex-1 rounded-full text-base font-semibold"
             >
-              {saving === "share" ? "Saving..." : existing ? "Save" : "Save & share"}
+              {saving === "share" ? "Saving..." : existing ? "Save" : "Review & send"}
             </Button>
           </div>
         </form>
