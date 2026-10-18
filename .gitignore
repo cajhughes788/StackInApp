@@ -103,3 +103,4 @@ traces/
 # 🔍 Miscellaneous tooling
 # ---------------------------------------
 .dataconnect/
+sendgrid.env
