@@ -20,7 +20,7 @@ import { computeReceiptCoverage } from "@shared/receiptRequirements"
 import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
 import { localToday } from "@/components/invoices/invoice-ui"
 import { formatInvoiceMoney } from "@shared/invoiceDisplay"
-import { invoiceBalanceDue } from "@shared/invoicePayments"
+import { invoiceBalanceDue, invoiceDueNow } from "@shared/invoicePayments"
 
 // One review list for everything the bank sent over: deposits (income) and
 // charges and refunds (expenses). Shown on both the Income and Expenses tabs
@@ -68,19 +68,46 @@ export default function NeedsYouPanel() {
     () => (invoices ?? []).filter((invoice) => invoice.status === "sent" && invoice.paymentFailedAt && !invoice.pendingPayment),
     [invoices]
   )
-  // Past due and unpaid, as one row — chasing them happens on the Invoices
-  // page. A failed payment already has its own row above.
   const today = localToday()
+  // A deposit past its due date: whether the booking stands is the user's
+  // call (waive it or cancel), so each gets its own row.
+  const overdueDeposits = useMemo(
+    () =>
+      (invoices ?? []).filter((invoice) => {
+        const dueNow = invoiceDueNow(invoice)
+        return (
+          invoice.status === "sent" &&
+          dueNow?.purpose === "deposit" &&
+          dueNow.dueDate < today &&
+          !invoice.pendingPayment &&
+          !invoice.paymentFailedAt
+        )
+      }),
+    [invoices, today]
+  )
+  // Past due and unpaid, as one row — chasing them happens on the Invoices
+  // page. A failed payment or an overdue deposit already has its own row.
   const overdue = useMemo(
     () =>
       (invoices ?? []).filter(
-        (invoice) => invoice.status === "sent" && invoice.dueDate < today && !invoice.pendingPayment && !invoice.paymentFailedAt
+        (invoice) =>
+          invoice.status === "sent" &&
+          invoice.dueDate < today &&
+          !invoice.pendingPayment &&
+          !invoice.paymentFailedAt &&
+          invoiceDueNow(invoice)?.purpose !== "deposit"
       ),
     [invoices, today]
   )
   const overdueTotal = overdue.reduce((sum, invoice) => sum + Math.round(invoiceBalanceDue(invoice) * 100), 0) / 100
   const total =
-    (incomeCount ?? 0) + (expensesCount ?? 0) + missingReceipts + openDisputes.length + failedPayments.length + (overdue.length > 0 ? 1 : 0)
+    (incomeCount ?? 0) +
+    (expensesCount ?? 0) +
+    missingReceipts +
+    openDisputes.length +
+    failedPayments.length +
+    overdueDeposits.length +
+    (overdue.length > 0 ? 1 : 0)
 
   async function hideMissingReceipts() {
     if (!activeWorkspaceId || !settings) return
@@ -182,6 +209,25 @@ export default function NeedsYouPanel() {
             <span className="block font-medium text-foreground">{invoice.clientName}&apos;s bank payment failed</span>
             <span className="block text-sm text-muted-foreground">
               Invoice #{invoice.number} · {formatInvoiceMoney(invoice.total)} is open again
+            </span>
+          </span>
+          <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        </Link>
+      ))}
+
+      {overdueDeposits.map((invoice) => (
+        <Link
+          key={invoice.id}
+          href={`/app/invoices/view?id=${encodeURIComponent(invoice.id)}`}
+          className="flex items-center gap-3 rounded-[18px] border border-card-border bg-card p-4 hover:bg-muted/40"
+        >
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400">
+            <Clock className="size-5" aria-hidden="true" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-medium text-foreground">{invoice.clientName}&apos;s deposit is overdue</span>
+            <span className="block text-sm text-muted-foreground">
+              Invoice #{invoice.number} · {formatInvoiceMoney(invoiceDueNow(invoice)?.amount ?? 0)} · waive it or cancel
             </span>
           </span>
           <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />

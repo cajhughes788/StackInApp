@@ -41,6 +41,12 @@ const SWATCHES: Array<{ hex: string; label: string }> = [
 const TERMS: InvoiceTerms[] = ["due_on_receipt", "net_15", "net_30"]
 const TERMS_SHORT: Record<InvoiceTerms, string> = { due_on_receipt: "Due now", net_15: "15 days", net_30: "30 days" }
 const HEX_RE = /^#[0-9a-fA-F]{6}$/
+const DEPOSIT_TYPES: Array<{ value: InvoiceSettings["defaultDeposit"]["type"]; label: string }> = [
+  { value: "none", label: "None" },
+  { value: "fixed", label: "$ amount" },
+  { value: "percent", label: "% of total" },
+]
+const DEPOSIT_DUE_DAYS = [3, 7, 14]
 
 type Draft = Omit<InvoiceSettings, "updatedAt">
 
@@ -72,13 +78,32 @@ function InvoiceSettingsPage() {
   const [fromStripe] = useState(() => stripeParam !== null)
   const fileInput = useRef<HTMLInputElement | null>(null)
 
+  // Typed as text so "12." isn't rewritten mid-typing; parsed on save.
+  const [depositText, setDepositText] = useState("")
+
   useEffect(() => {
     if (initialized.current || loadStatus !== "ready") return
     initialized.current = true
     const next = toDraft(settings)
     setDraft(next)
     setHexText(next.accentColor)
+    if (next.defaultDeposit.type !== "none") setDepositText(String(next.defaultDeposit.value))
   }, [loadStatus, settings])
+
+  const depositValue = (() => {
+    const cleaned = depositText.replace(/[$,%\s]/g, "")
+    if (!/^\d+(\.\d{0,2})?$/.test(cleaned)) return null
+    const value = Number(cleaned)
+    return value > 0 ? value : null
+  })()
+  const depositError =
+    draft.defaultDeposit.type === "none"
+      ? null
+      : depositValue === null
+        ? "Enter the deposit amount, or choose None."
+        : draft.defaultDeposit.type === "percent" && depositValue >= 100
+          ? "A percent deposit has to be under 100%."
+          : null
 
   function update(patch: Partial<Draft>) {
     setDraft((current) => ({ ...current, ...patch }))
@@ -105,11 +130,15 @@ function InvoiceSettingsPage() {
   }
 
   async function save() {
-    if (!workspaceId || emailInvalid) return
+    if (!workspaceId || emailInvalid || depositError) return
     setSaving(true)
     try {
       const saved = await saveInvoiceSettings(workspaceId, {
         ...draft,
+        defaultDeposit:
+          draft.defaultDeposit.type === "none" || depositValue === null
+            ? { ...draft.defaultDeposit, type: "none", value: 0 }
+            : { ...draft.defaultDeposit, value: depositValue },
         businessName: draft.businessName.trim(),
         businessEmail: draft.businessEmail.trim(),
         businessPhone: draft.businessPhone.trim(),
@@ -309,6 +338,65 @@ function InvoiceSettingsPage() {
               </div>
               <p className="text-xs text-muted-foreground">
                 How long clients have to pay. You can change it on each invoice.
+              </p>
+            </fieldset>
+            <fieldset className="space-y-1.5">
+              <legend className="mb-1.5 text-sm font-medium text-muted-foreground">Deposit</legend>
+              <div className="grid grid-cols-3 gap-1 rounded-[14px] bg-muted p-1">
+                {DEPOSIT_TYPES.map((option) => {
+                  const active = draft.defaultDeposit.type === option.value
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => update({ defaultDeposit: { ...draft.defaultDeposit, type: option.value } })}
+                      className={cn(
+                        "h-10 rounded-[10px] text-sm transition-colors",
+                        active ? "bg-card font-semibold text-foreground shadow-sm" : "text-muted-foreground"
+                      )}
+                    >
+                      {option.label}
+                    </button>
+                  )
+                })}
+              </div>
+              {draft.defaultDeposit.type !== "none" ? (
+                <div className="flex gap-2.5 pt-1">
+                  <label className={cn(fieldLabelClass, "flex-1")}>
+                    {draft.defaultDeposit.type === "percent" ? "Percent" : "Amount"}
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className={cn(softInputClass, "tabular-nums")}
+                      value={depositText}
+                      placeholder={draft.defaultDeposit.type === "percent" ? "25" : "100.00"}
+                      onChange={(event) => setDepositText(event.target.value)}
+                    />
+                  </label>
+                  <label className={cn(fieldLabelClass, "flex-1")}>
+                    Due within
+                    <select
+                      className={softInputClass}
+                      value={draft.defaultDeposit.dueInDays}
+                      onChange={(event) =>
+                        update({ defaultDeposit: { ...draft.defaultDeposit, dueInDays: Number(event.target.value) } })
+                      }
+                    >
+                      {[...new Set([...DEPOSIT_DUE_DAYS, draft.defaultDeposit.dueInDays])]
+                        .sort((a, b) => a - b)
+                        .map((days) => (
+                          <option key={days} value={days}>
+                            {days === 0 ? "Same day" : `${days} days`}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                </div>
+              ) : null}
+              {depositError ? <p className="text-sm text-destructive">{depositError}</p> : null}
+              <p className="text-xs text-muted-foreground">
+                Asked for up front on new invoices; the rest is due by the due date. You can change it on each invoice.
               </p>
             </fieldset>
             <label className={fieldLabelClass}>

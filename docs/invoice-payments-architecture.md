@@ -161,7 +161,7 @@ Goal: the payment engine is the only way money gets attached to an invoice, and 
   - draft and void invoices have no payments;
   - payment ids are unique.
 - There's no compatibility shape for `mark_paid`.
-- Test invoices saved in the old shape are converted once by `scripts/convert-legacy-invoices.cjs` (dry run by default). Delete that script after it has run.
+- The few test invoices saved in the old shape were deleted, not converted.
 - All three payment paths (manual, bank match and Stripe) moved onto the engine in this phase, because the fields they wrote no longer exist. Phases 4 and 5 add deposit/tip targets and the payment choice on top of it.
 
 1. **Engine.** `backend/functions/src/services/invoicePaymentEngine.ts`, with four parts:
@@ -197,6 +197,15 @@ Goal: the payment engine is the only way money gets attached to an invoice, and 
 ### Phase 3 — Deposits
 
 Goal: an artist can require a deposit, and every surface understands it.
+
+**Built and tested end to end.** The test ran in the local app against real data, with this branch's functions running in the Firebase functions emulator. It covered:
+- the settings default pre-filling a 25% deposit;
+- the client page and PDF asking for the deposit first;
+- recording the deposit, which gives "Deposit paid · $600 due" and locks the deposit;
+- an overdue deposit appearing in Needs you, then waived on one invoice and cancelled (voided) on another;
+- the server refusing to change or waive a paid deposit, to void a paid invoice, or to take an overpayment.
+
+One change from the plan: the client page's Pay button pays the deposit while one is owed, rather than the full balance. Checkout already charges the first payment option, which is the deposit. `invoiceDueNow` counts drafts too, so a draft's preview and PDF show the deposit; callers that mean "owed now" check that the status is `sent`.
 
 1. **API.** `InvoiceCreateInputSchema` and `InvoicePatchSchema` accept `deposit: { amount, dueDate } | null`.
    - Validation: `0 < amount < total`, and the deposit's due date is between the issue date and the invoice due date.
@@ -255,7 +264,7 @@ Goal: the client pays the right amount online, picks a tip on 521's page, and 52
    - If the invoice can't take the payment (already paid by another method, closed, void, or the amount is now above the balance due), the payment is refunded automatically, as duplicates are today.
 5. **ACH per payment.** `pendingPayment` holds the purpose, amount and tip while it clears. Success books through the engine. Failure clears it, reopens that option and notifies the user (wording now says which payment failed).
 6. **Refunds and disputes by payment intent.** `invoiceForPayment` looks up `paymentIntentIds array-contains`. Refunds and disputes attach to that payment. Stripe-dashboard refunds still arrive through `charge.refunded`. Payouts and `stripePayouts` are unchanged: a payout is a lump of many payments either way.
-7. **Cleanup.** Done in Phase 2. What's left: delete `scripts/convert-legacy-invoices.cjs` once it has run.
+7. **Cleanup.** Done in Phase 2. The old test invoices were deleted rather than converted, and the converter script was removed.
 8. **Tests.** Session amounts for each purpose, tip validation and caps, metadata round trip, the mismatch fallback, duplicate auto-refund, ACH clear and fail per payment, and refund or dispute on the second of two online payments.
 
 **Done when:** in Stripe test mode, the tattoo example paid as a deposit online, then balance + 20% tip online, books $100 service, then $700 service + $140 tip, with two fee expenses. The payouts are hidden from bank review, and refunding the tip alone works.

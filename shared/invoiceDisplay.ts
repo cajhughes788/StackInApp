@@ -1,4 +1,4 @@
-import { invoiceAmountPaid, invoiceBalanceDue, invoiceLatestPayment } from "./invoicePayments"
+import { invoiceAmountPaid, invoiceBalanceDue, invoiceDepositOutstanding, invoiceLatestPayment } from "./invoicePayments"
 import { invoiceRefundedTotal, type InvoiceTerms, type InvoiceType } from "./schemas/invoice"
 
 // ---------------------------------------------------------------------------
@@ -56,7 +56,8 @@ export type InvoiceDisplayStatus = {
 
 // `today` is a YYYY-MM-DD in the business's local time; the caller decides.
 export function invoiceDisplayStatus(
-  invoice: Pick<InvoiceType, "status" | "dueDate"> & Partial<Pick<InvoiceType, "total" | "refunds" | "dispute" | "payments">>,
+  invoice: Pick<InvoiceType, "status" | "dueDate"> &
+    Partial<Pick<InvoiceType, "total" | "refunds" | "dispute" | "payments" | "deposit">>,
   today: string
 ): InvoiceDisplayStatus {
   if (invoice.status === "paid" && (invoice.dispute?.status === "open" || invoice.dispute?.status === "inquiry")) {
@@ -78,17 +79,32 @@ export function invoiceDisplayStatus(
       return { label: invoiceAmountPaid(invoice) > 0 ? `Closed · ${formatInvoiceMoney(invoiceAmountPaid(invoice))} kept` : "Closed", tone: "closed" }
     case "draft":
       return { label: "Draft", tone: "draft" }
-    case "sent":
-      if (invoice.total !== undefined && invoiceAmountPaid(invoice) > 0) {
-        const balance = invoiceBalanceDue({ status: invoice.status, total: invoice.total, payments: invoice.payments })
-        return {
-          label: `Partly paid · ${formatInvoiceMoney(balance)} due`,
-          tone: invoice.dueDate < today ? "overdue" : "open",
+    case "sent": {
+      if (invoice.total !== undefined) {
+        const ledger = { status: invoice.status, total: invoice.total, payments: invoice.payments, deposit: invoice.deposit }
+        // A deposit still owed comes first: it's what the client pays next.
+        const deposit = invoiceDepositOutstanding(ledger)
+        if (deposit > 0 && invoice.deposit) {
+          const due = invoice.deposit.dueDate
+          if (due < today) return { label: `Deposit overdue since ${formatInvoiceDate(due)}`, tone: "overdue" }
+          return {
+            label: due === today ? `Deposit ${formatInvoiceMoney(deposit)} due today` : `Deposit ${formatInvoiceMoney(deposit)} due ${formatInvoiceDate(due)}`,
+            tone: "open",
+          }
+        }
+        if (invoiceAmountPaid(invoice) > 0) {
+          const balance = invoiceBalanceDue(ledger)
+          const paidDeposit = invoice.deposit && !invoice.deposit.waivedAt
+          return {
+            label: `${paidDeposit ? "Deposit paid" : "Partly paid"} · ${formatInvoiceMoney(balance)} due`,
+            tone: invoice.dueDate < today ? "overdue" : "open",
+          }
         }
       }
       if (invoice.dueDate < today) return { label: `Overdue since ${formatInvoiceDate(invoice.dueDate)}`, tone: "overdue" }
       if (invoice.dueDate === today) return { label: "Due today", tone: "open" }
       return { label: `Due ${formatInvoiceDate(invoice.dueDate)}`, tone: "open" }
+    }
   }
 }
 

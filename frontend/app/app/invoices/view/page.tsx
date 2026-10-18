@@ -53,6 +53,7 @@ import {
   useInvoiceSaving,
   voidInvoiceInBackground,
   closeInvoiceInBackground,
+  waiveDepositInBackground,
 } from "@/lib/domain/invoiceService"
 import { shareLink } from "@/lib/documentExport"
 import { shareInvoicePdf } from "@/lib/invoicePdf"
@@ -68,6 +69,7 @@ import {
 import {
   invoiceAmountPaid,
   invoiceBalanceDue,
+  invoiceDepositOutstanding,
   invoiceHasPayments,
   invoiceLatestPayment,
   invoiceRefundable,
@@ -106,6 +108,10 @@ function metaLine(invoice: InvoiceType): string {
     case "sent":
       if (invoice.pendingPayment) {
         return `Bank payment processing · started ${formatInvoiceDate(invoice.pendingPayment.startedAt.slice(0, 10))}`
+      }
+      if (invoiceDepositOutstanding(invoice) > 0 && invoice.deposit) {
+        const late = invoice.deposit.dueDate < localToday()
+        return `Deposit ${formatInvoiceMoney(invoiceDepositOutstanding(invoice))} ${late ? "was due" : "due"} ${formatInvoiceDate(invoice.deposit.dueDate)} · ${formatInvoiceMoney(invoice.total)} total`
       }
       if (invoiceHasPayments(invoice)) {
         return `${formatInvoiceMoney(invoiceAmountPaid(invoice))} paid · ${formatInvoiceMoney(invoiceBalanceDue(invoice))} due`
@@ -226,6 +232,15 @@ function InvoiceDetailPage() {
     }
   }
 
+  function onWaiveDeposit() {
+    if (!invoice || !workspaceId) return
+    waiveDepositInBackground(workspaceId, invoice)
+    toast({
+      title: "Deposit waived",
+      description: `${formatInvoiceMoney(invoiceBalanceDue(invoice))} is due by ${formatInvoiceDate(invoice.dueDate)}.`,
+    })
+  }
+
   function openRefund(paymentId: string | null) {
     setRefundPaymentId(paymentId)
     setRefundOpen(true)
@@ -248,6 +263,9 @@ function InvoiceDetailPage() {
       router.replace("/app/invoices")
     }
   }
+
+  const depositOverdue =
+    !!invoice?.deposit && invoiceDepositOutstanding(invoice) > 0 && !invoice.pendingPayment && invoice.deposit.dueDate < today
 
   // Not while a bank payment clears: it would land against a changed invoice.
   const editable = (invoice?.status === "draft" || invoice?.status === "sent") && !invoice?.pendingPayment
@@ -287,6 +305,9 @@ function InvoiceDetailPage() {
                 <DropdownMenuItem className="text-destructive" onSelect={() => setConfirm("delete")}>
                   Delete draft
                 </DropdownMenuItem>
+              ) : null}
+              {invoiceDepositOutstanding(invoice) > 0 && !invoice.pendingPayment ? (
+                <DropdownMenuItem onSelect={() => onWaiveDeposit()}>Waive deposit</DropdownMenuItem>
               ) : null}
               {invoiceRefundable(invoice) > 0 ? (
                 <DropdownMenuItem onSelect={() => openRefund(null)}>
@@ -398,6 +419,30 @@ function InvoiceDetailPage() {
             >
               Refund more
             </Button>
+          ) : null}
+
+          {depositOverdue && invoice.deposit ? (
+            // Past the deposit's due date: the booking is the user's call.
+            <div className="space-y-3 rounded-[14px] bg-red-100 px-3.5 py-3 text-sm text-red-900 dark:bg-red-950 dark:text-red-200">
+              <p>
+                {invoice.clientName}&apos;s {formatInvoiceMoney(invoiceDepositOutstanding(invoice))} deposit was due{" "}
+                {formatInvoiceDate(invoice.deposit.dueDate)}. Keep the booking without it, or cancel?
+              </p>
+              <div className="flex gap-2">
+                <Button type="button" size="sm" variant="outline" className="rounded-full bg-card" onClick={() => onWaiveDeposit()}>
+                  Waive deposit
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="rounded-full bg-card"
+                  onClick={() => setConfirm(invoiceHasPayments(invoice) ? "close" : "void")}
+                >
+                  Cancel booking
+                </Button>
+              </div>
+            </div>
           ) : null}
 
           {invoice.status === "sent" && invoice.paymentFailedAt && !invoice.pendingPayment ? (

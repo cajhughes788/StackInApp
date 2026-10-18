@@ -156,7 +156,7 @@ export function createInvoiceInBackground(workspaceId: string, input: CreateInpu
     paymentFailedAt: null,
     sharedAt: null,
     payments: [],
-    deposit: null,
+    deposit: input.deposit ? { ...input.deposit, waivedAt: null } : null,
     pendingPayment: null,
     openCheckout: null,
     closedAt: null,
@@ -211,6 +211,7 @@ export function editInvoiceInBackground(workspaceId: string, invoice: InvoiceTyp
     clientEmail: patch.clientEmail === undefined ? previous.clientEmail : patch.clientEmail || null,
     clientPhone: patch.clientPhone === undefined ? previous.clientPhone : patch.clientPhone || null,
     note: patch.note ?? previous.note,
+    deposit: patch.deposit === undefined ? previous.deposit : patch.deposit ? { ...patch.deposit, waivedAt: null } : null,
     lines,
     total: invoiceTotalFromLines(lines),
     updatedAt: new Date().toISOString(),
@@ -263,6 +264,18 @@ export function recordPaymentInBackground(workspaceId: string, invoice: InvoiceT
     const periodId = entries.byWorkspaceId[workspaceId]?.periodId
     if (periodId) void entries.refreshFromBackend(workspaceId, periodId, { force: true }).catch(() => {})
   }).catch((error) => onFailure(workspaceId, `Couldn't record the payment on #${previous.number}`, error, previous))
+}
+
+/** The deposit isn't needed: the whole amount is due by the invoice's due date. */
+export function waiveDepositInBackground(workspaceId: string, invoice: InvoiceType) {
+  const previous = latestInvoice(workspaceId, invoice.id) ?? invoice
+  if (!previous.deposit) return
+  const now = new Date().toISOString()
+  store().upsertInvoice(workspaceId, { ...previous, deposit: { ...previous.deposit, waivedAt: now }, openCheckout: null, updatedAt: now })
+  enqueue(invoice.id, async (id) => {
+    const { invoice: waived } = await updateInvoiceStatus(workspaceId, requireSaved(id), { action: "waive_deposit" })
+    applyServerCopy(workspaceId, invoice.id, waived)
+  }).catch((error) => onFailure(workspaceId, `Couldn't waive the deposit on #${previous.number}`, error, previous))
 }
 
 /** Ends a partly paid invoice, keeping what was paid. */

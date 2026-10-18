@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { Plus, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useToast } from "@/hooks/use-toast"
@@ -22,7 +23,8 @@ import { createInvoiceInBackground, currentInvoiceId, editInvoiceInBackground } 
 import { cn } from "@/lib/utils"
 import { dueDateForTerms, formatInvoiceDate, formatInvoiceMoney, INVOICE_TERMS_LABELS } from "@shared/invoiceDisplay"
 import type { IncomeCategory } from "@shared/schemas/entry"
-import type { InvoiceTerms } from "@shared/schemas/invoice"
+import { invoiceDepositOutstanding } from "@shared/invoicePayments"
+import type { InvoiceTerms, InvoiceType } from "@shared/schemas/invoice"
 
 type DraftLine = { key: number; description: string; amount: string; category: IncomeCategory }
 
@@ -48,6 +50,16 @@ function termsFor(issueDate: string, dueDate: string): InvoiceTerms | null {
 }
 
 let lineKey = 0
+// "2026-10-01" + 7 days → "2026-10-08".
+function addDays(date: string, days: number): string {
+  return new Date(Date.parse(`${date}T12:00:00Z`) + days * 86400000).toISOString().slice(0, 10)
+}
+
+// A deposit that's been paid or waived can't change any more.
+function depositSettled(invoice: InvoiceType | null): boolean {
+  return !!invoice?.deposit && (invoice.deposit.waivedAt !== null || invoiceDepositOutstanding(invoice) === 0)
+}
+
 function newLine(category: IncomeCategory = "services"): DraftLine {
   return { key: ++lineKey, description: "", amount: "", category }
 }
@@ -83,6 +95,10 @@ function InvoiceFormPage() {
   const [issueDate, setIssueDate] = useState(localToday())
   const [dueDate, setDueDate] = useState(() => dueDateForTerms(localToday(), "net_30"))
   const [note, setNote] = useState("")
+  const [depositOn, setDepositOn] = useState(false)
+  const [depositMode, setDepositMode] = useState<"fixed" | "percent">("fixed")
+  const [depositText, setDepositText] = useState("")
+  const [depositDueDate, setDepositDueDate] = useState(() => addDays(localToday(), 7))
   const [saving, setSaving] = useState<null | "draft" | "share">(null)
   const [showErrors, setShowErrors] = useState(false)
   const initialized = useRef(false)
@@ -100,10 +116,25 @@ function InvoiceFormPage() {
       setIssueDate(existing.issueDate)
       setDueDate(existing.dueDate)
       setNote(existing.note)
+      if (existing.deposit) {
+        setDepositOn(true)
+        setDepositMode("fixed")
+        setDepositText(existing.deposit.amount.toFixed(2))
+        setDepositDueDate(existing.deposit.dueDate)
+      }
     } else {
       if (settings) {
-        setDueDate(dueDateForTerms(localToday(), settings.defaultTerms))
+        const due = dueDateForTerms(localToday(), settings.defaultTerms)
+        setDueDate(due)
         setNote(settings.defaultNote)
+        const preset = settings.defaultDeposit
+        if (preset.type !== "none" && preset.value > 0) {
+          setDepositOn(true)
+          setDepositMode(preset.type)
+          setDepositText(preset.type === "percent" ? String(preset.value) : preset.value.toFixed(2))
+          const depositDue = addDays(localToday(), preset.dueInDays)
+          setDepositDueDate(depositDue > due ? due : depositDue)
+        }
       }
       if (prefillClient) {
         // Their contact details from the latest invoice to them.
@@ -135,6 +166,24 @@ function InvoiceFormPage() {
   const total = parsedLines.reduce((sum, line) => sum + Math.round((line.value ?? 0) * 100), 0) / 100
   const selectedTerms = termsFor(issueDate, dueDate)
   const filledLines = parsedLines.filter((line) => line.description.trim() || line.amount.trim())
+  const depositLocked = depositSettled(existing)
+  const depositInput = depositMode === "percent" ? Number(depositText.replace(/[%\s]/g, "")) : parseAmount(depositText)
+  const depositAmount =
+    depositInput === null || !Number.isFinite(depositInput) || depositInput <= 0
+      ? null
+      : depositMode === "percent"
+        ? Math.round(total * depositInput) / 100
+        : depositInput
+  const depositError =
+    !depositOn || depositLocked
+      ? null
+      : depositAmount === null || depositAmount <= 0
+        ? "Enter the deposit amount."
+        : Math.round(depositAmount * 100) >= Math.round(total * 100)
+          ? "The deposit has to be less than the total."
+          : depositDueDate < issueDate || depositDueDate > dueDate
+            ? "The deposit has to be due between the invoice date and its due date."
+            : null
   const errors = {
     client: !clientName.trim() ? "Who is this invoice for?" : null,
     lines:
@@ -147,7 +196,7 @@ function InvoiceFormPage() {
     email:
       clientEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail.trim()) ? "That email doesn't look right." : null,
   }
-  const valid = !errors.client && !errors.lines && !errors.dates && !errors.email
+  const valid = !errors.client && !errors.lines && !errors.dates && !errors.email && !depositError
 
   function updateLine(key: number, patch: Partial<DraftLine>) {
     setLines((current) => current.map((line) => (line.key === key ? { ...line, ...patch } : line)))
@@ -171,6 +220,10 @@ function InvoiceFormPage() {
       issueDate,
       dueDate,
       note: note.trim(),
+      // A settled deposit is left as it is (the server refuses to change it).
+      ...(depositLocked
+        ? {}
+        : { deposit: depositOn && depositAmount !== null ? { amount: depositAmount, dueDate: depositDueDate } : null }),
     }
     // Saved in the background (invoiceService) — the next screen shows it now.
     setSaving(mode)
@@ -424,6 +477,77 @@ function InvoiceFormPage() {
               </label>
               {showErrors && errors.dates ? <p className="text-sm text-destructive">{errors.dates}</p> : null}
             </fieldset>
+          </section>
+
+          <section className={cn(cardClass, "space-y-3")}>
+            {depositLocked && existing?.deposit ? (
+              <p className="text-sm text-muted-foreground">
+                Deposit of <span className="tabular-nums">{formatInvoiceMoney(existing.deposit.amount)}</span>{" "}
+                {existing.deposit.waivedAt ? "was waived" : "is paid"} — it can&apos;t be changed.
+              </p>
+            ) : (
+              <>
+                <label className="flex items-center justify-between gap-3">
+                  <span>
+                    <span className="block text-sm font-medium text-foreground">Ask for a deposit</span>
+                    <span className="block text-xs text-muted-foreground">Paid up front; the rest is due by the due date.</span>
+                  </span>
+                  <Switch checked={depositOn} onCheckedChange={setDepositOn} aria-label="Ask for a deposit" />
+                </label>
+                {depositOn ? (
+                  <>
+                    <div className="flex gap-2.5">
+                      <label className={cn(fieldLabelClass, "flex-1")}>
+                        Deposit
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          className={cn(softInputClass, "tabular-nums")}
+                          value={depositText}
+                          placeholder={depositMode === "percent" ? "25" : "100.00"}
+                          onChange={(event) => setDepositText(event.target.value)}
+                        />
+                      </label>
+                      <div className="grid w-[104px] shrink-0 grid-cols-2 gap-1 self-end rounded-[14px] bg-muted p-1">
+                        {(["fixed", "percent"] as const).map((mode) => (
+                          <button
+                            key={mode}
+                            type="button"
+                            aria-pressed={depositMode === mode}
+                            aria-label={mode === "fixed" ? "Dollar amount" : "Percent of total"}
+                            onClick={() => setDepositMode(mode)}
+                            className={cn(
+                              "h-10 rounded-[10px] text-sm transition-colors",
+                              depositMode === mode ? "bg-card font-semibold text-foreground shadow-sm" : "text-muted-foreground"
+                            )}
+                          >
+                            {mode === "fixed" ? "$" : "%"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <label className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
+                      <span>
+                        {depositAmount !== null && depositMode === "percent" ? (
+                          <span className="tabular-nums">{formatInvoiceMoney(depositAmount)} · </span>
+                        ) : null}
+                        Due {formatInvoiceDate(depositDueDate)}
+                      </span>
+                      <input
+                        type="date"
+                        aria-label="Deposit due date"
+                        className="h-9 rounded-lg border-0 bg-transparent px-1 text-sm font-medium text-emerald-700 dark:text-emerald-400"
+                        value={depositDueDate}
+                        min={issueDate}
+                        max={dueDate}
+                        onChange={(event) => event.target.value && setDepositDueDate(event.target.value)}
+                      />
+                    </label>
+                    {showErrors && depositError ? <p className="text-sm text-destructive">{depositError}</p> : null}
+                  </>
+                ) : null}
+              </>
+            )}
           </section>
 
           <section className={cn(cardClass, "space-y-1.5")}>

@@ -1,4 +1,4 @@
-import { invoiceBalanceDue } from "@shared/invoicePayments"
+import { invoiceBalanceDue, invoiceDueNow } from "@shared/invoicePayments"
 import type { InvoiceType } from "@shared/schemas/invoice"
 
 import { invoiceKeptAmount } from "@/components/invoices/invoice-money"
@@ -41,9 +41,10 @@ export function groupInvoicesByClient(invoices: InvoiceType[], today: string): I
     client.invoices.push(invoice)
     if (invoice.payments.length > 0) client.earned = addMoney(client.earned, invoiceKeptAmount(invoice))
     if (invoice.status === "sent") {
-      const balance = invoiceBalanceDue(invoice)
-      client.open = addMoney(client.open, balance)
-      if (invoice.dueDate < today) client.overdue = addMoney(client.overdue, balance)
+      client.open = addMoney(client.open, invoiceBalanceDue(invoice))
+      // What's late: an overdue deposit, or the rest once it's past due.
+      const dueNow = invoiceDueNow(invoice)
+      if (dueNow && dueNow.dueDate < today) client.overdue = addMoney(client.overdue, dueNow.amount)
     }
   }
   return [...byKey.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))

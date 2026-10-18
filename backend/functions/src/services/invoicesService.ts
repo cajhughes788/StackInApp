@@ -10,6 +10,7 @@ import {
   InvoiceSettingsSchema,
   InvoiceStatusActionSchema,
   invoiceTotalFromLines,
+  type InvoicePatch,
   type InvoiceSettings,
   type InvoiceStatusAction,
   type InvoiceType,
@@ -28,7 +29,7 @@ import {
   type RefundPaymentCandidate,
 } from "@shared/invoiceMatching"
 import { publicInvoiceUrl } from "@shared/invoiceDisplay"
-import { invoiceBalanceDue, invoicePaymentPurposeFor } from "@shared/invoicePayments"
+import { invoiceBalanceDue, invoiceDepositOutstanding, invoicePaymentPurposeFor } from "@shared/invoicePayments"
 
 export function invoicesCol(workspaceId: string) {
   return db.collection("workspaces").doc(workspaceId).collection("invoices")
@@ -187,6 +188,7 @@ export async function createInvoice(workspaceId: string, uid: string, raw: unkno
       issueDate: input.issueDate,
       dueDate: input.dueDate,
       note,
+      deposit: input.deposit ? { ...input.deposit, waivedAt: null } : null,
       status: input.send ? "sent" : "draft",
       createdAt: nowIso,
       updatedAt: nowIso,
@@ -215,9 +217,11 @@ export async function updateInvoice(workspaceId: string, uid: string, invoiceId:
       throw new ConflictError("A bank payment for this invoice is still clearing — it can be edited if that payment fails.")
     }
     const lines = patch.lines ?? current.lines
+    const deposit = nextDeposit(current, patch.deposit)
     const next = {
       ...current,
       ...patch,
+      deposit,
       clientEmail: patch.clientEmail === undefined ? current.clientEmail : patch.clientEmail || null,
       clientPhone: patch.clientPhone === undefined ? current.clientPhone : patch.clientPhone || null,
       lines,
@@ -225,6 +229,12 @@ export async function updateInvoice(workspaceId: string, uid: string, invoiceId:
       updatedAt: new Date().toISOString(),
     }
     if (next.dueDate < next.issueDate) throw new BadRequestError("Due date can't be before the issue date.")
+    if (deposit && Math.round(deposit.amount * 100) >= Math.round(next.total * 100)) {
+      throw new BadRequestError("The deposit has to be less than the total.")
+    }
+    if (deposit && (deposit.dueDate < next.issueDate || deposit.dueDate > next.dueDate)) {
+      throw new BadRequestError("The deposit has to be due between the invoice date and its due date.")
+    }
     // Booked payments never change; the total just has to stay above them.
     if (current.amountPaid > 0 && Math.round(next.total * 100) <= Math.round(current.amountPaid * 100)) {
       throw new ConflictError(
@@ -240,6 +250,25 @@ export async function updateInvoice(workspaceId: string, uid: string, invoiceId:
   })
   if (staleSessionId) await expireCheckoutSession(workspaceId, staleSessionId)
   return updated
+}
+
+// A patch's deposit, against what's already happened to it: once it's been
+// paid or waived it's settled and can't change.
+function nextDeposit(current: InvoiceType, requested: InvoicePatch["deposit"]): InvoiceType["deposit"] {
+  if (requested === undefined) return current.deposit
+  const settled =
+    !!current.deposit && (current.deposit.waivedAt !== null || invoiceDepositOutstanding(current) === 0)
+  if (settled) {
+    const same =
+      requested !== null &&
+      Math.round(requested.amount * 100) === Math.round(current.deposit!.amount * 100) &&
+      requested.dueDate === current.deposit!.dueDate
+    if (same) return current.deposit
+    throw new ConflictError(
+      current.deposit!.waivedAt ? "The deposit was waived, so it can't be changed." : "The deposit is already paid, so it can't be changed."
+    )
+  }
+  return requested ? { amount: requested.amount, dueDate: requested.dueDate, waivedAt: null } : null
 }
 
 // Drafts only — anything that was sent is kept and voided instead, so the
@@ -274,6 +303,9 @@ export async function updateInvoiceStatus(
   }
   if (action.action === "close") {
     return closeInvoice(workspaceId, ref)
+  }
+  if (action.action === "waive_deposit") {
+    return waiveDeposit(workspaceId, ref)
   }
   if (action.action === "share") {
     return shareInvoice(workspaceId, ref)
@@ -363,6 +395,38 @@ async function recordManualPayment(
     { notes: [action.paymentMethod === "check" ? "Paid by check" : null] }
   )
   return { invoice, entryId }
+}
+
+// The deposit isn't needed after all: the whole amount is due by the
+// invoice's due date. A client's open Checkout for the deposit is closed.
+async function waiveDeposit(workspaceId: string, ref: FirebaseFirestore.DocumentReference): Promise<{ invoice: InvoiceType }> {
+  let staleSessionId: string | null = null
+  const invoice = await db.runTransaction(async (txn) => {
+    const snap = await txn.get(ref)
+    if (!snap.exists) throw new NotFoundError("Invoice not found")
+    const current = InvoiceSchema.parse(snap.data())
+    if (!current.deposit) throw new ConflictError("This invoice has no deposit.")
+    if (current.deposit.waivedAt) return current
+    if (current.status !== "sent" && current.status !== "draft") {
+      throw new ConflictError(`A ${current.status} invoice's deposit can't be waived.`)
+    }
+    if (invoiceDepositOutstanding(current) === 0) throw new ConflictError("The deposit is already paid.")
+    if (current.pendingPayment) {
+      throw new ConflictError("A bank payment for this invoice is still clearing — wait for it to settle.")
+    }
+    staleSessionId = current.openCheckout?.sessionId ?? null
+    const nowIso = new Date().toISOString()
+    const next = InvoiceSchema.parse({
+      ...current,
+      deposit: { ...current.deposit, waivedAt: nowIso },
+      openCheckout: null,
+      updatedAt: nowIso,
+    })
+    txn.set(ref, next)
+    return next
+  })
+  if (staleSessionId) await expireCheckoutSession(workspaceId, staleSessionId)
+  return { invoice }
 }
 
 // Ends a partly paid invoice early. What was paid stays income; nothing

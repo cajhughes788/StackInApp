@@ -28,6 +28,14 @@ const {
   splitAcrossCategories,
 } = require("../shared/invoicePayments.ts");
 const { invoiceDisplayStatus } = require("../shared/invoiceDisplay.ts");
+const {
+  InvoiceCreateInputSchema,
+  InvoicePatchSchema,
+  InvoiceSettingsSchema,
+  InvoiceStatusActionSchema,
+} = require("../shared/schemas/invoice.ts");
+const { renderPublicInvoicePage } = require("../shared/invoicePublicPage.ts");
+const { buildInvoiceEmail } = require("../shared/invoiceEmail.ts");
 
 function run(name, fn) {
   fn();
@@ -285,6 +293,78 @@ run("a refund splits over the payment's own categories, tip included", () => {
   assert.deepEqual(parts, [["services", 5250], ["products", 1750], ["tips", 1400]]);
   const odd = refundCentsByCategory(lines, { amount: 700, tipAmount: 140 }, 1001);
   assert.equal(odd.reduce((sum, [, cents]) => sum + cents, 0), 1001);
+});
+
+/* --------------------------------------------------------
+ * Deposits (phase 3)
+ * -------------------------------------------------------- */
+
+const createBase = {
+  clientName: "Jordan",
+  lines: [{ description: "Forearm piece", amount: 800, category: "services" }],
+  issueDate: "2026-10-01",
+  dueDate: "2026-10-31",
+};
+
+run("a deposit on create has to fit the invoice", () => {
+  const ok = (deposit) => InvoiceCreateInputSchema.safeParse({ ...createBase, deposit }).success;
+  assert.equal(ok({ amount: 100, dueDate: "2026-10-08" }), true);
+  assert.equal(ok(null), true);
+  assert.equal(ok({ amount: 800, dueDate: "2026-10-08" }), false); // not less than the total
+  assert.equal(ok({ amount: 100, dueDate: "2026-09-30" }), false); // before the invoice date
+  assert.equal(ok({ amount: 100, dueDate: "2026-11-01" }), false); // after the due date
+  assert.equal(ok({ amount: 10.005, dueDate: "2026-10-08" }), false);
+  // A patch is checked against whatever it carries.
+  assert.equal(InvoicePatchSchema.safeParse({ deposit: { amount: 100, dueDate: "2026-10-08" } }).success, true);
+  assert.equal(InvoicePatchSchema.safeParse({ deposit: null }).success, true);
+  assert.equal(InvoicePatchSchema.safeParse({ dueDate: "2026-10-05", deposit: { amount: 100, dueDate: "2026-10-08" } }).success, false);
+});
+
+run("the stored invoice keeps its deposit inside its dates", () => {
+  assert.equal(InvoiceSchema.safeParse(doc({ deposit: { amount: 100, dueDate: "2026-11-05" } })).success, false);
+  assert.equal(InvoiceSchema.safeParse(doc({ deposit: { amount: 100, dueDate: "2026-09-30" } })).success, false);
+});
+
+run("waive_deposit is an action; settings carry a default deposit", () => {
+  assert.equal(InvoiceStatusActionSchema.safeParse({ action: "waive_deposit" }).success, true);
+  assert.deepEqual(InvoiceSettingsSchema.parse({}).defaultDeposit, { type: "none", value: 0, dueInDays: 7 });
+  assert.equal(InvoiceSettingsSchema.safeParse({ defaultDeposit: { type: "percent", value: 25, dueInDays: 7 } }).success, true);
+  assert.equal(InvoiceSettingsSchema.safeParse({ defaultDeposit: { type: "percent", value: 100, dueInDays: 7 } }).success, false);
+});
+
+run("status reads the deposit first, then the balance", () => {
+  const deposit = { amount: 100, dueDate: "2026-10-08", waivedAt: null };
+  const open = InvoiceSchema.parse(doc({ deposit }));
+  assert.equal(invoiceDisplayStatus(open, "2026-10-05").label, "Deposit $100.00 due Oct 8, 2026");
+  assert.equal(invoiceDisplayStatus(open, "2026-10-08").label, "Deposit $100.00 due today");
+  assert.deepEqual(invoiceDisplayStatus(open, "2026-10-09"), { label: "Deposit overdue since Oct 8, 2026", tone: "overdue" });
+  const paidDeposit = invoiceWithPayments(open, [payment("d", 100, { purpose: "deposit" })]);
+  assert.equal(invoiceDisplayStatus(paidDeposit, "2026-10-09").label, "Deposit paid · $700.00 due");
+  assert.equal(invoiceDisplayStatus(paidDeposit, "2026-11-01").tone, "overdue");
+  const waived = { ...open, deposit: { ...deposit, waivedAt: "x" } };
+  assert.equal(invoiceDisplayStatus(waived, "2026-10-09").label, "Due Oct 31, 2026");
+  // A draft shows what will be asked for (its PDF and preview); void doesn't.
+  assert.deepEqual(invoiceDueNow({ ...open, status: "draft" }), { purpose: "deposit", amount: 100, dueDate: "2026-10-08" });
+  assert.equal(invoiceDueNow({ ...open, status: "void" }), null);
+});
+
+run("the client's page and email ask for the deposit first", () => {
+  const settings = InvoiceSettingsSchema.parse({ businessName: "Ink & Co" });
+  const open = InvoiceSchema.parse(doc({ deposit: { amount: 100, dueDate: "2026-10-08", waivedAt: null }, shareToken: "tok" }));
+  const page = renderPublicInvoicePage(open, settings, "2026-10-05", { payPath: "/i/tok/pay" });
+  assert.ok(page.includes("Deposit due Oct 8, 2026"));
+  assert.ok(page.includes("Pay $100.00 deposit"));
+  assert.ok(page.includes("Then $700.00 due Oct 31, 2026"));
+  const after = renderPublicInvoicePage(invoiceWithPayments(open, [payment("d", 100, { purpose: "deposit" })]), settings, "2026-10-09", {
+    payPath: "/i/tok/pay",
+  });
+  assert.ok(after.includes("Balance due"));
+  assert.ok(after.includes("Pay $700.00<"));
+  assert.ok(after.includes("Paid so far"));
+  const email = buildInvoiceEmail({ invoice: open, settings, link: "https://x/i/tok", payableOnline: true });
+  assert.ok(email.subject.includes("$100.00 deposit due Oct 8"));
+  assert.ok(email.text.includes("Deposit due: $100.00"));
+  assert.ok(email.text.includes("Invoice total: $800.00, the rest due Oct 31, 2026"));
 });
 
 process.stdout.write("invoice payments checks passed\n");

@@ -1,5 +1,5 @@
 import { formatInvoiceDate, formatInvoiceMoney, textColorOnAccent } from "./invoiceDisplay"
-import { invoiceBalanceDue } from "./invoicePayments"
+import { invoiceBalanceDue, invoiceDueNow } from "./invoicePayments"
 import { escapeHtml } from "./invoicePublicPage"
 import { DEFAULT_INVOICE_ACCENT_COLOR, type InvoiceSettings, type InvoiceType } from "./schemas/invoice"
 
@@ -25,19 +25,24 @@ export function buildInvoiceEmail(params: {
   const message = params.message?.trim() || null
   const business = settings.businessName?.trim() || "Your service provider"
   const accent = settings.accentColor || DEFAULT_INVOICE_ACCENT_COLOR
-  const due = formatInvoiceMoney(invoiceBalanceDue(invoice))
-  const dueDate = formatInvoiceDate(invoice.dueDate)
+  // What the client pays next: the deposit while one is owed, else the rest.
+  const dueNow = invoiceDueNow(invoice)
+  const isDeposit = dueNow?.purpose === "deposit"
+  const due = formatInvoiceMoney(dueNow?.amount ?? invoiceBalanceDue(invoice))
+  const dueDate = formatInvoiceDate(dueNow?.dueDate ?? invoice.dueDate)
+  const amountLabel = isDeposit ? "Deposit due" : "Amount due"
   // Pay now goes straight to Stripe Checkout (GET /i/{token}/pay); the
   // invoice page stays one tap away.
   const payLink = payableOnline ? `${link.replace(/\/+$/, "")}/pay` : null
 
-  const subject = `Invoice #${invoice.number} from ${business} — ${due} due ${dueDate.replace(/, \d{4}$/, "")}`
+  const subject = `Invoice #${invoice.number} from ${business} — ${isDeposit ? `${due} deposit` : due} due ${dueDate.replace(/, \d{4}$/, "")}`
 
   const text = [
     `${business} sent you Invoice #${invoice.number}.`,
     "",
-    `Amount due: ${due}`,
+    `${amountLabel}: ${due}`,
     `Due: ${dueDate}`,
+    ...(isDeposit ? [`Invoice total: ${formatInvoiceMoney(invoice.total)}, the rest due ${formatInvoiceDate(invoice.dueDate)}`] : []),
     ...(message ? ["", message] : []),
     "",
     ...(payLink ? [`Pay now: ${payLink}`, ""] : []),
@@ -62,9 +67,11 @@ export function buildInvoiceEmail(params: {
 <tr><td style="padding:0 24px 20px;font-size:15px;color:#5F6864;">sent you Invoice #${e(invoice.number)}</td></tr>
 <tr><td style="padding:0 24px;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #E2E1DC;border-bottom:1px solid #E2E1DC;">
-<tr><td style="padding:16px 0 4px;font-size:12px;color:#5F6864;text-transform:uppercase;letter-spacing:.04em;">Amount due</td></tr>
+<tr><td style="padding:16px 0 4px;font-size:12px;color:#5F6864;text-transform:uppercase;letter-spacing:.04em;">${amountLabel}</td></tr>
 <tr><td style="padding:0 0 4px;font-size:30px;font-weight:700;">${e(due)}</td></tr>
-<tr><td style="padding:0 0 16px;font-size:14px;color:#5F6864;">Due ${e(dueDate)}</td></tr>
+<tr><td style="padding:0 0 16px;font-size:14px;color:#5F6864;">Due ${e(dueDate)}${
+    isDeposit ? ` · ${e(formatInvoiceMoney(invoice.total))} total, the rest due ${e(formatInvoiceDate(invoice.dueDate))}` : ""
+  }</td></tr>
 </table></td></tr>
 ${message ? `<tr><td style="padding:20px 24px 0;font-size:15px;line-height:1.5;white-space:pre-wrap;">${e(message)}</td></tr>` : ""}
 <tr><td align="center" style="padding:24px 24px ${payLink ? "8px" : "24px"};">

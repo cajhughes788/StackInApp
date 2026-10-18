@@ -73,7 +73,7 @@ export function invoiceWithPayments<T extends InvoiceType>(invoice: T, payments:
 export function invoicePaymentPurposeFor(invoice: LedgerInvoice, amount: number): InvoicePaymentPurpose {
   const cents = toCents(amount)
   if (cents === toCents(invoiceBalanceDue(invoice))) return invoiceAmountPaid(invoice) > 0 ? "balance" : "full"
-  const deposit = invoiceDepositOutstanding({ ...invoice, status: "sent" })
+  const deposit = invoiceDepositOutstanding(invoice)
   if (deposit > 0 && cents === toCents(deposit)) return "deposit"
   return "partial"
 }
@@ -122,16 +122,18 @@ export function invoiceHasPayments(invoice: { payments?: unknown[] }): boolean {
 // covered by what's been paid (a full payment covers it too).
 export function invoiceDepositOutstanding(invoice: LedgerInvoice): number {
   const deposit = invoice.deposit
-  if (!deposit || deposit.waivedAt || invoice.status !== "sent") return 0
+  if (!deposit || deposit.waivedAt || (invoice.status !== "sent" && invoice.status !== "draft")) return 0
   return Math.max(0, toCents(deposit.amount) - toCents(invoiceAmountPaid(invoice))) / 100
 }
 
 export type InvoiceDueNow = { purpose: "deposit" | "balance"; amount: number; dueDate: string }
 
 // What the client owes next, and by when: the deposit while it's
-// outstanding, otherwise the balance. Null when nothing is owed.
+// outstanding, otherwise the balance. Null when nothing is owed. A draft
+// counts (its PDF and preview show what will be asked for); callers that
+// mean "owed right now" check the status is sent.
 export function invoiceDueNow(invoice: LedgerInvoice & { dueDate: string }): InvoiceDueNow | null {
-  if (invoice.status !== "sent") return null
+  if (invoice.status !== "sent" && invoice.status !== "draft") return null
   const balance = invoiceBalanceDue(invoice)
   if (balance <= 0) return null
   const deposit = invoiceDepositOutstanding(invoice)

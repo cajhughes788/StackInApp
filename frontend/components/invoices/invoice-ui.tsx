@@ -17,7 +17,7 @@ import {
   invoiceDisplayStatus,
   type InvoiceDisplayStatus,
 } from "@shared/invoiceDisplay"
-import { invoiceAmountPaid, invoiceBalanceDue, invoiceLatestPayment } from "@shared/invoicePayments"
+import { invoiceAmountPaid, invoiceBalanceDue, invoiceDueNow, invoiceLatestPayment } from "@shared/invoicePayments"
 import {
   DEFAULT_INVOICE_ACCENT_COLOR,
   type InvoicePaidMethod,
@@ -160,6 +160,11 @@ export function shortStatusLabel(invoice: InvoiceType, today: string): string {
   if (status.label === "Disputed" || status.label === "Refunded") return status.label
   if (status.label === "Paid · partly refunded") return "Partly refunded"
   if (status.label.startsWith("Partly paid")) return status.tone === "overdue" ? "Partly paid · overdue" : "Partly paid"
+  if (status.label.startsWith("Deposit paid")) return status.tone === "overdue" ? "Balance overdue" : "Deposit paid"
+  if (status.label.startsWith("Deposit overdue")) return "Deposit overdue"
+  if (status.label.startsWith("Deposit ") && invoice.deposit) {
+    return `Deposit due ${formatInvoiceDate(invoice.deposit.dueDate).replace(/, \d{4}$/, "")}`
+  }
   if (invoice.status === "closed") return "Closed"
   if (status.tone === "overdue") {
     const days = Math.round(
@@ -274,6 +279,8 @@ export function BusinessMark({ settings, size = 48 }: { settings: InvoiceSetting
 // public page. Always light: it's a picture of a printed document.
 export function InvoicePreview({ invoice, settings }: { invoice: InvoiceType; settings: InvoiceSettings | null }) {
   const accent = settings?.accentColor || DEFAULT_INVOICE_ACCENT_COLOR
+  const dueNext = invoiceDueNow(invoice)
+  const previewDeposit = dueNext?.purpose === "deposit" ? dueNext : null
   return (
     <section aria-label="Invoice preview" className="overflow-hidden rounded-[18px] border border-card-border bg-white text-[#161B1E]">
       <div style={{ height: 5, background: accent }} />
@@ -310,14 +317,34 @@ export function InvoicePreview({ invoice, settings }: { invoice: InvoiceType; se
             </div>
           ))}
         </div>
-        <div className="flex justify-between text-[15px] font-bold">
-          <span>Balance due</span>
-          <span className="tabular-nums">{formatInvoiceMoney(invoiceBalanceDue(invoice))}</span>
-        </div>
+        {invoiceAmountPaid(invoice) > 0 && invoice.status !== "paid" ? (
+          <div className="flex justify-between text-[#5F6864]">
+            <span>Paid so far</span>
+            <span className="tabular-nums">−{formatInvoiceMoney(invoiceAmountPaid(invoice))}</span>
+          </div>
+        ) : null}
+        {/* The same "what's due next" the PDF and the client's page show. */}
+        {previewDeposit ? (
+          <div>
+            <div className="flex justify-between text-[15px] font-bold">
+              <span>Deposit due {formatInvoiceDate(previewDeposit.dueDate)}</span>
+              <span className="tabular-nums">{formatInvoiceMoney(previewDeposit.amount)}</span>
+            </div>
+            <div className="text-[#5F6864]">
+              Then {formatInvoiceMoney(Math.max(0, Math.round((invoiceBalanceDue(invoice) - previewDeposit.amount) * 100)) / 100)} due{" "}
+              {formatInvoiceDate(invoice.dueDate)}
+            </div>
+          </div>
+        ) : (
+          <div className="flex justify-between text-[15px] font-bold">
+            <span>Balance due</span>
+            <span className="tabular-nums">{formatInvoiceMoney(invoiceBalanceDue(invoice))}</span>
+          </div>
+        )}
         {invoice.note && invoice.status !== "void" ? (
           <div className="whitespace-pre-line rounded-[10px] bg-[#FAFAF8] px-3 py-2.5">
             <span className="mb-1 block text-[10px] font-semibold tracking-wide text-[#5F6864]">
-              {invoice.status === "paid" ? "NOTE" : "HOW TO PAY"}
+              {invoice.status === "paid" || invoice.status === "closed" ? "NOTE" : "HOW TO PAY"}
             </span>
             {invoice.note}
           </div>

@@ -5,7 +5,7 @@ import {
   textColorOnAccent,
   type InvoiceDisplayStatus,
 } from "./invoiceDisplay"
-import { invoiceAmountPaid, invoiceBalanceDue } from "./invoicePayments"
+import { invoiceAmountPaid, invoiceBalanceDue, invoiceDueNow, invoicePaymentOptions } from "./invoicePayments"
 import { DEFAULT_INVOICE_ACCENT_COLOR, type InvoiceSettings, type InvoiceType } from "./schemas/invoice"
 
 // ---------------------------------------------------------------------------
@@ -136,6 +136,10 @@ export function renderPublicInvoicePage(
 
   const showPay = !!options.payPath && invoice.status === "sent" && !invoice.pendingPayment
   const paid = invoiceAmountPaid(invoice)
+  // What the client pays next: the deposit while one is owed, else the rest.
+  const dueNow = invoiceDueNow(invoice)
+  const depositDue = dueNow?.purpose === "deposit" ? dueNow : null
+  const payAmount = invoicePaymentOptions(invoice)[0]?.amount ?? balance
   const processing = invoice.status === "sent" && !!invoice.pendingPayment
   const banner =
     processing
@@ -190,12 +194,17 @@ export function renderPublicInvoicePage(
     }
   </section>
   <section class="section">
-    <div class="label">Balance due</div>
-    <div class="due">${escapeHtml(formatInvoiceMoney(balance))}</div>
+    <div class="label">${depositDue ? `Deposit due ${escapeHtml(formatInvoiceDate(depositDue.dueDate))}` : "Balance due"}</div>
+    <div class="due">${escapeHtml(formatInvoiceMoney(depositDue ? depositDue.amount : balance))}</div>
+    ${
+      depositDue
+        ? `<div class="pay-note" style="text-align:left">Then ${escapeHtml(formatInvoiceMoney(Math.max(0, Math.round((balance - depositDue.amount) * 100)) / 100))} due ${escapeHtml(formatInvoiceDate(invoice.dueDate))}</div>`
+        : ""
+    }
     ${
       showPay && !options.justPaid
         ? `<form method="post" action="${escapeHtml(options.payPath!)}" style="margin-top:16px">
-      <button class="btn pay" type="submit">Pay ${escapeHtml(formatInvoiceMoney(balance))}</button>
+      <button class="btn pay" type="submit">Pay ${escapeHtml(formatInvoiceMoney(payAmount))}${depositDue ? " deposit" : ""}</button>
       <div class="pay-note">${options.bankTransfer ? "Card, Apple Pay, Google Pay or bank account" : "Card, Apple Pay or Google Pay"} · secure checkout by Stripe</div>
     </form>`
         : ""

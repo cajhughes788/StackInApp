@@ -17,7 +17,7 @@ import {
 import { groupInvoicesByClient } from "@/components/invoices/invoice-clients"
 import { cn } from "@/lib/utils"
 import { formatInvoiceMoney } from "@shared/invoiceDisplay"
-import { invoiceBalanceDue, invoicePaymentsReceivedIn } from "@shared/invoicePayments"
+import { invoiceBalanceDue, invoiceDueNow, invoicePaymentsReceivedIn } from "@shared/invoicePayments"
 import type { InvoiceType } from "@shared/schemas/invoice"
 
 type Filter = "all" | "open" | "overdue" | "paid" | "draft"
@@ -36,8 +36,11 @@ function matchesFilter(invoice: InvoiceType, filter: Filter, today: string): boo
       return true
     case "open":
       return invoice.status === "sent"
-    case "overdue":
-      return invoice.status === "sent" && invoice.dueDate < today
+    case "overdue": {
+      // The deposit's date while one is owed, the invoice's otherwise.
+      const dueNow = invoiceDueNow(invoice)
+      return invoice.status === "sent" && !!dueNow && dueNow.dueDate < today
+    }
     case "paid":
       return invoice.status === "paid"
     case "draft":
@@ -80,9 +83,10 @@ function InvoicesListPage() {
     let paidCount = 0
     for (const invoice of invoices) {
       if (invoice.status === "sent") {
-        const balance = invoiceBalanceDue(invoice)
-        waiting += balance
-        if (invoice.dueDate < today) overdue += balance
+        waiting += invoiceBalanceDue(invoice)
+        // What's late: an overdue deposit, or the rest once it's past due.
+        const dueNow = invoiceDueNow(invoice)
+        if (dueNow && dueNow.dueDate < today) overdue += dueNow.amount
       }
       // Cash basis: money counts in the month it arrived, payment by payment.
       const received = invoicePaymentsReceivedIn(invoice, month)

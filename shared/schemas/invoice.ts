@@ -218,6 +218,13 @@ export const InvoiceSchema = z
     if (invoice.deposit && Math.round(invoice.deposit.amount * 100) >= Math.round(invoice.total * 100)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["deposit", "amount"], message: "A deposit must be less than the total." })
     }
+    if (invoice.deposit && (invoice.deposit.dueDate < invoice.issueDate || invoice.deposit.dueDate > invoice.dueDate)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["deposit", "dueDate"],
+        message: "The deposit is due between the invoice date and its due date.",
+      })
+    }
   })
 
 export type InvoiceType = z.infer<typeof InvoiceSchema>
@@ -259,6 +266,12 @@ export const InvoiceLineInputSchema = z.object({
   category: IncomeCategorySchema,
 })
 
+// Money asked for up front. Null removes it.
+export const InvoiceDepositInputSchema = z.object({
+  amount: CentsAmountSchema,
+  dueDate: DateSchema,
+})
+
 const InvoiceFieldsSchema = z.object({
   clientName: z.string().trim().min(1).max(80),
   clientEmail: z.union([z.string().trim().email().max(254), z.literal("")]).nullable().optional(),
@@ -267,23 +280,43 @@ const InvoiceFieldsSchema = z.object({
   issueDate: DateSchema,
   dueDate: DateSchema,
   note: z.string().trim().max(1000).optional(),
+  deposit: InvoiceDepositInputSchema.nullable().optional(),
 })
 
 function dueOnOrAfterIssue(value: { issueDate?: string; dueDate?: string }) {
   return !value.issueDate || !value.dueDate || value.dueDate >= value.issueDate
 }
 
+// What can be checked from the request alone; the server checks a patch
+// again against the invoice it changes.
+function depositFits(value: {
+  lines?: Array<{ amount: number }>
+  issueDate?: string
+  dueDate?: string
+  deposit?: { amount: number; dueDate: string } | null
+}) {
+  const deposit = value.deposit
+  if (!deposit) return true
+  if (value.lines && Math.round(deposit.amount * 100) >= Math.round(invoiceTotalFromLines(value.lines) * 100)) return false
+  if (value.issueDate && deposit.dueDate < value.issueDate) return false
+  if (value.dueDate && deposit.dueDate > value.dueDate) return false
+  return true
+}
+
+const DEPOSIT_FITS_MESSAGE = "A deposit has to be less than the total and due between the invoice date and its due date."
+
 export const InvoiceCreateInputSchema = InvoiceFieldsSchema.extend({
   // Create straight to "sent" (the user is sending it now) instead of a draft.
   send: z.boolean().optional(),
   // Same retry-safety scheme as createEntry: a deterministic doc id.
   clientMutationId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).optional(),
-}).refine(dueOnOrAfterIssue, { path: ["dueDate"], message: "Due date can't be before the issue date." })
-
-export const InvoicePatchSchema = InvoiceFieldsSchema.partial().refine(dueOnOrAfterIssue, {
-  path: ["dueDate"],
-  message: "Due date can't be before the issue date.",
 })
+  .refine(dueOnOrAfterIssue, { path: ["dueDate"], message: "Due date can't be before the issue date." })
+  .refine(depositFits, { path: ["deposit"], message: DEPOSIT_FITS_MESSAGE })
+
+export const InvoicePatchSchema = InvoiceFieldsSchema.partial()
+  .refine(dueOnOrAfterIssue, { path: ["dueDate"], message: "Due date can't be before the issue date." })
+  .refine(depositFits, { path: ["deposit"], message: DEPOSIT_FITS_MESSAGE })
 
 export const InvoiceStatusActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("send") }),
@@ -328,6 +361,9 @@ export const InvoiceStatusActionSchema = z.discriminatedUnion("action", [
   // Ends a partly paid invoice early, keeping what was paid (a forfeited
   // deposit). Nothing more is owed.
   z.object({ action: z.literal("close") }),
+  // The deposit isn't needed after all: the whole amount is due by the
+  // invoice's due date instead.
+  z.object({ action: z.literal("waive_deposit") }),
 ])
 
 export type InvoiceCreateInput = z.infer<typeof InvoiceCreateInputSchema>
@@ -362,6 +398,15 @@ const InvoiceSettingsFields = {
   accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, "Use a hex color like #2FA866"),
   defaultTerms: InvoiceTermsSchema,
   defaultNote: z.string().trim().max(1000),
+  // Pre-fills a deposit on new invoices: a fixed amount or a percent of the
+  // total, due a number of days after the invoice date.
+  defaultDeposit: z
+    .object({
+      type: z.enum(["none", "fixed", "percent"]),
+      value: z.number().nonnegative().max(10_000_000),
+      dueInDays: z.number().int().min(0).max(365),
+    })
+    .refine((deposit) => deposit.type !== "percent" || deposit.value < 100, "A percent deposit has to be under 100%."),
 }
 
 export const InvoiceSettingsSchema = z.object({
@@ -372,6 +417,7 @@ export const InvoiceSettingsSchema = z.object({
   accentColor: InvoiceSettingsFields.accentColor.default(DEFAULT_INVOICE_ACCENT_COLOR),
   defaultTerms: InvoiceSettingsFields.defaultTerms.default("net_30"),
   defaultNote: InvoiceSettingsFields.defaultNote.default(""),
+  defaultDeposit: InvoiceSettingsFields.defaultDeposit.default({ type: "none", value: 0, dueInDays: 7 }),
   updatedAt: z.string().optional(),
 })
 
@@ -385,6 +431,7 @@ export const InvoiceSettingsPatchSchema = z.object({
   accentColor: InvoiceSettingsFields.accentColor.optional(),
   defaultTerms: InvoiceSettingsFields.defaultTerms.optional(),
   defaultNote: InvoiceSettingsFields.defaultNote.optional(),
+  defaultDeposit: InvoiceSettingsFields.defaultDeposit.optional(),
 })
 
 export type InvoiceSettings = z.infer<typeof InvoiceSettingsSchema>

@@ -107,7 +107,7 @@ export async function claimInvoicePayments(workspaceId: string, requests: Paymen
         throw new PaymentRejectedError(
           current.id,
           "over_balance",
-          `That's more than the ${invoiceBalanceDue(current).toFixed(2)} left on invoice #${current.number}.`
+          `That's more than the $${invoiceBalanceDue(current).toFixed(2)} left on invoice #${current.number}.`
         )
       }
       const payment: InvoicePayment = { ...request.payment, entryId: null, createdAt: nowIso }

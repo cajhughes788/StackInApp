@@ -7,7 +7,7 @@ import {
   invoiceDisplayStatus,
   invoiceFileName,
 } from "@shared/invoiceDisplay"
-import { invoiceAmountPaid, invoiceBalanceDue } from "@shared/invoicePayments"
+import { invoiceAmountPaid, invoiceBalanceDue, invoiceDueNow } from "@shared/invoicePayments"
 import { DEFAULT_INVOICE_ACCENT_COLOR, type InvoiceSettings, type InvoiceType } from "@shared/schemas/invoice"
 import { sharePdfBlob } from "@/lib/documentExport"
 
@@ -150,11 +150,20 @@ export async function buildInvoicePdf(invoice: InvoiceType, settings: InvoiceSet
     pdf.text(`−${formatInvoiceMoney(paid)}`, right, y, { align: "right" })
   }
   y += 30
+  // The deposit while one is owed, with what follows it; else the balance.
+  const dueNow = invoiceDueNow(invoice)
+  const depositDue = dueNow?.purpose === "deposit" ? dueNow : null
   pdf.setFont("helvetica", "bold").setFontSize(8).setTextColor(...MUTED)
-  pdf.text("BALANCE DUE", right, y, { align: "right" })
+  pdf.text(depositDue ? `DEPOSIT DUE ${formatInvoiceDate(depositDue.dueDate).toUpperCase()}` : "BALANCE DUE", right, y, { align: "right" })
   y += 24
   pdf.setFont("helvetica", "bold").setFontSize(22).setTextColor(...INK)
-  pdf.text(formatInvoiceMoney(invoiceBalanceDue(invoice)), right, y, { align: "right" })
+  pdf.text(formatInvoiceMoney(depositDue ? depositDue.amount : invoiceBalanceDue(invoice)), right, y, { align: "right" })
+  if (depositDue) {
+    y += 18
+    const rest = Math.max(0, Math.round((invoiceBalanceDue(invoice) - depositDue.amount) * 100)) / 100
+    pdf.setFont("helvetica", "normal").setFontSize(10).setTextColor(...MUTED)
+    pdf.text(`Then ${formatInvoiceMoney(rest)} due ${formatInvoiceDate(invoice.dueDate)}`, right, y, { align: "right" })
+  }
   y += 34
 
   // Note to customer — usually how to pay.
