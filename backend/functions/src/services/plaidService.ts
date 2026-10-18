@@ -648,7 +648,8 @@ async function upsertPendingTransactionFromPlaid(
 
   // A learned decision from a past confirm/dismiss on this same merchant
   // takes priority over the generic rule-based guess — see
-  // confirmPendingTransaction below, which writes this memory.
+  // confirmPendingTransaction below, which writes this memory. A dismissal
+  // remembers no category, so only a confirmed one decides the category.
   //
   // Merchant memory and the expense classifier only describe money going
   // out, so a deposit skips both. The same merchant key often covers both
@@ -676,23 +677,26 @@ async function upsertPendingTransactionFromPlaid(
         confidence: incomeMemory ? 0.95 : 0,
         suggestionSource: null,
       }
-    : memory
+    : memory?.expenseCategory
     ? {
         suggestedExpenseAccount: memory.expenseCategory,
         isBusinessGuess: memory.isBusiness,
         confidence: 0.95,
-        suggestionSource: memory.expenseCategory ? "merchant_memory" : null,
+        suggestionSource: "merchant_memory",
       }
-    : applyAccountDefault(
-        classifyPlaidTransaction({
-          merchantName,
-          rawName,
-          personalFinanceCategoryPrimary,
-          personalFinanceCategoryDetailed,
-          personalFinanceCategoryConfidence,
-          amount: transaction.amount,
-        }),
-        linkedAccount?.defaultBusiness ?? null
+    : withMemoryBusinessGuess(
+        applyAccountDefault(
+          classifyPlaidTransaction({
+            merchantName,
+            rawName,
+            personalFinanceCategoryPrimary,
+            personalFinanceCategoryDetailed,
+            personalFinanceCategoryConfidence,
+            amount: transaction.amount,
+          }),
+          linkedAccount?.defaultBusiness ?? null
+        ),
+        memory
       )
   // Explicit opt-in only (see PlaidMerchantMemorySchema) — the transaction
   // still gets recorded, just pre-dismissed and silent, so a rare business
@@ -820,7 +824,6 @@ async function upsertPendingTransactionFromPlaid(
     parsed.status === "pending" &&
     parsed.direction === "expense" &&
     !parsed.suggestedExpenseAccount &&
-    !memory &&
     merchantName &&
     resolvePlaidDisplayName(merchantName, rawName) === merchantName &&
     !isPeerToPeerDescriptor(merchantName, rawName)
@@ -877,15 +880,27 @@ async function classifyRefund(
       return { suggestedExpenseAccount: account, isBusinessGuess: true, confidence: 0.95, suggestionSource: "refund_purchase" }
     }
   }
-  if (memory) {
+  if (memory?.expenseCategory) {
     return {
       suggestedExpenseAccount: memory.expenseCategory,
       isBusinessGuess: memory.isBusiness,
       confidence: 0.8,
-      suggestionSource: memory.expenseCategory ? "merchant_memory" : null,
+      suggestionSource: "merchant_memory",
     }
   }
-  return classifyPlaidTransaction(input)
+  return withMemoryBusinessGuess(classifyPlaidTransaction(input), memory)
+}
+
+// Merchant memory without a category is a past personal dismissal: it says
+// how the last charge was treated, not what this merchant sells. It still
+// sets the business/personal guess (and beats a per-account default), but
+// the category comes from the other signals instead of being left blank.
+function withMemoryBusinessGuess(
+  classification: PlaidClassificationResult,
+  memory: PlaidMerchantMemoryType | null
+): PlaidClassificationResult {
+  if (!memory) return classification
+  return { ...classification, isBusinessGuess: memory.isBusiness }
 }
 
 async function workspaceImportsVenmoStatements(workspaceId: string): Promise<boolean> {
