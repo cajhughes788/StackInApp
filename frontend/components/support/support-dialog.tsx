@@ -14,7 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
-import { useToast } from "@/components/ui/use-toast"
+import { useToast } from "@/hooks/use-toast"
 import { submitSupportReport } from "@/lib/api/supportApi"
 import { ApiError } from "@/lib/api/core/errors"
 import {

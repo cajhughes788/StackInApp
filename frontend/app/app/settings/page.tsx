@@ -14,7 +14,7 @@ import { useAuth } from "@/contexts/auth-context";
 import { useSettingsStore } from "@/lib/stores/useSettingsStore";
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore";
 import { debugError, debugLog } from "@/lib/debugLoop";
-import { useToast } from "@/components/ui/use-toast";
+import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, } from "@/components/ui/dialog";
 import { getSettingsSaveStatusCopy } from "@/lib/domain/settingsSync";
