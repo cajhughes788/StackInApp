@@ -270,18 +270,22 @@
     height: var(--stackin-header-total-height);
   }
 
+  /* Notices sit bottom-centre on every screen size, above the home indicator. */
   .stackin-safe-message-viewport {
-    top: var(--stackin-message-top-offset);
-    right: var(--stackin-message-inline-end);
-    bottom: auto;
-    left: var(--stackin-message-inline-start);
-    width: auto;
-    max-width: calc(
-      100vw - var(--stackin-message-inline-start) -
-        var(--stackin-message-inline-end)
+    top: auto;
+    right: auto;
+    bottom: var(--stackin-message-bottom-offset);
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(
+      420px,
+      calc(
+        100vw - var(--stackin-message-inline-start) -
+          var(--stackin-message-inline-end)
+      )
     );
     max-height: calc(
-      100vh - var(--stackin-message-top-offset) -
+      100vh - var(--stackin-message-bottom-offset) -
         var(--stackin-message-gap)
     );
     padding: 0;
@@ -311,32 +315,6 @@
     }
   }
 
-  @media (min-width: 640px) {
-    .stackin-safe-message-viewport {
-      top: auto;
-      right: var(--stackin-message-inline-end);
-      bottom: var(--stackin-message-bottom-offset);
-      left: auto;
-      width: min(
-        420px,
-        calc(
-          100vw - var(--stackin-message-inline-start) -
-            var(--stackin-message-inline-end)
-        )
-      );
-      max-width: min(
-        420px,
-        calc(
-          100vw - var(--stackin-message-inline-start) -
-            var(--stackin-message-inline-end)
-        )
-      );
-      max-height: calc(
-        100vh - var(--stackin-message-bottom-offset) -
-          var(--stackin-message-gap)
-      );
-    }
-  }
 }
 
 /* Custom styles for spreadsheet grid */
