@@ -577,16 +577,15 @@ export default function PlaidPendingTransactionsPanel() {
       setSelectedIds(new Set(failedIds))
     }
 
-    const succeededCount = targets.length - failed.length
-    toast({
-      title:
-        failed.length === 0
-          ? isBusiness
-            ? `Added ${targets.length} to expenses`
-            : `Dismissed ${targets.length}`
-          : `${isBusiness ? "Added" : "Dismissed"} ${succeededCount} of ${targets.length} — ${failed.length} failed and are back in your review list`,
-      variant: failed.length > 0 ? "destructive" : undefined,
-    })
+    // The rows leaving the list confirm a full success; only a partial
+    // failure needs saying.
+    if (failed.length > 0) {
+      const succeededCount = targets.length - failed.length
+      toast({
+        title: `${isBusiness ? "Added" : "Dismissed"} ${succeededCount} of ${targets.length} — ${failed.length} failed and are back in your review list`,
+        variant: "destructive",
+      })
+    }
   }
 
   if (!activeWorkspaceId) return null

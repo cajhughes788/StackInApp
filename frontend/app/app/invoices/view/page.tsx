@@ -251,11 +251,9 @@ function InvoiceDetailPage() {
       voidInvoiceInBackground(workspaceId, invoice)
     } else if (action === "close") {
       closeInvoiceInBackground(workspaceId, invoice)
-      toast({ title: `Invoice #${invoice.number} closed`, description: `${formatInvoiceMoney(invoiceAmountPaid(invoice))} stays in your income.` })
     } else {
       setLeaving(true)
       deleteInvoiceInBackground(workspaceId, invoice)
-      toast({ title: `Draft #${invoice.number} deleted` })
       router.replace("/app/invoices")
     }
   }

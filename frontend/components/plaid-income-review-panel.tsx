@@ -466,16 +466,15 @@ export default function PlaidIncomeReviewPanel() {
     }
     if (isIncome && failed.length < targets.length) refreshVisibleEntries(workspaceId)
 
-    const succeededCount = targets.length - failed.length
-    toast({
-      title:
-        failed.length === 0
-          ? isIncome
-            ? `Added ${targets.length} to income`
-            : `Dismissed ${targets.length}`
-          : `${isIncome ? "Added" : "Dismissed"} ${succeededCount} of ${targets.length} — ${failed.length} failed and are back in your review list`,
-      variant: failed.length > 0 ? "destructive" : undefined,
-    })
+    // The rows leaving the list confirm a full success; only a partial
+    // failure needs saying.
+    if (failed.length > 0) {
+      const succeededCount = targets.length - failed.length
+      toast({
+        title: `${isIncome ? "Added" : "Dismissed"} ${succeededCount} of ${targets.length} — ${failed.length} failed and are back in your review list`,
+        variant: "destructive",
+      })
+    }
   }
 
   function toggleSelected(id: string) {
