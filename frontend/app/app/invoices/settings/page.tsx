@@ -148,7 +148,6 @@ function InvoiceSettingsPage() {
         defaultPolicies: draft.defaultPolicies.trim(),
       })
       setSettings(workspaceId, saved)
-      toast({ title: "Invoice settings saved" })
       if (fromStripe) router.replace("/app/invoices")
       else router.back()
     } catch (error) {

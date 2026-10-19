@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
-import { useToast } from "@/hooks/use-toast"
 import { fieldLabelClass, localToday, softInputClass } from "@/components/invoices/invoice-ui"
 import { recordPaymentInBackground } from "@/lib/domain/invoiceService"
 import { cn } from "@/lib/utils"
@@ -55,7 +54,6 @@ export default function RecordPaymentSheet({
   invoice: InvoiceType
   workspaceId: string
 }) {
-  const { toast } = useToast()
   const today = localToday()
   const balance = invoiceBalanceDue(invoice)
   // Pre-filled with what's owed next: the deposit while one is due, else the rest.
@@ -101,13 +99,7 @@ export default function RecordPaymentSheet({
       paymentMethod: method,
       clientMutationId: mutationId.current,
     })
-    toast({
-      title: remaining > 0 ? `${formatInvoiceMoney(amount)} recorded` : `Invoice #${invoice.number} paid`,
-      description:
-        remaining > 0
-          ? `${formatInvoiceMoney(remaining)} still due on #${invoice.number}.`
-          : `${formatInvoiceMoney(amount + tip)} added to your income.`,
-    })
+    // The invoice behind the sheet shows the new payment and what's left.
     onOpenChange(false)
   }
 

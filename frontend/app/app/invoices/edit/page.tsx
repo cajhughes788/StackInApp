@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useToast } from "@/hooks/use-toast"
 import { clientKey } from "@/components/invoices/invoice-clients"
 import {
   InvoicesPage,
@@ -83,7 +82,6 @@ export default function InvoiceFormPageRoute() {
 
 function InvoiceFormPage() {
   const router = useRouter()
-  const { toast } = useToast()
   const { ready, workspaceId, invoices, settings, loadStatus } = useInvoicesWorkspace()
   const invoiceId = useQueryParam("id")
   // "New invoice for <client>" from a client's page.
@@ -263,7 +261,6 @@ function InvoiceFormPage() {
       if (mode === "share") {
         router.replace(`/app/invoices/view?id=${encodeURIComponent(existing.id)}`)
       } else {
-        toast({ title: "Invoice saved" })
         router.replace("/app/invoices")
       }
     } else {
@@ -272,7 +269,6 @@ function InvoiceFormPage() {
         // A new invoice lands on its send step.
         router.replace(`/app/invoices/view?id=${encodeURIComponent(created.id)}&share=1`)
       } else {
-        toast({ title: `Draft for ${created.clientName} saved` })
         router.replace("/app/invoices")
       }
     }

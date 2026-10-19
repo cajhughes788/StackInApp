@@ -234,11 +234,8 @@ function InvoiceDetailPage() {
 
   function onWaiveDeposit() {
     if (!invoice || !workspaceId) return
+    // The deposit line and amount due change on screen; no message needed.
     waiveDepositInBackground(workspaceId, invoice)
-    toast({
-      title: "Deposit waived",
-      description: `${formatInvoiceMoney(invoiceBalanceDue(invoice))} is due by ${formatInvoiceDate(invoice.dueDate)}.`,
-    })
   }
 
   function openRefund(paymentId: string | null) {
@@ -252,7 +249,6 @@ function InvoiceDetailPage() {
     // Saved in the background (invoiceService).
     if (action === "void") {
       voidInvoiceInBackground(workspaceId, invoice)
-      toast({ title: `Invoice #${invoice.number} voided` })
     } else if (action === "close") {
       closeInvoiceInBackground(workspaceId, invoice)
       toast({ title: `Invoice #${invoice.number} closed`, description: `${formatInvoiceMoney(invoiceAmountPaid(invoice))} stays in your income.` })

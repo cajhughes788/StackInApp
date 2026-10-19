@@ -87,13 +87,8 @@ export default function WorkspaceSwitcher() {
     }
 
     if (navigationGuard?.mode === "background") {
+      // Finishes quietly; a failure still reports itself.
       void navigationGuard.flush()
-      toast({
-        title: "Saving settings in background",
-        description:
-          navigationGuard.reason ??
-          "Your latest settings changes will keep saving after you switch workspaces.",
-      })
     }
 
     setOpen(false)

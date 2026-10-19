@@ -409,9 +409,11 @@ async function rollbackDroppedReplayMutation(op: offlineQueue.OfflineMutation, e
             status: error instanceof ApiError ? error.status ?? null : null,
             message: error instanceof Error ? error.message : String(error),
         });
+        // A dropped change is a failure: shown as an error, not a notice.
         toast({
             title: feedback.title,
             description: feedback.description,
+            variant: "destructive",
         });
         return;
     }
