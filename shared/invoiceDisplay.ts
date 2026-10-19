@@ -141,3 +141,8 @@ export function formatInvoicePhone(phone: string): string {
   if (national.length !== 10) return trimmed
   return `(${national.slice(0, 3)}) ${national.slice(3, 6)}-${national.slice(6)}`
 }
+
+// A line's quantity: "3", "1.5", "0.25" — no trailing zeros.
+export function formatInvoiceQuantity(quantity: number): string {
+  return String(Math.round(quantity * 100) / 100)
+}

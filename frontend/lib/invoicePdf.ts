@@ -4,6 +4,7 @@ import type { jsPDF as JsPDF } from "jspdf"
 import {
   formatInvoiceDate,
   formatInvoicePhone,
+  formatInvoiceQuantity,
   formatInvoiceMoney,
   invoiceDisplayStatus,
   invoiceFileName,
@@ -78,8 +79,14 @@ export async function buildInvoicePdf(invoice: InvoiceType, settings: InvoiceSet
   pdf.setFont("helvetica", "bold").setFontSize(15).setTextColor(...INK)
   pdf.text(settings.businessName || " ", textLeft, y + 14)
   pdf.setFont("helvetica", "normal").setFontSize(10).setTextColor(...MUTED)
-  const contactLines = [settings.businessEmail, settings.businessPhone ? formatInvoicePhone(settings.businessPhone) : ""].filter(Boolean)
+  const contactLines = [
+    settings.businessEmail,
+    settings.businessPhone ? formatInvoicePhone(settings.businessPhone) : "",
+    ...(settings.businessAddress ?? "").split("\n").map((line) => line.trim()),
+  ].filter(Boolean)
   contactLines.forEach((line, index) => pdf.text(line, textLeft, y + 30 + index * 13))
+  // Room for every contact line (an address adds a few).
+  const headerHeight = Math.max(84, 30 + contactLines.length * 13 + 16)
 
   pdf.setFont("helvetica", "bold").setFontSize(24).setTextColor(...accent)
   pdf.text("INVOICE", right, y + 18, { align: "right" })
@@ -88,24 +95,35 @@ export async function buildInvoicePdf(invoice: InvoiceType, settings: InvoiceSet
   pdf.setTextColor(...(status.tone === "overdue" ? OVERDUE : MUTED))
   pdf.text(status.label, right, y + 51, { align: "right" })
 
-  y += 84
+  y += headerHeight
 
-  // Billed to / dates.
-  const columns: Array<[string, string]> = [
-    ["BILLED TO", invoice.clientName],
-    ["ISSUED", formatInvoiceDate(invoice.issueDate)],
-    ["DUE", formatInvoiceDate(invoice.dueDate)],
+  // Billed to (name, then email and address in grey) / dates.
+  const columns: Array<[string, string, string[]]> = [
+    [
+      "BILLED TO",
+      invoice.clientName,
+      [invoice.clientEmail ?? "", ...(invoice.clientAddress ?? "").split("\n").map((line) => line.trim())].filter(Boolean),
+    ],
+    ["ISSUED", formatInvoiceDate(invoice.issueDate), []],
+    ["DUE", formatInvoiceDate(invoice.dueDate), []],
   ]
   const columnWidth = contentWidth / columns.length
   let metaHeight = 0
-  columns.forEach(([label, value], index) => {
+  columns.forEach(([label, value, details], index) => {
     const x = MARGIN + index * columnWidth
     pdf.setFont("helvetica", "bold").setFontSize(8).setTextColor(...MUTED)
     pdf.text(label, x, y)
     pdf.setFont("helvetica", "normal").setFontSize(11).setTextColor(...INK)
     const wrapped: string[] = pdf.splitTextToSize(value, columnWidth - 12)
     pdf.text(wrapped, x, y + 15)
-    metaHeight = Math.max(metaHeight, 15 + wrapped.length * 14)
+    let height = 15 + wrapped.length * 14
+    if (details.length > 0) {
+      pdf.setFontSize(9.5).setTextColor(...MUTED)
+      const detailLines: string[] = details.flatMap((detail) => pdf.splitTextToSize(detail, columnWidth - 12) as string[])
+      pdf.text(detailLines, x, y + height + 1)
+      height += detailLines.length * 12 + 2
+    }
+    metaHeight = Math.max(metaHeight, height)
   })
   y += metaHeight + 22
 
@@ -123,7 +141,9 @@ export async function buildInvoicePdf(invoice: InvoiceType, settings: InvoiceSet
   for (const line of invoice.lines) {
     pdf.setFont("helvetica", "normal").setTextColor(...INK)
     const wrapped: string[] = pdf.splitTextToSize(line.description, contentWidth - 110)
-    const rowHeight = wrapped.length * 14 + 10
+    // "3 × $150.00" under the description when it's more than one.
+    const showQuantity = line.quantity !== 1
+    const rowHeight = wrapped.length * 14 + 10 + (showQuantity ? 12 : 0)
     const nextY = ensureSpace(y, rowHeight + 4)
     if (nextY !== y) {
       y = nextY
@@ -132,6 +152,11 @@ export async function buildInvoicePdf(invoice: InvoiceType, settings: InvoiceSet
     }
     pdf.text(wrapped, MARGIN, y)
     pdf.text(formatInvoiceMoney(line.amount), right, y, { align: "right" })
+    if (showQuantity) {
+      pdf.setFontSize(9.5).setTextColor(...MUTED)
+      pdf.text(`${formatInvoiceQuantity(line.quantity)} × ${formatInvoiceMoney(line.rate)}`, MARGIN, y + wrapped.length * 14)
+      pdf.setFontSize(11).setTextColor(...INK)
+    }
     y += rowHeight - 10
     pdf.setDrawColor(...LINE).line(MARGIN, y, right, y)
     y += 16
@@ -180,6 +205,21 @@ export async function buildInvoicePdf(invoice: InvoiceType, settings: InvoiceSet
     pdf.setFont("helvetica", "normal").setFontSize(11).setTextColor(...INK)
     pdf.text(wrapped, MARGIN + 16, y + 34)
     y += boxHeight
+  }
+
+  // Policies and terms, line by line so a long one carries onto a new page.
+  if (invoice.policies && invoice.status !== "void") {
+    y = ensureSpace(y + 18, 40)
+    pdf.setFont("helvetica", "bold").setFontSize(8).setTextColor(...MUTED)
+    pdf.text("POLICIES & TERMS", MARGIN, y)
+    y += 14
+    pdf.setFont("helvetica", "normal").setFontSize(10).setTextColor(...MUTED)
+    const policyLines: string[] = pdf.splitTextToSize(invoice.policies, contentWidth)
+    for (const policyLine of policyLines) {
+      y = ensureSpace(y, 14)
+      pdf.text(policyLine, MARGIN, y)
+      y += 13
+    }
   }
 
   if (invoice.status === "void") {

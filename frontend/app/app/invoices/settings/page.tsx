@@ -23,7 +23,7 @@ import { saveInvoiceSettings } from "@/lib/api/invoicesApi"
 import { prepareInvoiceLogo } from "@/lib/invoiceLogo"
 import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
 import { cn } from "@/lib/utils"
-import { INVOICE_TERMS_LABELS } from "@shared/invoiceDisplay"
+import { INVOICE_TERMS_LABELS, formatInvoicePhone } from "@shared/invoiceDisplay"
 import {
   DEFAULT_INVOICE_ACCENT_COLOR,
   InvoiceSettingsSchema,
@@ -143,7 +143,9 @@ function InvoiceSettingsPage() {
         businessName: draft.businessName.trim(),
         businessEmail: draft.businessEmail.trim(),
         businessPhone: draft.businessPhone.trim(),
+        businessAddress: draft.businessAddress.trim(),
         defaultNote: draft.defaultNote.trim(),
+        defaultPolicies: draft.defaultPolicies.trim(),
       })
       setSettings(workspaceId, saved)
       toast({ title: "Invoice settings saved" })
@@ -183,7 +185,14 @@ function InvoiceSettingsPage() {
               <div className="min-w-0 flex-1">
                 <div className="truncate font-semibold">{draft.businessName || "Your business name"}</div>
                 <div className="truncate text-[13px] text-[#5F6864]">
-                  {[draft.businessEmail, draft.businessPhone].filter(Boolean).join(" · ") || "Email · phone"}
+                  {draft.businessEmail || draft.businessPhone ? (
+                    <>
+                      {draft.businessEmail ? <div className="truncate">{draft.businessEmail}</div> : null}
+                      {draft.businessPhone ? <div className="whitespace-nowrap">{formatInvoicePhone(draft.businessPhone)}</div> : null}
+                    </>
+                  ) : (
+                    "Email · phone"
+                  )}
                 </div>
               </div>
               <div className="text-[13px] font-bold tracking-wide" style={{ color: accent }}>
@@ -266,6 +275,18 @@ function InvoiceSettingsPage() {
                 maxLength={40}
                 placeholder="Optional"
                 autoComplete="tel"
+              />
+            </label>
+            <label className={fieldLabelClass}>
+              Address
+              <Textarea
+                rows={2}
+                value={draft.businessAddress}
+                onChange={(event) => update({ businessAddress: event.target.value })}
+                maxLength={300}
+                placeholder={"Optional\n123 Main St, Boise, ID 83702"}
+                autoComplete="street-address"
+                className="resize-none rounded-xl border-0 bg-muted text-[15px] text-foreground shadow-none"
               />
             </label>
           </section>
@@ -423,6 +444,21 @@ function InvoiceSettingsPage() {
             <p className="text-xs leading-relaxed text-muted-foreground">
               Shows under &ldquo;How to pay&rdquo; on every invoice. Put your Venmo, Zelle or Cash App details here so
               clients know where to send money.
+            </p>
+            <label className={fieldLabelClass}>
+              Policies &amp; terms
+              <Textarea
+                rows={4}
+                value={draft.defaultPolicies}
+                onChange={(event) => update({ defaultPolicies: event.target.value })}
+                maxLength={2000}
+                placeholder={"Deposits are non-refundable.\nReschedule with 48 hours' notice.\nPayments over 30 days late add a $25 fee."}
+                className="resize-none rounded-xl border-0 bg-muted text-[15px] text-foreground shadow-none"
+              />
+            </label>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Added to each new invoice, where you can change it for that client. Each invoice keeps the policies it was
+              sent with.
             </p>
           </section>
 

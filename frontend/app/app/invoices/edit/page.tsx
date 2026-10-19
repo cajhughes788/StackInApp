@@ -26,7 +26,8 @@ import type { IncomeCategory } from "@shared/schemas/entry"
 import { invoiceDepositOutstanding } from "@shared/invoicePayments"
 import type { InvoiceTerms, InvoiceType } from "@shared/schemas/invoice"
 
-type DraftLine = { key: number; description: string; amount: string; category: IncomeCategory }
+// A line as typed: quantity × rate (the rate as dollars and cents).
+type DraftLine = { key: number; description: string; quantity: string; rate: string; category: IncomeCategory }
 
 const CATEGORY_OPTIONS: Array<{ value: IncomeCategory; label: string }> = [
   { value: "services", label: "Services" },
@@ -42,6 +43,14 @@ function parseAmount(text: string): number | null {
   const cleaned = text.replace(/[$,\s]/g, "")
   if (!/^\d+(\.\d{0,2})?$/.test(cleaned)) return null
   const value = Math.round(Number(cleaned) * 100) / 100
+  return value > 0 ? value : null
+}
+
+// "1.5" → 1.5; null unless a positive number with up to two decimals.
+function parseQuantity(text: string): number | null {
+  const cleaned = text.trim()
+  if (!/^\d+(\.\d{0,2})?$/.test(cleaned)) return null
+  const value = Number(cleaned)
   return value > 0 ? value : null
 }
 
@@ -61,7 +70,7 @@ function depositSettled(invoice: InvoiceType | null): boolean {
 }
 
 function newLine(category: IncomeCategory = "services"): DraftLine {
-  return { key: ++lineKey, description: "", amount: "", category }
+  return { key: ++lineKey, description: "", quantity: "1", rate: "", category }
 }
 
 export default function InvoiceFormPageRoute() {
@@ -95,6 +104,8 @@ function InvoiceFormPage() {
   const [issueDate, setIssueDate] = useState(localToday())
   const [dueDate, setDueDate] = useState(() => dueDateForTerms(localToday(), "net_30"))
   const [note, setNote] = useState("")
+  const [policies, setPolicies] = useState("")
+  const [clientAddress, setClientAddress] = useState("")
   const [depositOn, setDepositOn] = useState(false)
   const [depositMode, setDepositMode] = useState<"fixed" | "percent">("fixed")
   const [depositText, setDepositText] = useState("")
@@ -112,7 +123,16 @@ function InvoiceFormPage() {
       setClientName(existing.clientName)
       setClientEmail(existing.clientEmail ?? "")
       setClientPhone(existing.clientPhone ?? "")
-      setLines(existing.lines.map((line) => ({ ...newLine(line.category), description: line.description, amount: line.amount.toFixed(2) })))
+      setLines(
+        existing.lines.map((line) => ({
+          ...newLine(line.category),
+          description: line.description,
+          quantity: String(line.quantity),
+          rate: line.rate.toFixed(2),
+        }))
+      )
+      setClientAddress(existing.clientAddress ?? "")
+      setPolicies(existing.policies)
       setIssueDate(existing.issueDate)
       setDueDate(existing.dueDate)
       setNote(existing.note)
@@ -127,6 +147,7 @@ function InvoiceFormPage() {
         const due = dueDateForTerms(localToday(), settings.defaultTerms)
         setDueDate(due)
         setNote(settings.defaultNote)
+        setPolicies(settings.defaultPolicies)
         const preset = settings.defaultDeposit
         if (preset.type !== "none" && preset.value > 0) {
           setDepositOn(true)
@@ -142,6 +163,7 @@ function InvoiceFormPage() {
         setClientName(last?.clientName ?? prefillClient)
         setClientEmail(last?.clientEmail ?? "")
         setClientPhone(last?.clientPhone ?? "")
+        setClientAddress(last?.clientAddress ?? "")
       }
     }
   }, [existing, invoiceId, invoices, loadStatus, prefillClient, settings])
@@ -162,10 +184,15 @@ function InvoiceFormPage() {
     return names
   }, [invoices])
 
-  const parsedLines = lines.map((line) => ({ ...line, value: parseAmount(line.amount) }))
+  // Each line's amount is quantity × rate, to the cent (as the server works it out).
+  const parsedLines = lines.map((line) => {
+    const quantity = parseQuantity(line.quantity)
+    const rate = parseAmount(line.rate)
+    return { ...line, quantityValue: quantity, rateValue: rate, value: quantity !== null && rate !== null ? Math.round(quantity * rate * 100) / 100 : null }
+  })
   const total = parsedLines.reduce((sum, line) => sum + Math.round((line.value ?? 0) * 100), 0) / 100
   const selectedTerms = termsFor(issueDate, dueDate)
-  const filledLines = parsedLines.filter((line) => line.description.trim() || line.amount.trim())
+  const filledLines = parsedLines.filter((line) => line.description.trim() || line.rate.trim())
   const depositLocked = depositSettled(existing)
   const depositInput = depositMode === "percent" ? Number(depositText.replace(/[%\s]/g, "")) : parseAmount(depositText)
   const depositAmount =
@@ -190,7 +217,7 @@ function InvoiceFormPage() {
       filledLines.length === 0
         ? "Add at least one line."
         : filledLines.some((line) => !line.description.trim() || line.value === null)
-          ? "Each line needs a description and an amount."
+          ? "Each line needs a description, a quantity and a rate."
           : null,
     dates: dueDate < issueDate ? "The due date can't be before the invoice date." : null,
     email:
@@ -212,14 +239,18 @@ function InvoiceFormPage() {
       clientName: clientName.trim(),
       clientEmail: clientEmail.trim() || null,
       clientPhone: clientPhone.trim() || null,
+      clientAddress: clientAddress.trim() || null,
       lines: filledLines.map((line) => ({
         description: line.description.trim(),
+        quantity: line.quantityValue as number,
+        rate: line.rateValue as number,
         amount: line.value as number,
         category: line.category,
       })),
       issueDate,
       dueDate,
       note: note.trim(),
+      policies: policies.trim(),
       // A settled deposit is left as it is (the server refuses to change it).
       ...(depositLocked
         ? {}
@@ -311,6 +342,7 @@ function InvoiceFormPage() {
                       const last = invoices.find((invoice) => invoice.clientName === name)
                       if (last?.clientEmail && !clientEmail) setClientEmail(last.clientEmail)
                       if (last?.clientPhone && !clientPhone) setClientPhone(last.clientPhone)
+                      if (last?.clientAddress && !clientAddress) setClientAddress(last.clientAddress)
                     }}
                     className="h-8 rounded-full border border-card-border bg-card px-3 text-sm text-foreground hover:bg-muted"
                   >
@@ -348,6 +380,17 @@ function InvoiceFormPage() {
               </label>
             </div>
             {showErrors && errors.email ? <p className="text-sm text-destructive">{errors.email}</p> : null}
+            <label className={fieldLabelClass}>
+              Client address
+              <Textarea
+                rows={2}
+                value={clientAddress}
+                onChange={(event) => setClientAddress(event.target.value)}
+                maxLength={300}
+                placeholder="Optional — business clients often need it"
+                className="resize-none rounded-xl border-0 bg-muted text-[15px] text-foreground shadow-none"
+              />
+            </label>
           </section>
 
           <section className={cn(cardClass, "space-y-3.5")}>
@@ -377,21 +420,33 @@ function InvoiceFormPage() {
                   ) : null}
                 </div>
                 <div className="flex gap-2">
-                  <label className={cn(fieldLabelClass, "flex-1")}>
-                    Amount
+                  <label className={cn(fieldLabelClass, "w-[72px] shrink-0")}>
+                    Qty
                     <input
                       className={cn(softInputClass, "tabular-nums")}
-                      value={line.amount}
-                      onChange={(event) => updateLine(line.key, { amount: event.target.value })}
+                      value={line.quantity}
+                      onChange={(event) => updateLine(line.key, { quantity: event.target.value })}
+                      inputMode="decimal"
+                      placeholder="1"
+                      aria-label={`Quantity, line ${index + 1}`}
+                    />
+                  </label>
+                  <label className={cn(fieldLabelClass, "min-w-0 flex-1")}>
+                    Rate
+                    <input
+                      className={cn(softInputClass, "tabular-nums")}
+                      value={line.rate}
+                      onChange={(event) => updateLine(line.key, { rate: event.target.value })}
                       onBlur={() => {
-                        const value = parseAmount(line.amount)
-                        if (value !== null) updateLine(line.key, { amount: value.toFixed(2) })
+                        const value = parseAmount(line.rate)
+                        if (value !== null) updateLine(line.key, { rate: value.toFixed(2) })
                       }}
                       inputMode="decimal"
                       placeholder="0.00"
+                      aria-label={`Rate, line ${index + 1}`}
                     />
                   </label>
-                  <label className={cn(fieldLabelClass, "flex-1")}>
+                  <label className={cn(fieldLabelClass, "min-w-0 flex-1")}>
                     Type
                     <select
                       className={softInputClass}
@@ -406,6 +461,12 @@ function InvoiceFormPage() {
                     </select>
                   </label>
                 </div>
+                {parsedLines[index].value !== null && parsedLines[index].quantityValue !== 1 ? (
+                  <p className="text-right text-sm tabular-nums text-muted-foreground">
+                    {parsedLines[index].quantityValue} × {formatInvoiceMoney(parsedLines[index].rateValue ?? 0)} ={" "}
+                    <span className="font-semibold text-foreground">{formatInvoiceMoney(parsedLines[index].value ?? 0)}</span>
+                  </p>
+                ) : null}
               </div>
             ))}
             <button
@@ -564,6 +625,25 @@ function InvoiceFormPage() {
             </label>
             <p className="text-xs text-muted-foreground">
               {settings?.defaultNote ? "From your default note in Invoice settings" : "Set a default note in Invoice settings"}
+            </p>
+          </section>
+
+          <section className={cn(cardClass, "space-y-1.5")}>
+            <label className={fieldLabelClass}>
+              Policies &amp; terms
+              <Textarea
+                rows={3}
+                value={policies}
+                onChange={(event) => setPolicies(event.target.value)}
+                maxLength={2000}
+                placeholder="e.g. Deposits are non-refundable. Reschedule with 48 hours' notice."
+                className="resize-none rounded-xl border-0 bg-muted text-[15px] text-foreground shadow-none"
+              />
+            </label>
+            <p className="text-xs text-muted-foreground">
+              {settings?.defaultPolicies
+                ? "From your default policies in Invoice settings. Changes here apply to this invoice only."
+                : "Set default policies in Invoice settings to add them to every new invoice."}
             </p>
           </section>
 

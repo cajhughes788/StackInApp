@@ -15,6 +15,7 @@ import {
   formatInvoiceDate,
   formatInvoiceMoney,
   formatInvoicePhone,
+  formatInvoiceQuantity,
   invoiceDisplayStatus,
   type InvoiceDisplayStatus,
 } from "@shared/invoiceDisplay"
@@ -293,6 +294,7 @@ export function InvoicePreview({ invoice, settings }: { invoice: InvoiceType; se
             {settings?.businessPhone ? (
               <div className="whitespace-nowrap tabular-nums text-[#5F6864]">{formatInvoicePhone(settings.businessPhone)}</div>
             ) : null}
+            {settings?.businessAddress ? <div className="whitespace-pre-line text-[#5F6864]">{settings.businessAddress}</div> : null}
           </div>
           <div className="text-right">
             <div className="font-bold tracking-wide" style={{ color: accent }}>
@@ -310,13 +312,24 @@ export function InvoicePreview({ invoice, settings }: { invoice: InvoiceType; se
             <div key={label} className={cn("min-w-0", label === "BILLED TO" && "col-span-2")}>
               <div className="text-[10px] font-semibold tracking-wide text-[#5F6864]">{label}</div>
               <div className="break-words">{value}</div>
+              {label === "BILLED TO" && invoice.clientEmail ? <div className="break-all text-[#5F6864]">{invoice.clientEmail}</div> : null}
+              {label === "BILLED TO" && invoice.clientAddress ? (
+                <div className="whitespace-pre-line break-words text-[#5F6864]">{invoice.clientAddress}</div>
+              ) : null}
             </div>
           ))}
         </div>
         <div>
           {invoice.lines.map((line, index) => (
             <div key={index} className="flex justify-between gap-3 border-b border-[#ECEBE6] py-2 last:border-0">
-              <span className="min-w-0 break-words">{line.description}</span>
+              <span className="min-w-0 break-words">
+                {line.description}
+                {line.quantity !== 1 ? (
+                  <span className="block tabular-nums text-[#5F6864]">
+                    {formatInvoiceQuantity(line.quantity)} × {formatInvoiceMoney(line.rate)}
+                  </span>
+                ) : null}
+              </span>
               <span className="shrink-0 tabular-nums">{formatInvoiceMoney(line.amount)}</span>
             </div>
           ))}
@@ -351,6 +364,12 @@ export function InvoicePreview({ invoice, settings }: { invoice: InvoiceType; se
               {invoice.status === "paid" || invoice.status === "closed" ? "NOTE" : "HOW TO PAY"}
             </span>
             {invoice.note}
+          </div>
+        ) : null}
+        {invoice.policies && invoice.status !== "void" ? (
+          <div className="whitespace-pre-wrap break-words text-[#5F6864]">
+            <span className="mb-1 block text-[10px] font-semibold tracking-wide">POLICIES &amp; TERMS</span>
+            {invoice.policies}
           </div>
         ) : null}
       </div>

@@ -1,12 +1,14 @@
 import { apiFetch } from "@/lib/api/core/client"
 import { API_ENDPOINTS } from "@/lib/api/core/endpoints"
-import type {
-  InvoiceCreateInput,
-  InvoicePatch,
-  InvoiceSettings,
-  InvoiceSettingsPatch,
-  InvoiceStatusAction,
-  InvoiceType,
+import {
+  InvoiceSchema,
+  InvoiceSettingsSchema,
+  type InvoiceCreateInput,
+  type InvoicePatch,
+  type InvoiceSettings,
+  type InvoiceSettingsPatch,
+  type InvoiceStatusAction,
+  type InvoiceType,
 } from "@shared/schemas/invoice"
 import type { PaymentAccount, PaymentAccountAction } from "@shared/schemas/paymentAccount"
 
@@ -19,6 +21,28 @@ import type { PaymentAccount, PaymentAccountAction } from "@shared/schemas/payme
 // Writes are idempotent (client mutation ids / server-side state checks),
 // so waiting longer never double-books.
 const INVOICE_TIMEOUT_MS = 30_000
+
+// Everything the invoice API returns goes through the shared schemas, which
+// fill in defaults for fields a server one release behind doesn't send yet
+// (the web app and the functions deploy separately). An invoice that still
+// can't be read is left out of the list rather than crashing a screen.
+function readInvoice(raw: unknown): InvoiceType | null {
+  const parsed = InvoiceSchema.safeParse(raw)
+  if (parsed.success) return parsed.data
+  console.warn("invoicesApi: skipping an invoice that doesn't parse", parsed.error.issues)
+  return null
+}
+
+function requireInvoice(raw: unknown): InvoiceType {
+  const invoice = readInvoice(raw)
+  if (!invoice) throw new Error("The server sent back an invoice this version of the app can't read. Refresh and try again.")
+  return invoice
+}
+
+function readSettings(raw: unknown): InvoiceSettings {
+  const parsed = InvoiceSettingsSchema.safeParse(raw ?? {})
+  return parsed.success ? parsed.data : InvoiceSettingsSchema.parse({})
+}
 
 function query(workspaceId: string, invoiceId?: string): string {
   const base = `workspaceId=${encodeURIComponent(workspaceId)}`
@@ -33,7 +57,11 @@ export async function getInvoices(
     `${API_ENDPOINTS.invoices.get}?${query(workspaceId)}`,
     { timeout: INVOICE_TIMEOUT_MS, method: "GET" }
   )
-  return { invoices: res.invoices ?? [], settings: res.settings, paymentAccount: res.paymentAccount ?? null }
+  return {
+    invoices: (res.invoices ?? []).flatMap((raw) => readInvoice(raw) ?? []),
+    settings: readSettings(res.settings),
+    paymentAccount: res.paymentAccount ?? null,
+  }
 }
 
 /**
@@ -58,7 +86,7 @@ export async function saveInvoiceSettings(workspaceId: string, patch: InvoiceSet
     method: "POST",
     body: JSON.stringify(patch),
   })
-  return res.settings
+  return readSettings(res.settings)
 }
 
 export async function createInvoice(workspaceId: string, input: InvoiceCreateInput): Promise<InvoiceType> {
@@ -67,7 +95,7 @@ export async function createInvoice(workspaceId: string, input: InvoiceCreateInp
     method: "POST",
     body: JSON.stringify(input),
   })
-  return res.invoice
+  return requireInvoice(res.invoice)
 }
 
 export async function editInvoice(workspaceId: string, invoiceId: string, patch: InvoicePatch): Promise<InvoiceType> {
@@ -76,7 +104,7 @@ export async function editInvoice(workspaceId: string, invoiceId: string, patch:
     method: "PATCH",
     body: JSON.stringify(patch),
   })
-  return res.invoice
+  return requireInvoice(res.invoice)
 }
 
 /** Drafts only — a sent invoice is voided instead. */
@@ -102,5 +130,5 @@ export async function updateInvoiceStatus(
     `${API_ENDPOINTS.invoices.status}?${query(workspaceId, invoiceId)}`,
     { timeout: INVOICE_TIMEOUT_MS, method: "POST", body: JSON.stringify(action) }
   )
-  return { invoice: res.invoice, entryId: res.entryId ?? null, shareUrl: res.shareUrl ?? null }
+  return { invoice: requireInvoice(res.invoice), entryId: res.entryId ?? null, shareUrl: res.shareUrl ?? null }
 }

@@ -160,7 +160,10 @@ export async function createInvoice(workspaceId: string, uid: string, raw: unkno
   if (!parsed.success) throw new BadRequestError("Invalid invoice", formatIssues(parsed.error))
   const input = parsed.data
   await assertIndependentWorkspace(workspaceId)
-  const note = input.note ?? (await readInvoiceSettings(workspaceId)).defaultNote
+  const settings = await readInvoiceSettings(workspaceId)
+  const note = input.note ?? settings.defaultNote
+  // The policies the client gets with this invoice, kept with it.
+  const policies = input.policies ?? settings.defaultPolicies
 
   const ref = input.clientMutationId
     ? invoicesCol(workspaceId).doc(`cmid_${input.clientMutationId}`)
@@ -181,11 +184,13 @@ export async function createInvoice(workspaceId: string, uid: string, raw: unkno
       clientName: input.clientName,
       clientEmail: input.clientEmail || null,
       clientPhone: input.clientPhone || null,
+      clientAddress: input.clientAddress || null,
       lines: input.lines,
       total: invoiceTotalFromLines(input.lines),
       issueDate: input.issueDate,
       dueDate: input.dueDate,
       note,
+      policies,
       deposit: input.deposit ? { ...input.deposit, waivedAt: null } : null,
       status: input.send ? "sent" : "draft",
       createdAt: nowIso,
@@ -222,6 +227,7 @@ export async function updateInvoice(workspaceId: string, uid: string, invoiceId:
       deposit,
       clientEmail: patch.clientEmail === undefined ? current.clientEmail : patch.clientEmail || null,
       clientPhone: patch.clientPhone === undefined ? current.clientPhone : patch.clientPhone || null,
+      clientAddress: patch.clientAddress === undefined ? current.clientAddress : patch.clientAddress || null,
       lines,
       total: invoiceTotalFromLines(lines),
       updatedAt: new Date().toISOString(),

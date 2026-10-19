@@ -535,4 +535,60 @@ run("phone numbers read the same on every invoice; contact lines don't break", (
   assert.ok(page.includes('class="billed"'));
 });
 
+/* --------------------------------------------------------
+ * Invoice fields: quantity × rate, addresses, policies
+ * -------------------------------------------------------- */
+
+run("a line is quantity × rate, worked out to the cent", () => {
+  const parse = (line) => InvoiceCreateInputSchema.parse({ ...createBase, lines: [{ description: "x", category: "services", ...line }] }).lines[0];
+  assert.deepEqual(parse({ quantity: 3, rate: 150 }), { description: "x", quantity: 3, rate: 150, amount: 450, category: "services" });
+  assert.equal(parse({ quantity: 1.5, rate: 85 }).amount, 127.5);
+  assert.equal(parse({ quantity: 0.33, rate: 10.01 }).amount, 3.3); // 3.3033 → $3.30
+  // Just an amount still works: 1 × it.
+  assert.deepEqual(parse({ amount: 200 }), { description: "x", quantity: 1, rate: 200, amount: 200, category: "services" });
+  const bad = (line) => InvoiceCreateInputSchema.safeParse({ ...createBase, lines: [{ description: "x", category: "services", ...line }] }).success;
+  assert.equal(bad({ quantity: 2 }), false); // no rate or amount
+  assert.equal(bad({ quantity: 1.555, rate: 10 }), false); // three decimals
+  assert.equal(bad({ quantity: 0.001, rate: 1 }), false);
+  // The total and a deposit check use the worked-out amounts.
+  const input = InvoiceCreateInputSchema.parse({ ...createBase, lines: [{ description: "x", category: "services", quantity: 4, rate: 50 }] });
+  assert.equal(input.lines[0].amount, 200);
+  assert.equal(
+    InvoiceCreateInputSchema.safeParse({ ...createBase, lines: [{ description: "x", category: "services", quantity: 4, rate: 50 }], deposit: { amount: 250, dueDate: "2026-10-08" } }).success,
+    false
+  );
+});
+
+run("lines saved before quantities read as 1 × their amount", () => {
+  const old = InvoiceSchema.parse(doc());
+  assert.deepEqual(old.lines[0], { description: "Sleeve", quantity: 1, rate: 600, amount: 600, category: "services" });
+  assert.equal(old.clientAddress, null);
+  assert.equal(old.policies, "");
+});
+
+run("the client page shows quantities, addresses and policies", () => {
+  const invoice = InvoiceSchema.parse(
+    doc({
+      lines: [
+        { description: "Session", quantity: 3, rate: 150, amount: 450, category: "services" },
+        { description: "Aftercare kit", amount: 350, category: "products" },
+      ],
+      clientEmail: "jordan@example.com",
+      clientAddress: "12 Oak St\nBoise, ID 83702",
+      policies: "Deposits are non-refundable.",
+    })
+  );
+  const settings = InvoiceSettingsSchema.parse({ businessName: "Ink & Co", businessAddress: "1 Main St\nBoise, ID" });
+  const page = renderPublicInvoicePage(invoice, settings, "2026-10-05");
+  assert.ok(page.includes('<div class="qty">3 × $150.00</div>'));
+  assert.equal(page.includes("1 × $350.00"), false);
+  assert.ok(page.includes('<div class="sub">jordan@example.com</div>'));
+  assert.ok(page.includes("12 Oak St\nBoise, ID 83702"));
+  assert.ok(page.includes('<div class="address">1 Main St\nBoise, ID</div>'));
+  assert.ok(page.includes("Policies &amp; terms"));
+  assert.ok(page.includes("Deposits are non-refundable."));
+  // A void invoice drops its policies.
+  assert.equal(renderPublicInvoicePage({ ...invoice, status: "void" }, settings, "2026-10-05").includes("Policies &amp; terms"), false);
+});
+
 process.stdout.write("invoice payments checks passed\n");

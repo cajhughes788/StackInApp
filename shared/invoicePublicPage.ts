@@ -2,6 +2,7 @@ import {
   formatInvoiceDate,
   formatInvoiceMoney,
   formatInvoicePhone,
+  formatInvoiceQuantity,
   invoiceDisplayStatus,
   textColorOnAccent,
   type InvoiceDisplayStatus,
@@ -67,7 +68,7 @@ function shell(title: string, body: string, accent: string): string {
   .bar { height: 6px; background: var(--accent); }
   .section { padding: 24px; }
   .section + .section { border-top: 1px solid var(--line); }
-  .biz { display: flex; gap: 16px; align-items: center; }
+  .biz { display: flex; gap: 16px; align-items: flex-start; }
   .biz > div { min-width: 0; }
   .biz img { max-width: 96px; max-height: 64px; object-fit: contain; flex-shrink: 0; }
   .biz-name { font-size: 18px; font-weight: 600; }
@@ -76,6 +77,10 @@ function shell(title: string, body: string, accent: string): string {
   .biz-contact a { display: block; }
   .biz-contact .email { overflow-wrap: anywhere; }
   .biz-contact .phone { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .address { white-space: pre-line; }
+  .meta .sub { color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+  .qty { color: var(--muted); font-size: 13px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .policies { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); font-size: 14px; line-height: 1.5; }
   @media (max-width: 480px) {
     .biz { gap: 12px; }
     .biz img { max-width: 64px; max-height: 48px; }
@@ -237,6 +242,7 @@ export function renderPublicInvoicePage(
   ]
     .filter(Boolean)
     .join("")
+  const businessAddress = settings.businessAddress?.trim()
 
   const showPay = !!options.payPath && invoice.status === "sent" && !invoice.pendingPayment
   const paid = invoiceAmountPaid(invoice)
@@ -265,7 +271,11 @@ export function renderPublicInvoicePage(
   const lines = invoice.lines
     .map(
       (line) =>
-        `<tr><td>${escapeHtml(line.description)}</td><td class="amt">${escapeHtml(formatInvoiceMoney(line.amount))}</td></tr>`
+        `<tr><td>${escapeHtml(line.description)}${
+          line.quantity !== 1
+            ? `<div class="qty">${escapeHtml(formatInvoiceQuantity(line.quantity))} × ${escapeHtml(formatInvoiceMoney(line.rate))}</div>`
+            : ""
+        }</td><td class="amt">${escapeHtml(formatInvoiceMoney(line.amount))}</td></tr>`
     )
     .join("")
 
@@ -277,7 +287,7 @@ export function renderPublicInvoicePage(
       ${settings.logoDataUrl ? `<img src="${escapeHtml(settings.logoDataUrl)}" alt="">` : ""}
       <div>
         <div class="biz-name">${escapeHtml(businessName)}</div>
-        ${contact ? `<div class="biz-contact">${contact}</div>` : ""}
+        ${contact || businessAddress ? `<div class="biz-contact">${contact}${businessAddress ? `<div class="address">${escapeHtml(businessAddress)}</div>` : ""}</div>` : ""}
       </div>
     </div>
   </section>
@@ -287,7 +297,9 @@ export function renderPublicInvoicePage(
       <span class="pill" style="background:${tone.bg};color:${tone.fg}">${escapeHtml(status.label)}</span>
     </div>
     <div class="meta">
-      <div class="billed"><div class="label">Billed to</div>${escapeHtml(invoice.clientName)}</div>
+      <div class="billed"><div class="label">Billed to</div>${escapeHtml(invoice.clientName)}${
+        invoice.clientEmail ? `<div class="sub">${escapeHtml(invoice.clientEmail)}</div>` : ""
+      }${invoice.clientAddress ? `<div class="sub address">${escapeHtml(invoice.clientAddress)}</div>` : ""}</div>
       <div><div class="label">Issued</div>${escapeHtml(formatInvoiceDate(invoice.issueDate))}</div>
       <div><div class="label">Due</div>${escapeHtml(formatInvoiceDate(invoice.dueDate))}</div>
     </div>
@@ -324,6 +336,11 @@ export function renderPublicInvoicePage(
   ${
     invoice.note && invoice.status !== "void" && invoice.status !== "closed"
       ? `<section class="section"><div class="label" style="margin-bottom:8px">${invoice.status === "paid" ? "Note" : showPay ? "Other ways to pay" : "How to pay"}</div><div class="note">${escapeHtml(invoice.note)}</div></section>`
+      : ""
+  }
+  ${
+    invoice.policies && invoice.status !== "void"
+      ? `<section class="section"><div class="label" style="margin-bottom:8px">Policies &amp; terms</div><div class="policies">${escapeHtml(invoice.policies)}</div></section>`
       : ""
   }
 </article>

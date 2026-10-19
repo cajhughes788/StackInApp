@@ -141,6 +141,7 @@ export function createInvoiceInBackground(workspaceId: string, input: CreateInpu
     clientName: input.clientName,
     clientEmail: input.clientEmail || null,
     clientPhone: input.clientPhone || null,
+    clientAddress: input.clientAddress || null,
     lastEmailedAt: null,
     lastEmailedTo: null,
     recentEmailSends: [],
@@ -149,6 +150,8 @@ export function createInvoiceInBackground(workspaceId: string, input: CreateInpu
     issueDate: input.issueDate,
     dueDate: input.dueDate,
     note: input.note ?? "",
+    // The server fills in the default policies when none were sent.
+    policies: input.policies ?? "",
     shareToken: null,
     status: "draft",
     refunds: [],

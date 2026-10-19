@@ -21,11 +21,22 @@ import { invoiceLedgerFields } from "../invoicePayments"
 // -------------------------------------------------------------
 const InvoiceDateSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/, "Use YYYY-MM-DD")
 
-export const InvoiceLineSchema = z.object({
-  description: z.string(),
-  amount: z.number().positive(),
-  category: IncomeCategorySchema,
-})
+// A line is quantity × rate; `amount` is that product to the cent and is
+// what every total, payment and match uses. Lines saved before quantities
+// existed read as 1 × their amount.
+export const InvoiceLineSchema = z.preprocess(
+  (line) =>
+    line && typeof line === "object" && !Array.isArray(line)
+      ? { quantity: 1, ...(line as Record<string, unknown>), rate: (line as Record<string, unknown>).rate ?? (line as Record<string, unknown>).amount }
+      : line,
+  z.object({
+    description: z.string(),
+    quantity: z.number().positive(),
+    rate: z.number().positive(),
+    amount: z.number().positive(),
+    category: IncomeCategorySchema,
+  })
+)
 
 // sent: open, including partly paid. paid: payments cover the total.
 // void: ended with nothing paid. closed: ended early with what was paid kept
@@ -144,6 +155,8 @@ export const InvoiceSchema = z
     clientEmail: z.string().nullable().default(null),
     // For "Text it" (a pre-filled Messages draft). Stored as typed.
     clientPhone: z.string().nullable().default(null),
+    // Billing address, as typed (multi-line).
+    clientAddress: z.string().nullable().default(null),
     // Emails 521 sent for this invoice: the latest, and the recent send
     // times that cap resends (invoiceEmailService.ts).
     lastEmailedAt: z.string().nullable().default(null),
@@ -158,6 +171,10 @@ export const InvoiceSchema = z
     // "Note to customer" — usually how to pay (Venmo/Zelle details).
     // Pre-filled from InvoiceSettings.defaultNote.
     note: z.string().default(""),
+    // Policies and terms the client agreed to (a deposit policy, late
+    // fees), copied from InvoiceSettings.defaultPolicies when the invoice is
+    // made, so a later change to the defaults never rewrites it.
+    policies: z.string().default(""),
     // Unguessable id in the public link (invoiceShares/{shareToken}); set the
     // first time the invoice is shared.
     shareToken: z.string().nullable().default(null),
@@ -256,15 +273,26 @@ const CentsAmountSchema = z
   .max(10_000_000)
   .refine((amount) => Math.abs(amount * 100 - Math.round(amount * 100)) < 1e-6, "Amounts are in whole cents")
 
-export const InvoiceLineInputSchema = z.object({
-  description: z.string().trim().min(1).max(200),
-  amount: z
-    .number()
-    .positive()
-    .max(10_000_000)
-    .refine((amount) => Math.abs(amount * 100 - Math.round(amount * 100)) < 1e-6, "Amounts are in whole cents"),
-  category: IncomeCategorySchema,
-})
+const WholeCents = (amount: number) => Math.abs(amount * 100 - Math.round(amount * 100)) < 1e-6
+
+// A line as sent: quantity × rate (the amount is worked out here, to the
+// cent), or just an amount (1 × it).
+export const InvoiceLineInputSchema = z
+  .object({
+    description: z.string().trim().min(1).max(200),
+    quantity: z.number().positive().max(100_000).refine(WholeCents, "Quantities go to two decimal places").default(1),
+    rate: z.number().positive().max(10_000_000).refine(WholeCents, "Rates are in whole cents").optional(),
+    amount: z.number().positive().max(10_000_000).refine(WholeCents, "Amounts are in whole cents").optional(),
+    category: IncomeCategorySchema,
+  })
+  .refine((line) => line.rate !== undefined || line.amount !== undefined, { message: "A line needs a rate or an amount." })
+  .transform((line) => {
+    const quantity = line.rate !== undefined ? line.quantity : 1
+    const rate = line.rate ?? line.amount!
+    const amount = Math.round(quantity * rate * 100) / 100
+    return { description: line.description, quantity, rate, amount, category: line.category }
+  })
+  .refine((line) => line.amount > 0 && line.amount <= 10_000_000, { message: "A line's amount has to be between $0.01 and $10,000,000." })
 
 // Money asked for up front. Null removes it.
 export const InvoiceDepositInputSchema = z.object({
@@ -276,10 +304,12 @@ const InvoiceFieldsSchema = z.object({
   clientName: z.string().trim().min(1).max(80),
   clientEmail: z.union([z.string().trim().email().max(254), z.literal("")]).nullable().optional(),
   clientPhone: z.string().trim().max(40).nullable().optional(),
+  clientAddress: z.string().trim().max(300).nullable().optional(),
   lines: z.array(InvoiceLineInputSchema).min(1).max(50),
   issueDate: DateSchema,
   dueDate: DateSchema,
   note: z.string().trim().max(1000).optional(),
+  policies: z.string().trim().max(2000).optional(),
   deposit: InvoiceDepositInputSchema.nullable().optional(),
 })
 
@@ -390,6 +420,10 @@ const InvoiceSettingsFields = {
   businessName: z.string().trim().max(80),
   businessEmail: z.union([z.string().trim().email().max(254), z.literal("")]),
   businessPhone: z.string().trim().max(40),
+  // Mailing address, as typed (multi-line). Shown with the contact details.
+  businessAddress: z.string().trim().max(300),
+  // Copied onto each new invoice (deposit policy, late fees, cancellations).
+  defaultPolicies: z.string().trim().max(2000),
   logoDataUrl: z
     .string()
     .max(INVOICE_LOGO_MAX_LENGTH)
@@ -416,6 +450,8 @@ export const InvoiceSettingsSchema = z.object({
   businessName: InvoiceSettingsFields.businessName.default(""),
   businessEmail: InvoiceSettingsFields.businessEmail.default(""),
   businessPhone: InvoiceSettingsFields.businessPhone.default(""),
+  businessAddress: InvoiceSettingsFields.businessAddress.default(""),
+  defaultPolicies: InvoiceSettingsFields.defaultPolicies.default(""),
   logoDataUrl: InvoiceSettingsFields.logoDataUrl.default(null),
   accentColor: InvoiceSettingsFields.accentColor.default(DEFAULT_INVOICE_ACCENT_COLOR),
   defaultTerms: InvoiceSettingsFields.defaultTerms.default("net_30"),
@@ -431,6 +467,8 @@ export const InvoiceSettingsPatchSchema = z.object({
   businessName: InvoiceSettingsFields.businessName.optional(),
   businessEmail: InvoiceSettingsFields.businessEmail.optional(),
   businessPhone: InvoiceSettingsFields.businessPhone.optional(),
+  businessAddress: InvoiceSettingsFields.businessAddress.optional(),
+  defaultPolicies: InvoiceSettingsFields.defaultPolicies.optional(),
   logoDataUrl: InvoiceSettingsFields.logoDataUrl.optional(),
   accentColor: InvoiceSettingsFields.accentColor.optional(),
   defaultTerms: InvoiceSettingsFields.defaultTerms.optional(),
