@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { Check } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useToast } from "@/hooks/use-toast"
@@ -399,6 +400,15 @@ function InvoiceSettingsPage() {
                 Asked for up front on new invoices; the rest is due by the due date. You can change it on each invoice.
               </p>
             </fieldset>
+            <label className="flex items-center justify-between gap-3">
+              <span>
+                <span className="block text-sm font-medium text-foreground">Ask for a tip when clients pay online</span>
+                <span className="block text-xs text-muted-foreground">
+                  15%, 20%, 25% or their own amount, on the payment that finishes the invoice. Booked as tip income.
+                </span>
+              </span>
+              <Switch checked={draft.offerTips} onCheckedChange={(offerTips) => update({ offerTips })} aria-label="Ask for a tip" />
+            </label>
             <label className={fieldLabelClass}>
               Note to customer
               <Textarea

@@ -26,6 +26,7 @@ const {
   invoicePaymentRefundable,
   invoiceLatestPayment,
   splitAcrossCategories,
+  invoiceCheckoutAmounts,
 } = require("../shared/invoicePayments.ts");
 const { invoiceDisplayStatus } = require("../shared/invoiceDisplay.ts");
 const {
@@ -459,6 +460,62 @@ run("already recorded: a bank deposit matches a hand-recorded payment, tip inclu
   assert.deepEqual(manualPaymentTargets([recorded], "2026-11-12"), []);
   const online = invoiceWithPayments(withDeposit(), [payment("s", 100, { via: "online", receivedOn: "2026-10-10" })]);
   assert.deepEqual(manualPaymentTargets([online], "2026-10-12"), []);
+});
+
+/* --------------------------------------------------------
+ * Online checkout amounts (phase 5)
+ * -------------------------------------------------------- */
+
+run("checkout charges the chosen option, from the invoice not the request", () => {
+  const open = withDeposit();
+  assert.deepEqual(invoiceCheckoutAmounts(open, {}, true), { purpose: "deposit", amountCents: 10000, tipCents: 0 });
+  assert.deepEqual(invoiceCheckoutAmounts(open, { purpose: "full" }, true), { purpose: "full", amountCents: 80000, tipCents: 0 });
+  // An option the invoice doesn't offer falls back to the first one.
+  assert.equal(invoiceCheckoutAmounts(open, { purpose: "balance" }, true).purpose, "deposit");
+  assert.equal(invoiceCheckoutAmounts({ ...open, status: "paid" }, {}, true), null);
+});
+
+run("tips: presets and custom, only on a finishing payment, only when offered", () => {
+  const open = withDeposit();
+  assert.equal(invoiceCheckoutAmounts(open, { purpose: "full", tip: "20" }, true).tipCents, 16000);
+  assert.equal(invoiceCheckoutAmounts(open, { purpose: "full", tip: "15" }, true).tipCents, 12000);
+  assert.equal(invoiceCheckoutAmounts(open, { purpose: "full", tip: "custom", customTip: "$45.50" }, true).tipCents, 4550);
+  // Never on a deposit; never when the business doesn't ask for tips.
+  assert.equal(invoiceCheckoutAmounts(open, { purpose: "deposit", tip: "20" }, true).tipCents, 0);
+  assert.equal(invoiceCheckoutAmounts(open, { purpose: "full", tip: "20" }, false).tipCents, 0);
+  // Anything odd is no tip: unknown percent, bad text, more than the payment.
+  assert.equal(invoiceCheckoutAmounts(open, { purpose: "full", tip: "50" }, true).tipCents, 0);
+  assert.equal(invoiceCheckoutAmounts(open, { purpose: "full", tip: "custom", customTip: "lots" }, true).tipCents, 0);
+  assert.equal(invoiceCheckoutAmounts(open, { purpose: "full", tip: "custom", customTip: "800.01" }, true).tipCents, 0);
+  assert.equal(invoiceCheckoutAmounts(open, { purpose: "full", tip: "custom", customTip: "800" }, true).tipCents, 80000);
+  // After the deposit, the balance takes the tip.
+  const paidDeposit = invoiceWithPayments(open, [payment("d", 100, { purpose: "deposit" })]);
+  assert.deepEqual(invoiceCheckoutAmounts(paidDeposit, { tip: "20" }, true), { purpose: "balance", amountCents: 70000, tipCents: 14000 });
+});
+
+run("settings: tips are off unless turned on", () => {
+  assert.equal(InvoiceSettingsSchema.parse({}).offerTips, false);
+  assert.equal(InvoiceSettingsSchema.parse({ offerTips: true }).offerTips, true);
+});
+
+run("the invoice page offers the deposit or everything, and a tip when asked", () => {
+  const open = InvoiceSchema.parse(doc({ deposit: { amount: 100, dueDate: "2026-10-08", waivedAt: null }, shareToken: "tok" }));
+  const tipsOn = InvoiceSettingsSchema.parse({ offerTips: true });
+  const page = renderPublicInvoicePage(open, tipsOn, "2026-10-05", { payPath: "/i/tok/pay" });
+  assert.ok(page.includes('name="purpose" value="deposit" data-amount="10000" checked'));
+  assert.ok(page.includes('name="purpose" value="full" data-amount="80000"'));
+  assert.ok(page.includes("(when paying in full)"));
+  for (const v of ["0", "15", "20", "25", "custom"]) assert.ok(page.includes(`name="tip" value="${v}"`));
+  assert.ok(page.includes('name="customTip"'));
+  // Tips off: no picker. One option: a hidden choice.
+  const tipsOff = renderPublicInvoicePage(open, InvoiceSettingsSchema.parse({}), "2026-10-05", { payPath: "/i/tok/pay" });
+  assert.equal(tipsOff.includes('name="tip" value='), false);
+  const plain = renderPublicInvoicePage(InvoiceSchema.parse(doc({ shareToken: "tok" })), tipsOn, "2026-10-05", { payPath: "/i/tok/pay" });
+  assert.ok(plain.includes('type="hidden" name="purpose" value="full"'));
+  assert.ok(plain.includes("Add a tip"));
+  assert.equal(plain.includes("(when paying in full)"), false);
+  // Nothing payable online: no form at all.
+  assert.equal(renderPublicInvoicePage(open, tipsOn, "2026-10-05", {}).includes("payform"), false);
 });
 
 process.stdout.write("invoice payments checks passed\n");

@@ -407,6 +407,9 @@ const InvoiceSettingsFields = {
       dueInDays: z.number().int().min(0).max(365),
     })
     .refine((deposit) => deposit.type !== "percent" || deposit.value < 100, "A percent deposit has to be under 100%."),
+  // The invoice page asks clients paying online for a tip on the payment
+  // that finishes the invoice.
+  offerTips: z.boolean(),
 }
 
 export const InvoiceSettingsSchema = z.object({
@@ -418,6 +421,7 @@ export const InvoiceSettingsSchema = z.object({
   defaultTerms: InvoiceSettingsFields.defaultTerms.default("net_30"),
   defaultNote: InvoiceSettingsFields.defaultNote.default(""),
   defaultDeposit: InvoiceSettingsFields.defaultDeposit.default({ type: "none", value: 0, dueInDays: 7 }),
+  offerTips: InvoiceSettingsFields.offerTips.default(false),
   updatedAt: z.string().optional(),
 })
 
@@ -432,6 +436,7 @@ export const InvoiceSettingsPatchSchema = z.object({
   defaultTerms: InvoiceSettingsFields.defaultTerms.optional(),
   defaultNote: InvoiceSettingsFields.defaultNote.optional(),
   defaultDeposit: InvoiceSettingsFields.defaultDeposit.optional(),
+  offerTips: InvoiceSettingsFields.offerTips.optional(),
 })
 
 export type InvoiceSettings = z.infer<typeof InvoiceSettingsSchema>

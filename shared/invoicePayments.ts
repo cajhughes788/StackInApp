@@ -268,3 +268,53 @@ export function refundCentsByCategory(
 export function invoicePaymentsReceivedIn(invoice: { payments?: InvoicePayment[] }, month: string): InvoicePayment[] {
   return (invoice.payments ?? []).filter((payment) => payment.receivedOn.slice(0, 7) === month)
 }
+
+/* --------------------------------------------------------
+ * Online checkout — what the client chose on the invoice page
+ * -------------------------------------------------------- */
+
+// The tip buttons on the invoice page, as percents of the payment.
+export const INVOICE_TIP_PRESETS = [15, 20, 25] as const
+
+export type InvoiceCheckoutChoice = {
+  // One of invoicePaymentOptions' purposes; the first option otherwise.
+  purpose?: string | null
+  // "0", a preset percent ("15"), or "custom" with customTip in dollars.
+  tip?: string | null
+  customTip?: string | null
+}
+
+export type InvoiceCheckoutAmounts = { purpose: InvoicePaymentPurpose; amountCents: number; tipCents: number }
+
+function parseDollarsToCents(text: string): number | null {
+  const cleaned = text.replace(/[$,\s]/g, "")
+  if (!/^\d+(\.\d{0,2})?$/.test(cleaned)) return null
+  return Math.round(Number(cleaned) * 100)
+}
+
+// The amounts a Checkout session charges for the client's choice. The
+// amount always comes from the invoice, never the request. A tip only goes
+// on the payment that finishes the invoice (never a deposit), only when the
+// business asks for tips, and at most the payment itself; anything else
+// counts as no tip. Null when nothing can be paid online.
+export function invoiceCheckoutAmounts(
+  invoice: LedgerInvoice & { dueDate: string },
+  choice: InvoiceCheckoutChoice,
+  offerTips: boolean
+): InvoiceCheckoutAmounts | null {
+  const options = invoicePaymentOptions(invoice)
+  if (options.length === 0) return null
+  const option = options.find((o) => o.purpose === choice.purpose) ?? options[0]
+  const amountCents = toCents(option.amount)
+  const finishing = option.purpose === "balance" || option.purpose === "full"
+  let tipCents = 0
+  if (offerTips && finishing && choice.tip) {
+    const preset = INVOICE_TIP_PRESETS.find((percent) => String(percent) === choice.tip)
+    if (preset) tipCents = Math.round((amountCents * preset) / 100)
+    else if (choice.tip === "custom") {
+      const custom = parseDollarsToCents(choice.customTip ?? "")
+      tipCents = custom !== null && custom <= amountCents ? custom : 0
+    }
+  }
+  return { purpose: option.purpose, amountCents, tipCents }
+}

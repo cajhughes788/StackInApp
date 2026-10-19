@@ -7,11 +7,11 @@ import { renderPublicInvoiceNotFound, renderPublicInvoicePage } from "@shared/in
 // rewrites /i/** here, so the token is the last path segment; ?t= also
 // works when the function is hit directly.
 //
-// /i/{token}/pay starts Stripe Checkout for the client (303 to Stripe): POST
-// from the page's Pay button, GET from the email's "Pay now" link. The
-// amount always comes from the stored invoice, never the request, and the
-// session is reused per invoice — so a mail scanner opening the link first
-// can't create a second payment.
+// /i/{token}/pay starts Stripe Checkout for the client (303 to Stripe): a
+// POST from the page's Pay form, carrying what they chose to pay and any
+// tip. The amounts always come from the stored invoice, never the request
+// (invoiceCheckoutAmounts). A GET (an old email link, a mail scanner) only
+// lands on the invoice page — paying needs the client's choices.
 //
 // The CSP allows nothing but inline styles, data: images (the logo), the one
 // inline print handler, and the Pay form posting here and on to Stripe.
@@ -48,8 +48,18 @@ export async function publicInvoiceHandler(req: Request, res: Response): Promise
     return
   }
   try {
+    if (pay && req.method === "GET") {
+      res.redirect(303, `/i/${encodeURIComponent(token)}`)
+      return
+    }
     if (pay) {
-      const result = await startInvoiceCheckout(token)
+      const body = (req.body ?? {}) as Record<string, unknown>
+      const text = (value: unknown) => (typeof value === "string" ? value.slice(0, 40) : null)
+      const result = await startInvoiceCheckout(token, {
+        purpose: text(body.purpose),
+        tip: text(body.tip),
+        customTip: text(body.customTip),
+      })
       if (result.kind === "not_found") {
         res.status(404).send(renderPublicInvoiceNotFound())
         return

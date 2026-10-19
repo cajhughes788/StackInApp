@@ -258,6 +258,25 @@ Goal: a Plaid deposit can be recognized as a deposit payment, a balance payment,
 
 Goal: the client pays the right amount online, picks a tip on 521's page, and 521 books it from Stripe's own data.
 
+**Built.** Several pieces landed in Phase 2: the webhook booking through the engine, metadata on sessions, per-payment refunds and disputes, and clearing bank transfers per payment. This phase added:
+- **The client page:**
+  - A choice between the deposit and everything (or the balance alone).
+  - A tip picker (no tip / 15 / 20 / 25% / custom), only on a payment that finishes the invoice.
+  - A small script that keeps the Pay button's amount current.
+- **`invoiceCheckoutAmounts`**, shared and tested, which works out the session's amounts from the invoice and the client's choice:
+  - The amount never comes from the request.
+  - Tips are at most 100% of the payment and never go on a deposit.
+  - Anything malformed counts as no tip.
+- **A separate "Tip" line item** in Checkout. A different choice expires the client's earlier open session.
+- **Settings:** `offerTips` ("Ask for a tip when clients pay online"), **off by default**, so businesses where a tip prompt doesn't fit never see one.
+- **The email's "Pay now"** opens the invoice page. A GET of `/i/{token}/pay` redirects there.
+- **The failed bank-transfer notification** says whether it was the deposit, and how much.
+
+**Not tested end to end with real Stripe:** the project's Stripe key is live, so real Checkout would make real charges. The amounts, page and form are covered by unit tests and a browser check of the real page. A Stripe end-to-end test needs:
+- a test-mode secret key, given only to the local emulator (e.g. `backend/functions/.secret.local`);
+- a test-mode connected account on a workspace;
+- the Stripe CLI forwarding webhooks to the emulator.
+
 1. **Public page** (`shared/invoicePublicPage.ts`, still server-rendered, no new script):
    - **Payment choice:** radio buttons for the options in `invoicePaymentOptions` (deposit or full; or balance).
    - **Tip picker, when the choice finishes the invoice:** 15% / 20% / 25% / custom / no tip. The percentages are of the amount being paid.

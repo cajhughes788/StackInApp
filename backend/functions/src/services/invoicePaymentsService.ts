@@ -7,7 +7,7 @@ import {
   type InvoicePaymentPurpose,
   type InvoiceType,
 } from "@shared/schemas/invoice"
-import { invoicePaymentOptions } from "@shared/invoicePayments"
+import { invoiceCheckoutAmounts, invoicePaymentOptions, type InvoiceCheckoutChoice } from "@shared/invoicePayments"
 import { publicInvoiceUrl } from "@shared/invoiceDisplay"
 import { StripePayoutSchema } from "@shared/stripePayouts"
 import { payoutsCol } from "./stripePayoutsStore"
@@ -62,34 +62,45 @@ export async function invoiceOnlinePayment(
   return { payable, bankTransfer: payable && account?.achStatus === "active" }
 }
 
-export async function startInvoiceCheckout(shareToken: string): Promise<CheckoutStart> {
+// The client chose what to pay (deposit, balance or everything) and a tip
+// on the invoice page. The amounts come from the invoice, never the request
+// (invoiceCheckoutAmounts); the tip is its own line so Stripe's receipt and
+// dashboard show it, and the metadata tells the webhook exactly how much of
+// the charge was the tip.
+export async function startInvoiceCheckout(shareToken: string, choice: InvoiceCheckoutChoice = {}): Promise<CheckoutStart> {
   const shared = await findSharedInvoice(shareToken)
   if (!shared) return { kind: "not_found" }
   const { workspaceId, invoice, settings } = shared
   const account = await readPaymentAccount(workspaceId)
-  // Phase 5 lets the client choose (deposit, balance, full) and tip; until
-  // then the first option is what's offered.
-  const [option] = invoicePaymentOptions(invoice)
-  if (!option || !account?.chargesEnabled || !account.acceptOnline) {
+  const amounts = invoiceCheckoutAmounts(invoice, choice, settings.offerTips)
+  if (!amounts || !account?.chargesEnabled || !account.acceptOnline) {
     return { kind: "not_payable" }
   }
 
   const stripe = getStripe()
   const stripeAccount = account.stripeAccountId
-  const amountCents = toCents(option.amount)
-  const tipCents = 0
+  const { amountCents, tipCents } = amounts
+  const option = { purpose: amounts.purpose }
   const pageUrl = publicInvoiceUrl(shareToken)
 
-  // Reuse the client's open session (a second tap, a back button) so one
-  // invoice doesn't collect two payments.
+  // Reuse the client's open session for the same choice (a second tap, a
+  // back button) so one invoice doesn't collect two payments. A different
+  // choice closes the old session first.
   if (invoice.openCheckout) {
     const existing = await stripe.checkout.sessions
       .retrieve(invoice.openCheckout.sessionId, {}, { stripeAccount })
       .catch(() => null)
-    if (existing?.status === "open" && existing.amount_total === amountCents + tipCents && existing.url) {
+    if (existing?.status === "complete") return { kind: "redirect", url: `${pageUrl}?paid=1` }
+    const same =
+      invoice.openCheckout.purpose === amounts.purpose &&
+      invoice.openCheckout.amountCents === amountCents &&
+      invoice.openCheckout.tipCents === tipCents
+    if (existing?.status === "open" && same && existing.amount_total === amountCents + tipCents && existing.url) {
       return { kind: "redirect", url: existing.url }
     }
-    if (existing?.status === "complete") return { kind: "redirect", url: `${pageUrl}?paid=1` }
+    if (existing?.status === "open") {
+      await stripe.checkout.sessions.expire(existing.id, {}, { stripeAccount }).catch(() => null)
+    }
   }
 
   const business = settings.businessName || ""
@@ -112,8 +123,9 @@ export async function startInvoiceCheckout(shareToken: string): Promise<Checkout
       // transfer settles days later (checkout.session.async_payment_*).
       payment_method_types: account.achStatus === "active" ? ["card", "us_bank_account"] : ["card"],
       // The whole invoice: its own lines. Part of it: one line saying which.
-      line_items:
-        amountCents === toCents(invoice.total)
+      // A tip is a line of its own.
+      line_items: [
+        ...(amountCents === toCents(invoice.total)
           ? invoice.lines.map((line) => ({
               quantity: 1,
               price_data: {
@@ -131,7 +143,11 @@ export async function startInvoiceCheckout(shareToken: string): Promise<Checkout
                   product_data: { name: `${PURPOSE_LINE_LABELS[option.purpose]} — Invoice #${invoice.number}` },
                 },
               },
-            ],
+            ]),
+        ...(tipCents > 0
+          ? [{ quantity: 1, price_data: { currency: "usd", unit_amount: tipCents, product_data: { name: "Tip" } } }]
+          : []),
+      ],
       client_reference_id: invoice.id,
       metadata: checkoutMetadata,
       payment_intent_data: {
@@ -258,9 +274,11 @@ export async function handleAsyncPaymentFailed(stripeAccountId: string, session:
   const ownerUid = workspaceSnap.data()?.ownerId as string | undefined
   if (!ownerUid) return
   const { sendTransactionNotification } = await import("./pushNotificationService.js")
+  const what = failed.pendingPayment?.purpose === "deposit" ? "deposit" : "payment"
+  const amount = failed.pendingPayment ? ` of $${failed.pendingPayment.amount.toFixed(2)}` : ""
   await sendTransactionNotification(ownerUid, {
-    title: `${failed.clientName}'s bank payment failed`,
-    body: `Invoice #${failed.number} is open again — they can pay from the same link.`,
+    title: `${failed.clientName}'s bank ${what} failed`,
+    body: `Their ${what}${amount} on Invoice #${failed.number} bounced — they can pay again from the same link.`,
     data: { deepLink: `stackin://invoices/${failed.id}`, workspaceId: target.workspaceId },
   }).catch((error) => console.error("invoicePayments: failed-payment notification failed", error))
 }

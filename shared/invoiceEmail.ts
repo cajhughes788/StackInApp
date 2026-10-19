@@ -31,9 +31,9 @@ export function buildInvoiceEmail(params: {
   const due = formatInvoiceMoney(dueNow?.amount ?? invoiceBalanceDue(invoice))
   const dueDate = formatInvoiceDate(dueNow?.dueDate ?? invoice.dueDate)
   const amountLabel = isDeposit ? "Deposit due" : "Amount due"
-  // Pay now goes straight to Stripe Checkout (GET /i/{token}/pay); the
-  // invoice page stays one tap away.
-  const payLink = payableOnline ? `${link.replace(/\/+$/, "")}/pay` : null
+  // Pay now opens the invoice page, where the client picks what to pay
+  // (the deposit or everything) and any tip before Stripe Checkout.
+  const payLink = payableOnline ? link : null
 
   const subject = `Invoice #${invoice.number} from ${business} — ${isDeposit ? `${due} deposit` : due} due ${dueDate.replace(/, \d{4}$/, "")}`
 

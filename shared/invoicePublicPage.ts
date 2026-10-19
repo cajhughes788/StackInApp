@@ -5,7 +5,14 @@ import {
   textColorOnAccent,
   type InvoiceDisplayStatus,
 } from "./invoiceDisplay"
-import { invoiceAmountPaid, invoiceBalanceDue, invoiceDueNow, invoicePaymentOptions } from "./invoicePayments"
+import {
+  INVOICE_TIP_PRESETS,
+  invoiceAmountPaid,
+  invoiceBalanceDue,
+  invoiceDueNow,
+  invoicePaymentOptions,
+  type InvoicePaymentOption,
+} from "./invoicePayments"
 import { DEFAULT_INVOICE_ACCENT_COLOR, type InvoiceSettings, type InvoiceType } from "./schemas/invoice"
 
 // ---------------------------------------------------------------------------
@@ -83,6 +90,19 @@ function shell(title: string, body: string, accent: string): string {
   .btn.secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); }
   .btn.pay { width: 100%; padding: 15px 22px; font-size: 17px; }
   .pay-note { text-align: center; color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .muted { color: var(--muted); font-weight: 400; }
+  .choice { border: 0; padding: 0; margin: 0 0 16px; min-width: 0; }
+  .choice:disabled { opacity: .45; }
+  .opt { display: flex; gap: 10px; align-items: center; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; margin-top: 8px; cursor: pointer; }
+  .opt:has(input:checked) { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .opt strong { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .tipgrid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
+  .tip { position: relative; display: flex; align-items: center; justify-content: center; min-height: 44px; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; cursor: pointer; text-align: center; }
+  .tip input { position: absolute; opacity: 0; pointer-events: none; }
+  .tip:has(input:checked) { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); font-weight: 600; }
+  .tip:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .custom { display: none; width: 100%; margin-top: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; font: inherit; }
+  .tips:has(input[value="custom"]:checked) .custom { display: block; }
   .foot { text-align: center; color: var(--muted); font-size: 12px; margin-top: 24px; }
   @media print {
     body { background: #fff; }
@@ -100,6 +120,74 @@ ${body}
 </body>
 </html>`
 }
+
+const PURPOSE_LABELS: Record<string, string> = {
+  deposit: "Deposit",
+  balance: "Balance",
+  full: "Pay in full",
+  partial: "Payment",
+}
+
+// The amounts the client can pay: one hidden choice, or radio buttons for
+// the deposit or everything. data-amount (cents) feeds the button label.
+function renderPayChoices(invoice: InvoiceType, payOptions: InvoicePaymentOption[]): string {
+  if (payOptions.length === 1) {
+    const [only] = payOptions
+    return `<input type="hidden" name="purpose" value="${escapeHtml(only.purpose)}" data-amount="${Math.round(only.amount * 100)}">`
+  }
+  const choices = payOptions
+    .map((option, index) => {
+      const due = option.purpose === "deposit" && invoice.deposit ? ` <span class="muted">due ${escapeHtml(formatInvoiceDate(invoice.deposit.dueDate))}</span>` : ""
+      return `<label class="opt"><input type="radio" name="purpose" value="${escapeHtml(option.purpose)}" data-amount="${Math.round(option.amount * 100)}"${
+        index === 0 ? " checked" : ""
+      }><span>${escapeHtml(PURPOSE_LABELS[option.purpose] ?? "Payment")}${due}</span><strong>${escapeHtml(formatInvoiceMoney(option.amount))}</strong></label>`
+    })
+    .join("")
+  return `<fieldset class="choice"><legend class="label">How much are you paying?</legend>${choices}</fieldset>`
+}
+
+function renderTipPicker(onlyWhenPayingInFull: boolean): string {
+  const presets = INVOICE_TIP_PRESETS.map(
+    (percent) => `<label class="tip"><input type="radio" name="tip" value="${percent}"><span>${percent}%</span></label>`
+  ).join("")
+  return `<fieldset class="choice tips" id="tips"><legend class="label">${
+    onlyWhenPayingInFull ? "Add a tip <span class=\"muted\">(when paying in full)</span>" : "Add a tip"
+  }</legend><div class="tipgrid"><label class="tip"><input type="radio" name="tip" value="0" checked><span>No tip</span></label>${presets}<label class="tip"><input type="radio" name="tip" value="custom"><span>Other</span></label></div><input class="custom" name="customTip" inputmode="decimal" autocomplete="off" placeholder="Tip amount, e.g. 50" aria-label="Tip amount"></fieldset>`
+}
+
+// Keeps the Pay button's amount in step with the choices (the form works
+// without it — the server works the amounts out either way).
+const PAY_FORM_SCRIPT = `<script>
+(function () {
+  var form = document.getElementById("payform");
+  var button = document.getElementById("paybtn");
+  if (!form || !button) return;
+  var tips = document.getElementById("tips");
+  function money(cents) { return "$" + (cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function update() {
+    var chosen = form.querySelector('input[name="purpose"]:checked') || form.querySelector('input[name="purpose"]');
+    var amount = Number(chosen.getAttribute("data-amount")) || 0;
+    var isDeposit = chosen.value === "deposit";
+    var tip = 0;
+    if (tips) {
+      tips.disabled = isDeposit;
+      var pick = form.querySelector('input[name="tip"]:checked');
+      if (!isDeposit && pick) {
+        if (pick.value === "custom") {
+          var typed = Math.round(Number((form.customTip.value || "").replace(/[$,\\s]/g, "")) * 100);
+          tip = typed > 0 && typed <= amount ? typed : 0;
+        } else {
+          tip = Math.round(amount * Number(pick.value) / 100) || 0;
+        }
+      }
+    }
+    button.textContent = "Pay " + money(amount + tip) + (isDeposit ? " deposit" : "");
+  }
+  form.addEventListener("change", update);
+  form.addEventListener("input", update);
+  update();
+})();
+</script>`
 
 export type PublicInvoicePageOptions = {
   // Show "Pay $X" (online payments on, invoice open). payPath is where the
@@ -139,7 +227,11 @@ export function renderPublicInvoicePage(
   // What the client pays next: the deposit while one is owed, else the rest.
   const dueNow = invoiceDueNow(invoice)
   const depositDue = dueNow?.purpose === "deposit" ? dueNow : null
-  const payAmount = invoicePaymentOptions(invoice)[0]?.amount ?? balance
+  // What the client can pay online, and whether a tip is asked for (only on
+  // a payment that finishes the invoice).
+  const payOptions = invoicePaymentOptions(invoice)
+  const payAmount = payOptions[0]?.amount ?? balance
+  const showTips = !!settings.offerTips && payOptions.some((o) => o.purpose === "balance" || o.purpose === "full")
   const processing = invoice.status === "sent" && !!invoice.pendingPayment
   const banner =
     processing
@@ -202,11 +294,14 @@ export function renderPublicInvoicePage(
         : ""
     }
     ${
-      showPay && !options.justPaid
-        ? `<form method="post" action="${escapeHtml(options.payPath!)}" style="margin-top:16px">
-      <button class="btn pay" type="submit">Pay ${escapeHtml(formatInvoiceMoney(payAmount))}${depositDue ? " deposit" : ""}</button>
+      showPay && !options.justPaid && payOptions.length > 0
+        ? `<form method="post" action="${escapeHtml(options.payPath!)}" id="payform" style="margin-top:16px">
+      ${renderPayChoices(invoice, payOptions)}
+      ${showTips ? renderTipPicker(payOptions.length > 1) : ""}
+      <button class="btn pay" type="submit" id="paybtn">Pay ${escapeHtml(formatInvoiceMoney(payAmount))}${depositDue ? " deposit" : ""}</button>
       <div class="pay-note">${options.bankTransfer ? "Card, Apple Pay, Google Pay or bank account" : "Card, Apple Pay or Google Pay"} · secure checkout by Stripe</div>
-    </form>`
+    </form>
+    ${PAY_FORM_SCRIPT}`
         : ""
     }
   </section>

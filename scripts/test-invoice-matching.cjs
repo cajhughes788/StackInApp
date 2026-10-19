@@ -634,11 +634,13 @@ run("invoice email: subject, CTA and escaping", () => {
   assert.equal(email.html.includes("<script>"), false);
   assert.ok(email.html.includes("&lt;script&gt;"));
   assert.ok(email.html.includes("Bob&#39;s &lt;Cuts&gt;"));
-  assert.ok(email.html.includes('href="https://x.test/i/t/pay"'));
+  // Pay now opens the invoice page (the client picks the amount and tip
+  // there), never Stripe directly.
+  assert.equal(email.html.includes("/pay"), false);
   assert.ok(email.html.includes("Pay $250.00 now"));
   assert.ok(email.html.includes('href="https://x.test/i/t"'));
   assert.ok(email.html.includes("Other ways to pay"));
-  assert.ok(email.text.includes("Pay now: https://x.test/i/t/pay"));
+  assert.ok(email.text.includes("Pay now: https://x.test/i/t\n"));
   assert.ok(email.text.includes("View invoice: https://x.test/i/t"));
   assert.ok(email.text.includes("Reply to this email"));
 
