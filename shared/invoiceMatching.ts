@@ -285,7 +285,7 @@ export function pickPaidInvoices(
       invoices: best.invoices.map((target) => toRef(target)),
       invoiceTotal: best.totalCents / 100,
       feeAmount: best.feeCents / 100,
-      alternatives: tied.slice(1, 1 + MAX_ALTERNATIVES).map((group) => group.invoices.map((target) => toRef(target))),
+      alternatives: tied.slice(1, 1 + MAX_ALTERNATIVES).map((group) => ({ invoices: group.invoices.map((target) => toRef(target)) })),
       alreadyPaid: false,
     }
   }
@@ -315,7 +315,7 @@ export function pickPaidInvoices(
         invoices: [toRef(best.invoices[0], best.tipCents)],
         invoiceTotal: depositCents / 100,
         feeAmount: 0,
-        alternatives: tied.slice(1, 1 + MAX_ALTERNATIVES).map((group) => [toRef(group.invoices[0], group.tipCents)]),
+        alternatives: tied.slice(1, 1 + MAX_ALTERNATIVES).map((group) => ({ invoices: [toRef(group.invoices[0], group.tipCents)] })),
         alreadyPaid: false,
       }
     }
@@ -329,7 +329,7 @@ export function pickPaidInvoices(
 // Null when the ids don't match any offered group.
 export function resolveChosenInvoiceGroup(match: PlaidInvoiceMatch, invoiceIds: string[]): PlaidInvoiceRef[] | null {
   const wanted = [...invoiceIds].sort().join("|")
-  for (const group of [match.invoices, ...match.alternatives]) {
+  for (const group of [match.invoices, ...match.alternatives.map((alternative) => alternative.invoices)]) {
     if (group.map((ref) => ref.invoiceId).sort().join("|") === wanted) return group
   }
   return null

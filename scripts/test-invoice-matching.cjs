@@ -172,7 +172,9 @@ run("a real tie comes back with alternatives, oldest due first", () => {
     invoice({ number: "0012", total: 450, clientName: "Acme", dueDate: "2026-10-01" }),
   ]);
   assert.deepEqual(match.invoices.map((i) => i.number), ["0012"]);
-  assert.deepEqual(match.alternatives.map((g) => g.map((i) => i.number)), [["0019"]]);
+  assert.deepEqual(match.alternatives.map((g) => g.invoices.map((i) => i.number)), [["0019"]]);
+  // Storable in Firestore: no array directly inside an array.
+  for (const alternative of match.alternatives) assert.equal(Array.isArray(alternative), false);
 });
 
 run("short names don't match a payer on containment", () => {

@@ -60,7 +60,7 @@ export default function InvoiceMatchCard({
   onNotThis: () => void
 }) {
   const displayName = resolvePlaidDisplayName(transaction.merchantName, transaction.rawName)
-  const groups = [match.invoices, ...match.alternatives]
+  const groups = [match.invoices, ...match.alternatives.map((alternative) => alternative.invoices)]
   const [picked, setPicked] = useState<string>(groupKey(match.invoices))
   const first = match.invoices[0]
   // What the first invoice will still be owed after this deposit.

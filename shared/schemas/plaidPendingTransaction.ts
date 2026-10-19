@@ -81,7 +81,9 @@ export const PlaidInvoiceMatchSchema = z.object({
   feeAmount: z.number().nonnegative(),
   // Other invoice groups that fit just as well — non-empty means the review
   // card asks which one instead of suggesting `invoices`.
-  alternatives: z.array(z.array(PlaidInvoiceRefSchema).min(1).max(3)).default([]),
+  // Each a { invoices } object, not a bare list: Firestore can't store an
+  // array directly inside an array.
+  alternatives: z.array(z.object({ invoices: z.array(PlaidInvoiceRefSchema).min(1).max(3) })).default([]),
   // The invoices were already marked paid by hand — this deposit is that
   // money arriving, so the card offers "already recorded" (a dismissal with
   // dismissReason "invoice_already_paid") instead of "mark paid".
