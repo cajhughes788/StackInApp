@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils"
 import {
   formatInvoiceDate,
   formatInvoiceMoney,
+  formatInvoicePhone,
   invoiceDisplayStatus,
   type InvoiceDisplayStatus,
 } from "@shared/invoiceDisplay"
@@ -288,7 +289,10 @@ export function InvoicePreview({ invoice, settings }: { invoice: InvoiceType; se
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="truncate text-[15px] font-semibold">{settings?.businessName || "Your business name"}</div>
-            {settings?.businessEmail ? <div className="truncate text-[#5F6864]">{settings.businessEmail}</div> : null}
+            {settings?.businessEmail ? <div className="break-all text-[#5F6864]">{settings.businessEmail}</div> : null}
+            {settings?.businessPhone ? (
+              <div className="whitespace-nowrap tabular-nums text-[#5F6864]">{formatInvoicePhone(settings.businessPhone)}</div>
+            ) : null}
           </div>
           <div className="text-right">
             <div className="font-bold tracking-wide" style={{ color: accent }}>
@@ -297,13 +301,13 @@ export function InvoicePreview({ invoice, settings }: { invoice: InvoiceType; se
             <div className="text-[#5F6864]">#{invoice.number}</div>
           </div>
         </div>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2">
           {[
             ["BILLED TO", invoice.clientName],
             ["ISSUED", formatInvoiceDate(invoice.issueDate)],
             ["DUE", formatInvoiceDate(invoice.dueDate)],
           ].map(([label, value]) => (
-            <div key={label} className="min-w-0">
+            <div key={label} className={cn("min-w-0", label === "BILLED TO" && "col-span-2")}>
               <div className="text-[10px] font-semibold tracking-wide text-[#5F6864]">{label}</div>
               <div className="break-words">{value}</div>
             </div>

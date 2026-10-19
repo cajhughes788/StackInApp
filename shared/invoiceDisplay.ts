@@ -129,3 +129,15 @@ export function textColorOnAccent(hex: string): "#FFFFFF" | "#161B1E" {
   const luminance = 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5)
   return luminance > 0.179 ? "#161B1E" : "#FFFFFF"
 }
+
+// A business phone as it should read on an invoice: US numbers as
+// "(208) 714-2103" however they were typed; anything else (another country,
+// an extension) as typed.
+export function formatInvoicePhone(phone: string): string {
+  const trimmed = phone.trim()
+  if (trimmed.startsWith("+") && !trimmed.startsWith("+1")) return trimmed
+  const digits = trimmed.replace(/\D/g, "")
+  const national = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits
+  if (national.length !== 10) return trimmed
+  return `(${national.slice(0, 3)}) ${national.slice(3, 6)}-${national.slice(6)}`
+}

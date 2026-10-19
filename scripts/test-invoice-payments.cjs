@@ -518,4 +518,21 @@ run("the invoice page offers the deposit or everything, and a tip when asked", (
   assert.equal(renderPublicInvoicePage(open, tipsOn, "2026-10-05", {}).includes("payform"), false);
 });
 
+run("phone numbers read the same on every invoice; contact lines don't break", () => {
+  const { formatInvoicePhone } = require("../shared/invoiceDisplay.ts");
+  for (const typed of ["2087142103", "208-714-2103", "(208) 714 2103", "+1 208 714 2103", "1-208-714-2103"]) {
+    assert.equal(formatInvoicePhone(typed), "(208) 714-2103");
+  }
+  assert.equal(formatInvoicePhone("+44 20 7946 0958"), "+44 20 7946 0958");
+  assert.equal(formatInvoicePhone("208-714-2103 ext 4"), "208-714-2103 ext 4");
+  const page = renderPublicInvoicePage(
+    InvoiceSchema.parse(doc()),
+    InvoiceSettingsSchema.parse({ businessName: "The 521 App", businessEmail: "me@example.com", businessPhone: "2087142103" }),
+    "2026-10-05"
+  );
+  assert.ok(page.includes('class="email" href="mailto:me@example.com"'));
+  assert.ok(page.includes('class="phone" href="tel:2087142103">(208) 714-2103</a>'));
+  assert.ok(page.includes('class="billed"'));
+});
+
 process.stdout.write("invoice payments checks passed\n");

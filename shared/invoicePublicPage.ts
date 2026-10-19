@@ -1,6 +1,7 @@
 import {
   formatInvoiceDate,
   formatInvoiceMoney,
+  formatInvoicePhone,
   invoiceDisplayStatus,
   textColorOnAccent,
   type InvoiceDisplayStatus,
@@ -67,14 +68,28 @@ function shell(title: string, body: string, accent: string): string {
   .section { padding: 24px; }
   .section + .section { border-top: 1px solid var(--line); }
   .biz { display: flex; gap: 16px; align-items: center; }
-  .biz img { max-width: 96px; max-height: 64px; object-fit: contain; }
+  .biz > div { min-width: 0; }
+  .biz img { max-width: 96px; max-height: 64px; object-fit: contain; flex-shrink: 0; }
   .biz-name { font-size: 18px; font-weight: 600; }
   .biz a { color: var(--muted); text-decoration: none; }
-  .biz-contact { color: var(--muted); font-size: 14px; }
+  .biz-contact { color: var(--muted); font-size: 14px; line-height: 1.45; margin-top: 2px; }
+  .biz-contact a { display: block; }
+  .biz-contact .email { overflow-wrap: anywhere; }
+  .biz-contact .phone { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  @media (max-width: 480px) {
+    .biz { gap: 12px; }
+    .biz img { max-width: 64px; max-height: 48px; }
+  }
   .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
   h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -.01em; }
   .pill { display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; white-space: nowrap; }
-  .meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-top: 16px; }
+  /* Billed to on its own row, the dates side by side — three across on wider screens. */
+  .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; margin-top: 16px; }
+  .meta .billed { grid-column: 1 / -1; overflow-wrap: anywhere; }
+  @media (min-width: 560px) {
+    .meta { grid-template-columns: 2fr 1fr 1fr; }
+    .meta .billed { grid-column: auto; }
+  }
   .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
   .lines { width: 100%; border-collapse: collapse; }
   .lines td { padding: 10px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -211,16 +226,17 @@ export function renderPublicInvoicePage(
   const businessName = settings.businessName || "Invoice"
   const balance = invoiceBalanceDue(invoice)
 
+  // One line each, so a phone number never breaks across lines on a phone.
   const contact = [
     settings.businessEmail
-      ? `<a href="mailto:${escapeHtml(settings.businessEmail)}">${escapeHtml(settings.businessEmail)}</a>`
+      ? `<a class="email" href="mailto:${escapeHtml(settings.businessEmail)}">${escapeHtml(settings.businessEmail)}</a>`
       : "",
     settings.businessPhone
-      ? `<a href="tel:${escapeHtml(telHref(settings.businessPhone))}">${escapeHtml(settings.businessPhone)}</a>`
+      ? `<a class="phone" href="tel:${escapeHtml(telHref(settings.businessPhone))}">${escapeHtml(formatInvoicePhone(settings.businessPhone))}</a>`
       : "",
   ]
     .filter(Boolean)
-    .join(" · ")
+    .join("")
 
   const showPay = !!options.payPath && invoice.status === "sent" && !invoice.pendingPayment
   const paid = invoiceAmountPaid(invoice)
@@ -271,7 +287,7 @@ export function renderPublicInvoicePage(
       <span class="pill" style="background:${tone.bg};color:${tone.fg}">${escapeHtml(status.label)}</span>
     </div>
     <div class="meta">
-      <div><div class="label">Billed to</div>${escapeHtml(invoice.clientName)}</div>
+      <div class="billed"><div class="label">Billed to</div>${escapeHtml(invoice.clientName)}</div>
       <div><div class="label">Issued</div>${escapeHtml(formatInvoiceDate(invoice.issueDate))}</div>
       <div><div class="label">Due</div>${escapeHtml(formatInvoiceDate(invoice.dueDate))}</div>
     </div>

@@ -3,6 +3,7 @@
 import type { jsPDF as JsPDF } from "jspdf"
 import {
   formatInvoiceDate,
+  formatInvoicePhone,
   formatInvoiceMoney,
   invoiceDisplayStatus,
   invoiceFileName,
@@ -77,7 +78,7 @@ export async function buildInvoicePdf(invoice: InvoiceType, settings: InvoiceSet
   pdf.setFont("helvetica", "bold").setFontSize(15).setTextColor(...INK)
   pdf.text(settings.businessName || " ", textLeft, y + 14)
   pdf.setFont("helvetica", "normal").setFontSize(10).setTextColor(...MUTED)
-  const contactLines = [settings.businessEmail, settings.businessPhone].filter(Boolean)
+  const contactLines = [settings.businessEmail, settings.businessPhone ? formatInvoicePhone(settings.businessPhone) : ""].filter(Boolean)
   contactLines.forEach((line, index) => pdf.text(line, textLeft, y + 30 + index * 13))
 
   pdf.setFont("helvetica", "bold").setFontSize(24).setTextColor(...accent)
