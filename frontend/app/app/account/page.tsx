@@ -17,6 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useToast } from "@/hooks/use-toast"
+import { FieldError } from "@/components/ui/field-error"
 import { API_ENDPOINTS, apiFetch } from "@/lib/api"
 import StackInHeader from "@/components/stackin-header"
 import { debugError } from "@/lib/debugLoop"
@@ -38,6 +39,7 @@ export default function AccountPage() {
 
   const [showConfirmDelete, setShowConfirmDelete] = useState(false)
   const [deletePassword, setDeletePassword] = useState("")
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const [isSchedulingDeletion, setIsSchedulingDeletion] = useState(false)
   const [isCancellingDeletion, setIsCancellingDeletion] = useState(false)
   const [isResetting, setIsResetting] = useState(false)
@@ -52,20 +54,11 @@ const handleLogout = async () => {
 
   /** Safe Password Reset */
   const handlePasswordReset = async () => {
-    if (!user?.email) {
-      toast({
-        title: "No email found",
-        description: "Unable to send reset email.",
-        variant: "destructive",
-      })
-      return
-    }
-
     const auth = getAuthSafe()
-    if (!auth) {
+    if (!user?.email || !auth) {
       toast({
-        title: "Auth unavailable",
-        description: "Please refresh the page and try again.",
+        title: "Couldn't send the reset email",
+        description: "Refresh the page and try again.",
         variant: "destructive",
       })
       return
@@ -80,8 +73,8 @@ const handleLogout = async () => {
       })
     } catch {
       toast({
-        title: "Error",
-        description: "Failed to send password reset email",
+        title: "Couldn't send the reset email",
+        description: "Check your connection and try again.",
         variant: "destructive",
       })
     } finally {
@@ -125,33 +118,17 @@ const handleLogout = async () => {
 
   const handleDeleteAccount = async () => {
     const auth = getAuthSafe()
-    if (!auth || !auth.currentUser) {
-      toast({
-        title: "Auth unavailable",
-        description: "Please refresh and sign in again.",
-        variant: "destructive",
-      })
-      return
-    }
-
     if (!user) return
-    if (!user.email) {
-      toast({
-        title: "Missing email",
-        description: "We could not verify your account email for re-authentication.",
-        variant: "destructive",
-      })
+    if (!auth?.currentUser || !user.email) {
+      setDeleteError("Something went wrong. Sign out, sign back in and try again.")
       return
     }
 
     if (!deletePassword) {
-      toast({
-        title: "Password required",
-        description: "Enter your password to confirm account deletion.",
-        variant: "destructive",
-      })
+      setDeleteError("Enter your password to confirm.")
       return
     }
+    setDeleteError(null)
 
     setIsSchedulingDeletion(true)
 
@@ -191,11 +168,7 @@ const handleLogout = async () => {
         })
       })
     } catch (err: any) {
-      toast({
-        title: "Error",
-        description: err.message || "Failed to schedule account deletion",
-        variant: "destructive",
-      })
+      setDeleteError(err.message || "Couldn't schedule the deletion. Try again.")
     } finally {
       setIsSchedulingDeletion(false)
     }
@@ -215,8 +188,8 @@ const handleLogout = async () => {
       })
     } catch (err: any) {
       toast({
-        title: "Error",
-        description: err.message || "Failed to undo account deletion request",
+        title: "Couldn't undo the deletion request",
+        description: err.message || "Check your connection and try again.",
         variant: "destructive",
       })
     } finally {
@@ -395,9 +368,14 @@ const handleLogout = async () => {
                 id="delete-password"
                 type="password"
                 value={deletePassword}
-                onChange={(e) => setDeletePassword(e.target.value)}
+                onChange={(e) => {
+                  setDeletePassword(e.target.value)
+                  setDeleteError(null)
+                }}
                 placeholder="Enter your password"
+                aria-invalid={!!deleteError}
               />
+              <FieldError message={deleteError} />
             </div>
           </div>
           <div className="flex flex-col gap-3">
@@ -418,6 +396,7 @@ const handleLogout = async () => {
               onClick={() => {
                 setShowConfirmDelete(false)
                 setDeletePassword("")
+                setDeleteError(null)
               }}
             >
               Cancel

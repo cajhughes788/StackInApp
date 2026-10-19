@@ -736,10 +736,8 @@ export default function ExpenseForm() {
       event.preventDefault()
       if (submitting) return
 
-      if (!activeWorkspaceId) {
-        alert("No active workspace selected.")
-        return
-      }
+      // The form only opens inside a workspace.
+      if (!activeWorkspaceId) return
 
       setSubmitting(true)
 

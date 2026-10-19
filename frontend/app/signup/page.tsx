@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { FirebaseError } from "firebase/app";
 import { Eye, EyeOff } from "lucide-react";
+import { FieldError } from "@/components/ui/field-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -71,25 +72,16 @@ export default function SignupPage() {
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [agreed, setAgreed] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [confirmError, setConfirmError] = useState<string | null>(null);
+    const [agreeError, setAgreeError] = useState<string | null>(null);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (password !== confirmPassword) {
-            toast({
-                title: "Passwords don't match",
-                description: "Re-enter your password so both fields match.",
-                variant: "destructive",
-            });
+        const mismatch = password !== confirmPassword;
+        setConfirmError(mismatch ? "Passwords don't match." : null);
+        setAgreeError(agreed ? null : "Agree to the Terms and Privacy Policy to continue.");
+        if (mismatch || !agreed)
             return;
-        }
-        if (!agreed) {
-            toast({
-                title: "Agreement required",
-                description: "Please agree to the Terms and Conditions and Privacy Policy to continue.",
-                variant: "destructive",
-            });
-            return;
-        }
         setLoading(true);
         try {
             const auth = getAuthSafe();
@@ -172,15 +164,16 @@ export default function SignupPage() {
             <div className="space-y-2">
               <Label htmlFor="confirm-password">Confirm password</Label>
               <div className="relative">
-                <Input id="confirm-password" type={showConfirmPassword ? "text" : "password"} autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Re-enter your password" required/>
+                <Input id="confirm-password" type={showConfirmPassword ? "text" : "password"} autoComplete="new-password" value={confirmPassword} onChange={(e) => { setConfirmPassword(e.target.value); setConfirmError(null); }} placeholder="Re-enter your password" aria-invalid={!!confirmError} required/>
                 <button type="button" onClick={() => setShowConfirmPassword((current) => !current)} className="absolute right-3 top-2.5 text-muted-foreground">
                   {showConfirmPassword ? <EyeOff size={18}/> : <Eye size={18}/>}
                 </button>
               </div>
+              <FieldError message={confirmError}/>
             </div>
 
             <div className="flex items-start gap-3 rounded-md border border-border p-4 text-sm">
-              <Checkbox id="agree" checked={agreed} onCheckedChange={(checked) => setAgreed(checked === true)} className="mt-0.5"/>
+              <Checkbox id="agree" checked={agreed} onCheckedChange={(checked) => { setAgreed(checked === true); setAgreeError(null); }} className="mt-0.5"/>
               <label htmlFor="agree" className="leading-relaxed">
                 I have read and agree to the{" "}
                 <Link href="/terms" className="text-primary underline underline-offset-2">Terms and Conditions</Link>
@@ -188,6 +181,7 @@ export default function SignupPage() {
                 <Link href="/privacy" className="text-primary underline underline-offset-2">Privacy Policy</Link>.
               </label>
             </div>
+            <FieldError message={agreeError} className="-mt-2"/>
 
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "Creating account..." : "Continue"}

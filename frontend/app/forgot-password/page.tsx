@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 import { useToast } from "@/hooks/use-toast"
+import { FieldError } from "@/components/ui/field-error"
 import StackInMark from "@/components/stackin-mark"
 
 export default function ForgotPasswordPage() {
@@ -18,6 +19,7 @@ export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("")
   const [isSending, setIsSending] = useState(false)
   const [redirecting, setRedirecting] = useState(false)
+  const [emailError, setEmailError] = useState<string | null>(null)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -25,11 +27,7 @@ export default function ForgotPasswordPage() {
 
     const auth = getAuthSafe() // ✅ safely grab auth instance
     if (!auth) {
-      toast({
-        title: "Auth unavailable",
-        description: "Please refresh the page and try again.",
-        variant: "destructive",
-      })
+      setEmailError("Something went wrong. Refresh the page and try again.")
       return
     }
 
@@ -57,11 +55,7 @@ export default function ForgotPasswordPage() {
       // account" from a real failure, or this becomes an oracle for
       // checking who has a 521 account by email address.
       if (err instanceof FirebaseError && err.code === "auth/invalid-email") {
-        toast({
-          title: "Email looks off",
-          description: "Please enter a valid email address and try again.",
-          variant: "destructive",
-        })
+        setEmailError("That email doesn't look right.")
       } else {
         showSentAndRedirect()
       }
@@ -92,12 +86,17 @@ export default function ForgotPasswordPage() {
                 type="email"
                 placeholder="you@example.com"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value)
+                  setEmailError(null)
+                }}
                 autoComplete="email"
+                aria-invalid={!!emailError}
                 className="h-11 rounded-xl"
                 required
                 disabled={isSending || redirecting}
               />
+              <FieldError message={emailError} />
             </div>
 
             <Button

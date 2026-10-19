@@ -14,7 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
-import { useToast } from "@/hooks/use-toast"
+import { FieldError } from "@/components/ui/field-error"
 import { submitSupportReport } from "@/lib/api/supportApi"
 import { ApiError } from "@/lib/api/core/errors"
 import {
@@ -69,7 +69,7 @@ export default function SupportDialog({
   const [message, setMessage] = useState("")
   const [isSending, setIsSending] = useState(false)
   const [status, setStatus] = useState<"form" | "success">("form")
-  const { toast } = useToast()
+  const [formError, setFormError] = useState<string | null>(null)
 
   const context = useMemo(
     () => collectSupportContext({ route, workspace }),
@@ -111,6 +111,7 @@ export default function SupportDialog({
       setSelectedKind("help")
       setIsSending(false)
       setStatus("form")
+      setFormError(null)
     }
 
     onOpenChange(nextOpen)
@@ -120,15 +121,12 @@ export default function SupportDialog({
     const trimmedMessage = message.trim()
 
     if (!trimmedMessage) {
-      toast({
-        title: "Add a short message",
-        description: "Tell us what happened before sending.",
-        variant: "destructive",
-      })
+      setFormError("Tell us what happened before sending.")
       return
     }
 
     try {
+      setFormError(null)
       setIsSending(true)
       await submitSupportReport({
         kind: selectedKind,
@@ -137,14 +135,11 @@ export default function SupportDialog({
       })
       setStatus("success")
     } catch (error) {
-      toast({
-        title: "Could not send",
-        description:
-          error instanceof ApiError && error.message
-            ? error.message
-            : "Please try again.",
-        variant: "destructive",
-      })
+      setFormError(
+        error instanceof ApiError && error.message
+          ? error.message
+          : "Couldn't send. Check your connection and try again."
+      )
     } finally {
       setIsSending(false)
     }
@@ -204,10 +199,15 @@ export default function SupportDialog({
             <div className="space-y-2">
               <Textarea
                 value={message}
-                onChange={(event) => setMessage(event.target.value)}
+                onChange={(event) => {
+                  setMessage(event.target.value)
+                  setFormError(null)
+                }}
                 placeholder={selectedOption.prompt}
                 className="min-h-32"
+                aria-invalid={!!formError}
               />
+              <FieldError message={formError} />
             </div>
 
             <DialogFooter>

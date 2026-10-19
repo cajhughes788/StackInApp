@@ -20,6 +20,7 @@ import {
   CardContent,
 } from "@/components/ui/card"
 import { useToast } from "@/hooks/use-toast"
+import { FieldError } from "@/components/ui/field-error"
 import { Eye, EyeOff } from "lucide-react"
 import StackInMark from "@/components/stackin-mark"
 
@@ -35,6 +36,8 @@ export default function ResetPasswordPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [confirmError, setConfirmError] = useState<string | null>(null)
+  const [formError, setFormError] = useState<string | null>(null)
 
 useEffect(() => {
   // ⭐ Read oobCode manually from the real URL (browser-only, never SSR)
@@ -51,8 +54,8 @@ useEffect(() => {
   const auth = getAuthSafe()
   if (!auth) {
     toast({
-      title: "Auth unavailable",
-      description: "Please refresh the page and try again.",
+      title: "Couldn't open this link",
+      description: "Refresh the page and try again.",
       variant: "destructive",
     })
     router.push("/forgot-password")
@@ -77,22 +80,15 @@ useEffect(() => {
     e.preventDefault()
     if (!oobCode || !newPassword || !confirmPassword) return
 
+    setFormError(null)
     if (newPassword !== confirmPassword) {
-      toast({
-        title: "Passwords do not match",
-        description: "Please re-enter your passwords.",
-        variant: "destructive",
-      })
+      setConfirmError("Passwords don't match.")
       return
     }
 
     const auth = getAuthSafe() // ✅ safe guard here too
     if (!auth) {
-      toast({
-        title: "Auth unavailable",
-        description: "Please refresh the page and try again.",
-        variant: "destructive",
-      })
+      setFormError("Something went wrong. Refresh the page and try again.")
       return
     }
 
@@ -101,11 +97,7 @@ useEffect(() => {
       await confirmPasswordReset(auth, oobCode, newPassword)
       router.push("/login")
     } catch (err: any) {
-      toast({
-        title: "Error resetting password",
-        description: err.message || "Something went wrong. Please try again.",
-        variant: "destructive",
-      })
+      setFormError(err.message || "Couldn't save your new password. Try again.")
     } finally {
       setIsSubmitting(false)
     }
@@ -173,9 +165,13 @@ useEffect(() => {
                   id="confirmPassword"
                   type={showConfirmPassword ? "text" : "password"}
                   value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  onChange={(e) => {
+                    setConfirmPassword(e.target.value)
+                    setConfirmError(null)
+                  }}
                   autoComplete="new-password"
                   className="h-11 rounded-xl pr-11"
+                  aria-invalid={!!confirmError}
                   required
                 />
                 <button
@@ -187,11 +183,13 @@ useEffect(() => {
                   {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </div>
+              <FieldError message={confirmError} />
             </div>
 
             <Button type="submit" className="h-11 w-full rounded-full" disabled={isSubmitting}>
               {isSubmitting ? "Saving..." : "Save new password"}
             </Button>
+            <FieldError message={formError} className="text-center" />
           </form>
         </CardContent>
       </Card>

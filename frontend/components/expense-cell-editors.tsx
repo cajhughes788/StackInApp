@@ -7,6 +7,7 @@
 // caller: the grid arms a cell on the first tap and opens it on the second, a
 // category row opens on the first tap.
 
+import { FieldError } from "@/components/ui/field-error"
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { AlertCircle } from "lucide-react"
 import { PopoverTrigger, Popover } from "@/components/ui/popover"
@@ -76,10 +77,18 @@ export function ExpenseFieldEditor({
   independentSettings: VisibilityContext["independentSettings"]
 }) {
   const [value, setValue] = useState(() => currentFieldValue(expense, field))
+  const [fieldError, setFieldError] = useState<string | null>(null)
   // Each opening starts from the expense's current value.
   useEffect(() => {
-    if (isOpen) setValue(currentFieldValue(expense, field))
+    if (isOpen) {
+      setValue(currentFieldValue(expense, field))
+      setFieldError(null)
+    }
   }, [isOpen])
+  const changeValue = (next: string) => {
+    setValue(next)
+    setFieldError(null)
+  }
 
   const expenseCategoryOptions = useMemo(
     () =>
@@ -111,7 +120,7 @@ export function ExpenseFieldEditor({
     if (field === "amount") {
       const num = Number(value)
       if (isNaN(num)) {
-        toast({ title: "Invalid amount", description: "Enter a valid number.", variant: "destructive" })
+        setFieldError("Enter a number.")
         return
       }
       patch.amount = num
@@ -120,7 +129,7 @@ export function ExpenseFieldEditor({
     if (field === "account") {
       const normalizedAccount = resolveExpenseCategoryLabel(value, customExpenseCategories)
       if (!normalizedAccount) {
-        toast({ title: "Invalid category", description: "Please choose a valid expense category.", variant: "destructive" })
+        setFieldError("Choose one of the categories below.")
         return
       }
       patch.account = normalizedAccount
@@ -135,7 +144,7 @@ export function ExpenseFieldEditor({
       onSaved()
     } catch (error) {
       toast({
-        title: "Save failed",
+        title: "Couldn't save your change",
         description: error instanceof Error ? error.message : "Could not save your change. Please try again.",
         variant: "destructive",
       })
@@ -176,14 +185,15 @@ export function ExpenseFieldEditor({
         {field === "vendor" ? (
           <>
             <div className="text-sm font-medium">Edit Vendor</div>
-            <Input value={value} onChange={(evt) => setValue(evt.target.value)} />
+            <Input value={value} onChange={(evt) => changeValue(evt.target.value)} />
           </>
         ) : null}
 
         {field === "amount" ? (
           <>
             <div className="text-sm font-medium">Edit Amount</div>
-            <Input inputMode="decimal" className="text-right" value={value} onChange={(evt) => setValue(evt.target.value)} />
+            <Input inputMode="decimal" className="text-right" value={value} onChange={(evt) => changeValue(evt.target.value)} aria-invalid={!!fieldError} />
+            <FieldError message={fieldError} />
           </>
         ) : null}
 
@@ -192,16 +202,18 @@ export function ExpenseFieldEditor({
             <div className="text-sm font-medium">Edit Category</div>
             <Input
               value={value}
-              onChange={(evt) => setValue(evt.target.value)}
+              onChange={(evt) => changeValue(evt.target.value)}
               placeholder="Start typing to choose a category"
+              aria-invalid={!!fieldError}
             />
+            <FieldError message={fieldError} />
             <div className="max-h-44 overflow-y-auto rounded-md border border-border">
               {categorySuggestions.map((category) => (
                 <button
                   key={category}
                   type="button"
                   className="block w-full border-b border-border px-3 py-2 text-left text-sm last:border-b-0 hover:bg-accent"
-                  onClick={() => setValue(category)}
+                  onClick={() => changeValue(category)}
                 >
                   {category}
                 </button>

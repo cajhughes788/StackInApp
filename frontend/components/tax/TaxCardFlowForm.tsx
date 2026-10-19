@@ -1286,14 +1286,7 @@ export default function TaxCardFlowForm({ onClose }: { onClose?: () => void }) {
   async function persistProfile(options: {
     closeOnSuccess: boolean;
   }): Promise<boolean> {
-    if (!activeWorkspaceId) {
-      toast({
-        title: "Save failed",
-        description: "No active workspace selected.",
-        variant: "destructive",
-      });
-      return false;
-    }
+    if (!activeWorkspaceId) return false;
 
     const marylandResidentSelectedNow =
       formData.state === "Maryland" ||
@@ -1337,9 +1330,10 @@ export default function TaxCardFlowForm({ onClose }: { onClose?: () => void }) {
           formData.pennsylvaniaWorkPsdCode?.trim() || undefined,
       });
     } catch (err: any) {
+      console.warn("TaxCardFlowForm: tax profile failed validation", err);
       toast({
-        title: "Save failed",
-        description: err.message || "Could not save tax profile",
+        title: "Couldn't save your tax details",
+        description: "Check your answers and try again.",
         variant: "destructive",
       });
       return false;
@@ -1361,8 +1355,8 @@ export default function TaxCardFlowForm({ onClose }: { onClose?: () => void }) {
     } catch (err: any) {
       setTaxProfileStore(activeWorkspaceId, previousTaxProfile);
       toast({
-        title: "Background save failed",
-        description: err.message || "Could not save tax profile",
+        title: "Couldn't save your tax details",
+        description: err.message || "Check your connection and try again.",
         variant: "destructive",
       });
       return false;

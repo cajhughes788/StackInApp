@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { useAccountAuthorityState } from "@/contexts/account-authority-context"
 import { useToast } from "@/hooks/use-toast"
+import { FieldError } from "@/components/ui/field-error"
 import { API_ENDPOINTS, apiFetch, createWorkspaceAPI } from "@/lib/api"
 import { detectNativeSignupCountryEligibility } from "@/lib/mobile/nativeSignupEligibility"
 import { useAuth } from "@/contexts/auth-context"
@@ -50,6 +51,8 @@ export default function WelcomePage() {
   const [name, setName] = useState("")
   const [type, setType] = useState<WorkspaceType | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [nameError, setNameError] = useState<string | null>(null)
+  const [typeError, setTypeError] = useState<string | null>(null)
   const [requestedAddWorkspaceMode, setRequestedAddWorkspaceMode] = useState(false)
   const lastBillingRefreshAtRef = useRef(0)
   const [nativeCheckoutAllowed, setNativeCheckoutAllowed] = useState(false)
@@ -73,6 +76,8 @@ export default function WelcomePage() {
 
         return refreshedAuthority
       } catch (err: any) {
+        // Refreshes on focus and resume fail quietly; the next one retries.
+        if (options.silent) return null
         toast({
           title: isNativeApp ? "Access error" : "Subscription error",
           description:
@@ -155,14 +160,8 @@ export default function WelcomePage() {
   }, [loadAccountAuthority, router])
 
   const handleOpenCheckout = async () => {
-    if (!selectedTier) {
-      toast({
-        title: "Choose a plan",
-        description: "Pick the plan that fits your work to continue.",
-        variant: "destructive",
-      })
-      return
-    }
+    // The button stays disabled until a plan is picked.
+    if (!selectedTier) return
 
     try {
       setOpeningCheckout(true)
@@ -231,42 +230,14 @@ export default function WelcomePage() {
   }, [allowedWorkspaceTypes, hasSingleWorkspaceType])
 
   const handleCreateWorkspace = async () => {
-    if (!name.trim()) {
-      toast({
-        title: "Workspace name required",
-        description: "Please enter a name for your workspace.",
-        variant: "destructive",
-      })
-      return
-    }
+    setNameError(name.trim() ? null : "Enter a name for this workspace.")
+    setTypeError(type ? null : "Choose a workspace type.")
+    if (!name.trim()) return
 
-    if (!canCreateAnotherWorkspace) {
-      toast({
-        title: hasReachedWorkspaceLimit
-          ? "Workspace limit reached"
-          : isNativeApp
-            ? "Access unavailable"
-            : "Subscription required",
-        description: hasReachedWorkspaceLimit
-          ? isNativeApp
-            ? "This 521 account has reached its current workspace limit."
-            : "Your current subscription has reached its workspace limit."
-          : isNativeApp
-            ? "This mobile app is for existing 521 customers with mobile access."
-            : "Create your subscription first, then come back here to set up your workspace.",
-        variant: "destructive",
-      })
-      return
-    }
+    // The button is disabled and the reason shown under the type picker.
+    if (!canCreateAnotherWorkspace) return
 
-    if (!type) {
-      toast({
-        title: "Workspace type required",
-        description: "Please select a workspace type.",
-        variant: "destructive",
-      })
-      return
-    }
+    if (!type) return
 
     try {
       setIsSubmitting(true)
@@ -396,9 +367,14 @@ export default function WelcomePage() {
               <Input
                 placeholder="e.g. Main Job, Freelance, Barber Shop"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => {
+                  setName(e.target.value)
+                  setNameError(null)
+                }}
                 disabled={isSubmitting}
+                aria-invalid={!!nameError}
               />
+              <FieldError message={nameError} />
             </div>
 
             <div className="space-y-2">
@@ -435,6 +411,8 @@ export default function WelcomePage() {
                   )}
                 </div>
               )}
+
+              <FieldError message={type ? null : typeError} />
 
               {!canCreateAnotherWorkspace && (
                 <div className="space-y-3">

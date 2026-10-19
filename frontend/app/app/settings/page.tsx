@@ -521,13 +521,6 @@ export default function SettingsPage() {
                         authLoading,
                     });
                 }
-                if (source === "manual") {
-                    toast({
-                        title: "Not signed in",
-                        description: "You must be signed in to save settings.",
-                        variant: "destructive",
-                    });
-                }
                 return false;
             }
             if (!activeWorkspaceId) {
@@ -535,13 +528,6 @@ export default function SettingsPage() {
                     debugError("android-settings-save", "persist_blocked_no_workspace", {
                         source,
                         authLoading,
-                    });
-                }
-                if (source === "manual") {
-                    toast({
-                        title: "Save failed",
-                        description: "No active workspace selected.",
-                        variant: "destructive",
                     });
                 }
                 return false;
@@ -556,7 +542,8 @@ export default function SettingsPage() {
                         validationError,
                     });
                 }
-                if (source === "manual") {
+                // First-time setup lists what's missing above the button.
+                if (source === "manual" && !isInitialSettingsSetup) {
                     toast({
                         title: "Cannot save settings",
                         description: getSettingsValidationErrors(nextFormData).join(" "),
@@ -673,7 +660,7 @@ export default function SettingsPage() {
                 saveTraceRef.current?.error("settings_save.failed", err);
                 if (source !== "autosave" && source !== "flush") {
                     toast({
-                        title: "Save failed",
+                        title: "Couldn't save your settings",
                         description: err?.message ?? "Could not save settings.",
                         variant: "destructive",
                     });

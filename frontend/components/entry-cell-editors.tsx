@@ -113,7 +113,7 @@ export type CellEditorControl = {
 
 function savedFailedToast(description = "We could not save this change. Please try again.") {
     toast({
-        title: "Save failed",
+        title: "Couldn't save your change",
         description,
         variant: "destructive",
     });

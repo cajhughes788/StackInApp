@@ -46,6 +46,7 @@ import {
 import { createRecurringRule } from "@/lib/domain/recurringRulesService"
 import { cadenceLabel } from "@shared/recurringSchedule"
 import { useToast } from "@/hooks/use-toast"
+import { FieldError } from "@/components/ui/field-error"
 import { useReviewRequestNonce } from "@/lib/push/deepLinkStore"
 import { useReviewCountsStore } from "@/lib/stores/useReviewCountsStore"
 
@@ -106,6 +107,7 @@ function TransactionReviewCard({
   isSelected,
   onToggleSelected,
   categoryValue,
+  categoryMissing,
   expenseCategoryOptions,
   onCategoryChange,
   onConfirm,
@@ -118,6 +120,7 @@ function TransactionReviewCard({
   isSelected: boolean
   onToggleSelected: () => void
   categoryValue: string | undefined
+  categoryMissing: boolean
   expenseCategoryOptions: string[]
   onCategoryChange: (value: string) => void
   onConfirm: () => void
@@ -181,6 +184,7 @@ function TransactionReviewCard({
             ))}
           </SelectContent>
         </Select>
+        <FieldError message={categoryMissing ? "Choose a category first." : null} className="mt-1.5" />
       </div>
 
       {isReceiptRowOpen ? (
@@ -271,6 +275,9 @@ export default function PlaidPendingTransactionsPanel() {
   const receiptCapture = useReceiptCapture(activeWorkspaceId)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkCategory, setBulkCategory] = useState<string>("")
+  // Rows (and the bulk bar) where Business was tapped without a category.
+  const [categoryMissingIds, setCategoryMissingIds] = useState<Set<string>>(new Set())
+  const [bulkCategoryMissing, setBulkCategoryMissing] = useState(false)
   const [isBulkWorking, setIsBulkWorking] = useState(false)
 
   const loadTransactions = useCallback(async () => {
@@ -483,7 +490,7 @@ export default function PlaidPendingTransactionsPanel() {
     if (!activeWorkspaceId) return
     const account = selectedAccount[transaction.id] ?? transaction.suggestedExpenseAccount ?? undefined
     if (isBusiness && !account) {
-      toast({ title: "Choose an expense category first", variant: "destructive" })
+      setCategoryMissingIds((prev) => new Set(prev).add(transaction.id))
       return
     }
     const receiptAssetId =
@@ -536,7 +543,7 @@ export default function PlaidPendingTransactionsPanel() {
   async function handleBulkDecision(isBusiness: boolean, alwaysPersonal = false) {
     if (!activeWorkspaceId || selectedIds.size === 0) return
     if (isBusiness && !bulkCategory) {
-      toast({ title: "Choose an expense category first", variant: "destructive" })
+      setBulkCategoryMissing(true)
       return
     }
     const targets = transactions.filter((t) => selectedIds.has(t.id))
@@ -652,7 +659,13 @@ export default function PlaidPendingTransactionsPanel() {
       {selectedIds.size > 0 ? (
         <div className="flex flex-wrap items-center gap-2 rounded-[18px] bg-card border border-card-border p-3">
           <span className="text-sm font-medium">{selectedIds.size} selected</span>
-          <Select value={bulkCategory} onValueChange={setBulkCategory}>
+          <Select
+            value={bulkCategory}
+            onValueChange={(value) => {
+              setBulkCategory(value)
+              setBulkCategoryMissing(false)
+            }}
+          >
             <SelectTrigger className="w-[200px] rounded-xl border-0 bg-muted shadow-none">
               <SelectValue placeholder="Choose expense category" />
             </SelectTrigger>
@@ -681,6 +694,7 @@ export default function PlaidPendingTransactionsPanel() {
           >
             <X className="h-4 w-4 mr-1" /> Not business
           </Button>
+          <FieldError message={bulkCategoryMissing ? "Choose a category first." : null} className="basis-full" />
         </div>
       ) : null}
 
@@ -692,10 +706,17 @@ export default function PlaidPendingTransactionsPanel() {
             isSelected={selectedIds.has(transaction.id)}
             onToggleSelected={() => toggleSelected(transaction.id)}
             categoryValue={selectedAccount[transaction.id] ?? transaction.suggestedExpenseAccount ?? undefined}
+            categoryMissing={categoryMissingIds.has(transaction.id)}
             expenseCategoryOptions={expenseCategoryOptions}
-            onCategoryChange={(value) =>
+            onCategoryChange={(value) => {
               setSelectedAccount((prev) => ({ ...prev, [transaction.id]: value }))
-            }
+              setCategoryMissingIds((prev) => {
+                if (!prev.has(transaction.id)) return prev
+                const next = new Set(prev)
+                next.delete(transaction.id)
+                return next
+              })
+            }}
             onConfirm={() => handleConfirmClick(transaction)}
             onDismiss={() => void handleDecision(transaction, false)}
             isReceiptRowOpen={receiptRowId === transaction.id}

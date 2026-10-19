@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
+import { FieldError } from "@/components/ui/field-error"
 import { deleteWorkspaceAPI, updateWorkspaceAPI } from "@/lib/api/workspaceApi"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import { useSettingsStore } from "@/lib/stores/useSettingsStore"
@@ -49,6 +50,7 @@ export function WorkspaceNameCard() {
     workspaceState.status === "ready" ? workspaceState.activeWorkspace : null
   const [workspaceName, setWorkspaceName] = useState("")
   const [isSavingWorkspaceName, setIsSavingWorkspaceName] = useState(false)
+  const [workspaceNameError, setWorkspaceNameError] = useState<string | null>(null)
 
   useEffect(() => {
     setWorkspaceName(activeWorkspace?.name ?? "")
@@ -59,11 +61,7 @@ export function WorkspaceNameCard() {
 
     const nextName = workspaceName.trim()
     if (!nextName) {
-      toast({
-        title: "Workspace name required",
-        description: "Enter a workspace name before saving.",
-        variant: "destructive",
-      })
+      setWorkspaceNameError("Enter a workspace name.")
       return
     }
 
@@ -101,9 +99,14 @@ export function WorkspaceNameCard() {
           <Input
             id="workspace-name"
             value={workspaceName}
-            onChange={(e) => setWorkspaceName(e.target.value)}
+            onChange={(e) => {
+              setWorkspaceName(e.target.value)
+              setWorkspaceNameError(null)
+            }}
             placeholder="Workspace name"
+            aria-invalid={!!workspaceNameError}
           />
+          <FieldError message={workspaceNameError} />
         </div>
         <Button
           variant="outline"
@@ -156,7 +159,6 @@ export function AppearanceCard() {
 
 /** Delete a workspace — any of yours, defaulting to the active one. */
 export function WorkspaceDeleteCard() {
-  const { toast } = useToast()
   const workspaceState = useWorkspaceStore((s) => s.state)
   const removeWorkspace = useWorkspaceStore((s) => s.removeWorkspace)
   const clearSettings = useSettingsStore((s) => s.clear)
@@ -174,6 +176,7 @@ export function WorkspaceDeleteCard() {
   const [workspaceDeleteConfirmation, setWorkspaceDeleteConfirmation] = useState("")
   const [isDeletingWorkspace, setIsDeletingWorkspace] = useState(false)
   const [workspaceDeleteNotice, setWorkspaceDeleteNotice] = useState<string | null>(null)
+  const [workspaceDeleteError, setWorkspaceDeleteError] = useState<string | null>(null)
 
   const activeWorkspace =
     workspaceState.status === "ready" ? workspaceState.activeWorkspace : null
@@ -211,30 +214,17 @@ export function WorkspaceDeleteCard() {
     setShowDeleteWorkspaceDialog(false)
     setWorkspaceDeleteReason("")
     setWorkspaceDeleteConfirmation("")
+    setWorkspaceDeleteError(null)
   }
 
   const handleDeleteWorkspace = async () => {
-    if (!workspaceToDelete) {
-      toast({
-        title: "Choose a workspace",
-        description: "Select the workspace you want to delete.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    if (!isWorkspaceDeleteConfirmed) {
-      toast({
-        title: "Confirmation required",
-        description: "Enter the workspace name and tell us why you're deleting it.",
-        variant: "destructive",
-      })
-      return
-    }
+    // The delete button stays disabled until both are filled in.
+    if (!workspaceToDelete || !isWorkspaceDeleteConfirmed) return
 
     try {
       setIsDeletingWorkspace(true)
       setWorkspaceDeleteNotice(null)
+      setWorkspaceDeleteError(null)
       const deletedWorkspaceId = workspaceToDelete.id
       const deletedWorkspaceName = workspaceToDelete.name
       const remainingWorkspaces = availableWorkspaces.filter(
@@ -321,11 +311,7 @@ export function WorkspaceDeleteCard() {
             : null,
         details: typeof err?.details === "string" ? err.details : null,
       })
-      toast({
-        title: "Unable to delete workspace",
-        description: err?.message || "Please try again.",
-        variant: "destructive",
-      })
+      setWorkspaceDeleteError(err?.message || "Couldn't delete the workspace. Try again.")
     } finally {
       debugLog("workspace-delete", "delete_flow_finished", {
         workspaceId: workspaceToDelete?.id ?? null,
@@ -423,6 +409,7 @@ export function WorkspaceDeleteCard() {
             >
               {isDeletingWorkspace ? "Deleting..." : "Delete workspace permanently"}
             </Button>
+            <FieldError message={workspaceDeleteError} className="text-center" />
             <Button
               variant="outline"
               onClick={resetWorkspaceDeleteDialog}
