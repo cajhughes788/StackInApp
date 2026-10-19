@@ -13,6 +13,12 @@ const config: CapacitorConfig = {
       // presents regardless of this config.
       presentationOptions: ["badge", "sound", "alert"],
     },
+    LocalNotifications: {
+      // Android only: the 521 mark (res/drawable/ic_stat_521.xml) instead of
+      // the launcher tile, tinted brand green. iOS always uses the app icon.
+      smallIcon: "ic_stat_521",
+      iconColor: "#2FA866",
+    },
     CapacitorSQLite: {
       iosDatabaseLocation: 'Library/CapacitorDatabase',
       iosIsEncryption: true,

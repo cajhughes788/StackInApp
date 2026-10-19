@@ -20,6 +20,14 @@
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
 
+        <!-- Notification icon: 521 mark for push (FCM) notifications -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_stat_521" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/notification_accent" />
+
         <!-- Main Activity -->
         <activity
             android:name=".MainActivity"
