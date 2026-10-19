@@ -17,9 +17,9 @@ import {
 } from "@shared/schemas/invoice"
 import type { PlaidInvoiceMatch } from "@shared/schemas/plaidPendingTransaction"
 import {
+  manualPaymentTargets,
+  openInvoiceTargets,
   pickPaidInvoices,
-  selectManuallyPaidInvoiceCandidates,
-  selectOpenInvoiceCandidates,
   MANUAL_PAID_LOOKBACK_DAYS,
   REFUND_PAYMENT_LOOKAHEAD_DAYS,
   matchInvoiceRefundPayment,
@@ -29,7 +29,7 @@ import {
   type RefundPaymentCandidate,
 } from "@shared/invoiceMatching"
 import { publicInvoiceUrl } from "@shared/invoiceDisplay"
-import { invoiceBalanceDue, invoiceDepositOutstanding, invoicePaymentPurposeFor } from "@shared/invoicePayments"
+import { invoiceDepositOutstanding, invoicePaymentPurposeFor } from "@shared/invoicePayments"
 
 export function invoicesCol(workspaceId: string) {
   return db.collection("workspaces").doc(workspaceId).collection("invoices")
@@ -57,19 +57,17 @@ export async function findInvoiceMatchForDeposit(
   workspaceId: string,
   deposit: InvoiceMatchDeposit
 ): Promise<PlaidInvoiceMatch | null> {
+  // Open invoices, each matched on what it can be paid now: its deposit or
+  // everything, or what's left — with a tip allowed on a final payment.
   const openSnap = await invoicesCol(workspaceId).where("status", "==", "sent").get()
-  // A partly paid invoice is matched on what's left of it.
-  const open = parseInvoices(openSnap).map((invoice) => ({ ...invoice, total: invoiceBalanceDue(invoice) }))
-  const openMatch = pickPaidInvoices(deposit, selectOpenInvoiceCandidates(open, deposit.date))
+  const openMatch = pickPaidInvoices(deposit, openInvoiceTargets(parseInvoices(openSnap), deposit.date), { tips: true })
   if (openMatch) return openMatch
 
+  // Payments recorded by hand lately, each on what it brought in.
   const recentlyPaidSnap = await invoicesCol(workspaceId)
     .where("lastManualPaymentOn", ">=", isoDaysBefore(deposit.date, MANUAL_PAID_LOOKBACK_DAYS + 1).slice(0, 10))
     .get()
-  const paidMatch = pickPaidInvoices(
-    deposit,
-    selectManuallyPaidInvoiceCandidates(parseInvoices(recentlyPaidSnap), deposit.date)
-  )
+  const paidMatch = pickPaidInvoices(deposit, manualPaymentTargets(parseInvoices(recentlyPaidSnap), deposit.date))
   return paidMatch ? { ...paidMatch, alreadyPaid: true } : null
 }
 

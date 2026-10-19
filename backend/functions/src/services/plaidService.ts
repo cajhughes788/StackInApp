@@ -47,7 +47,7 @@ import {
   resolveChosenInvoiceGroup,
   type RefundPaymentCandidate,
 } from "@shared/invoiceMatching"
-import { invoiceBalanceDue, invoiceCentsByCategory, invoicePaymentPurposeFor } from "@shared/invoicePayments"
+import { invoiceCentsByCategory, invoicePaymentOptions, invoicePaymentPurposeFor } from "@shared/invoicePayments"
 import { sendTransactionNotification } from "./pushNotificationService"
 import { suggestCategoriesWithAi, type AiCategoryRequest } from "./aiCategorySuggestion"
 import { PLAID_CLIENT_ID, PLAID_SECRET, PLAID_ENV, PLAID_TOKEN_ENCRYPTION_KEY } from "../secrets"
@@ -1921,8 +1921,8 @@ async function confirmInvoicePayment(
   const engine = await import("./invoicePaymentEngine.js")
 
   // One payment per invoice, claimed together so a concurrent payment can't
-  // take any of them. The invoice is matched on what it had left to pay
-  // (findInvoiceMatchForDeposit), so each payment is that amount.
+  // take any of them. Each is what the match offered: the deposit, the
+  // balance or everything (findInvoiceMatchForDeposit), plus any tip.
   let claims: Awaited<ReturnType<typeof engine.claimInvoicePayments>>
   try {
     const snaps = await db.getAll(...group.map((invoiceRef) => invoicesCol(workspaceId).doc(invoiceRef.invoiceId)))
@@ -1931,18 +1931,23 @@ async function confirmInvoicePayment(
       group.map((invoiceRef, index) => {
         const parsed = snaps[index].exists ? InvoiceSchema.safeParse(snaps[index].data()) : null
         const current = parsed?.success ? parsed.data : null
+        // The amount offered must still be one the invoice can be paid in.
         // (A payment from this deposit already on it is a resumed confirm.)
         const resumed = current?.payments.some((p) => p.id === paymentId) ?? false
-        if (current && !resumed && current.status === "sent" && Math.round(invoiceBalanceDue(current) * 100) !== Math.round(invoiceRef.amount * 100)) {
+        const stillOffered =
+          !current ||
+          current.status !== "sent" ||
+          invoicePaymentOptions(current).some((option) => Math.round(option.amount * 100) === Math.round(invoiceRef.amount * 100))
+        if (!resumed && !stillOffered) {
           throw new ConflictError(`Invoice #${invoiceRef.number} changed since this deposit was matched.`)
         }
         return {
           invoiceId: invoiceRef.invoiceId,
           payment: {
             id: paymentId,
-            purpose: current ? invoicePaymentPurposeFor(current, invoiceRef.amount) : "full",
+            purpose: current ? invoicePaymentPurposeFor(current, invoiceRef.amount) : invoiceRef.purpose,
             amount: invoiceRef.amount,
-            tipAmount: 0,
+            tipAmount: invoiceRef.tipAmount,
             // The day the money arrived, not the day it was confirmed.
             receivedOn: pending.date,
             via: "bank_match" as const,

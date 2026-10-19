@@ -28,6 +28,18 @@ function groupKey(group: PlaidInvoiceRef[]): string {
   return group.map((ref) => ref.invoiceId).join("|")
 }
 
+// What one payment in a match pays: "Deposit for Invoice #0012".
+function purposeLabel(ref: PlaidInvoiceRef): string {
+  if (ref.purpose === "deposit") return `Deposit for Invoice #${ref.number}`
+  if (ref.purpose === "balance") return `Balance of Invoice #${ref.number}`
+  if (ref.purpose === "partial") return `Part of Invoice #${ref.number}`
+  return `Pays Invoice #${ref.number}`
+}
+
+function toCents(amount: number): number {
+  return Math.round(amount * 100)
+}
+
 export default function InvoiceMatchCard({
   transaction,
   match,
@@ -51,6 +63,11 @@ export default function InvoiceMatchCard({
   const groups = [match.invoices, ...match.alternatives]
   const [picked, setPicked] = useState<string>(groupKey(match.invoices))
   const first = match.invoices[0]
+  // What the first invoice will still be owed after this deposit.
+  const firstInvoice = invoicesById.get(first.invoiceId)
+  const stillDue = firstInvoice
+    ? Math.max(0, toCents(firstInvoice.total) - toCents(firstInvoice.amountPaid) - toCents(first.amount)) / 100
+    : 0
 
   const header = (
     <div className="flex items-start justify-between gap-3">
@@ -74,7 +91,12 @@ export default function InvoiceMatchCard({
   if (match.alreadyPaid) {
     const paidInvoice = invoicesById.get(first.invoiceId)
     // Mid-sentence: brand names keep their capitals ("by Zelle", "by check").
-    const manual = paidInvoice?.payments.filter((payment) => payment.via === "manual").pop()
+    // The hand-recorded payment this deposit would be: same amount (tip
+    // included), else the latest one recorded by hand.
+    const manualPayments = paidInvoice?.payments.filter((payment) => payment.via === "manual") ?? []
+    const manual =
+      manualPayments.find((payment) => toCents(payment.amount) + toCents(payment.tipAmount) === toCents(first.amount)) ??
+      manualPayments.pop()
     const method = manual?.method
     const how =
       !method || method === "other"
@@ -89,7 +111,17 @@ export default function InvoiceMatchCard({
         <div className="flex items-start gap-2.5 rounded-xl bg-muted px-3 py-2.5 text-sm leading-snug">
           <Info className="mt-0.5 size-[18px] shrink-0 text-muted-foreground" aria-hidden="true" />
           <span>
-            You marked <strong>{label}</strong> paid{how}
+            {match.invoices.length === 1 && first.purpose !== "full" ? (
+              <>
+                You recorded a {formatCurrency(first.amount)} {first.purpose === "deposit" ? "deposit" : "payment"} on{" "}
+                <strong>{label}</strong>
+              </>
+            ) : (
+              <>
+                You marked <strong>{label}</strong> paid
+              </>
+            )}
+            {how}
             {when}. Is this the same money?
           </span>
         </div>
@@ -132,7 +164,14 @@ export default function InvoiceMatchCard({
                   className="size-[18px] accent-[var(--primary)]"
                 />
                 <span className="min-w-0 flex-1 break-words">
-                  {group.map((ref) => `#${ref.number} · ${ref.clientName}`).join(" + ")}
+                  {group
+                    .map(
+                      (ref) =>
+                        `#${ref.number} · ${ref.clientName}${ref.purpose === "deposit" ? " (deposit)" : ""}${
+                          ref.tipAmount > 0 ? ` + ${formatCurrency(ref.tipAmount)} tip` : ""
+                        }`
+                    )
+                    .join(" + ")}
                 </span>
                 {due ? <span className="shrink-0 text-muted-foreground">due {shortDate(due)}</span> : null}
               </label>
@@ -177,17 +216,30 @@ export default function InvoiceMatchCard({
             <div key={ref.invoiceId} className="flex justify-between gap-3">
               <span className="min-w-0 break-words">
                 #{ref.number} · {ref.clientName}
+                {ref.purpose === "deposit" ? " · deposit" : ref.purpose === "balance" ? " · balance" : ""}
               </span>
               <span className="shrink-0 tabular-nums">{formatCurrency(ref.amount)}</span>
             </div>
           ))}
+        </div>
+      ) : match.kind === "with_tip" ? (
+        <div className="space-y-1.5 rounded-xl bg-accent px-3 py-2.5 text-sm">
+          <div className="flex justify-between gap-3">
+            <strong className="min-w-0 break-words">{purposeLabel(first)}</strong>
+            <span className="shrink-0 tabular-nums">{formatCurrency(first.amount)}</span>
+          </div>
+          <div className="flex justify-between gap-3">
+            <span>Tip on top</span>
+            <span className="shrink-0 tabular-nums">+{formatCurrency(first.tipAmount)}</span>
+          </div>
+          <div className="text-xs text-muted-foreground">{first.clientName} · the tip is added to your income as tips</div>
         </div>
       ) : match.kind === "net_of_fees" ? (
         <div className="space-y-1.5 rounded-xl bg-accent px-3 py-2.5 text-sm">
           {match.invoices.map((ref) => (
             <div key={ref.invoiceId} className="flex justify-between gap-3">
               <strong className="min-w-0 break-words">
-                Pays Invoice #{ref.number}
+                {purposeLabel(ref)}
                 {match.invoices.length > 1 ? ` · ${ref.clientName}` : ""}
               </strong>
               <span className="shrink-0 tabular-nums">{formatCurrency(ref.amount)}</span>
@@ -206,13 +258,15 @@ export default function InvoiceMatchCard({
         <div className="flex items-center gap-2.5 rounded-xl bg-accent px-3 py-2.5">
           <FileText className="size-5 shrink-0 text-emerald-700 dark:text-emerald-400" aria-hidden="true" />
           <div className="min-w-0 text-sm leading-snug">
-            <strong>Pays Invoice #{first.number}</strong>
+            <strong>{purposeLabel(first)}</strong>
             <br />
             <span className="text-muted-foreground">
               {first.clientName}
-              {invoicesById.get(first.invoiceId)?.dueDate
-                ? ` · due ${shortDate(invoicesById.get(first.invoiceId)!.dueDate)}`
-                : ""}
+              {stillDue > 0 && firstInvoice
+                ? ` · then ${formatCurrency(stillDue)} due ${shortDate(firstInvoice.dueDate)}`
+                : firstInvoice?.dueDate
+                  ? ` · due ${shortDate(firstInvoice.dueDate)}`
+                  : ""}
             </span>
           </div>
         </div>
@@ -226,7 +280,13 @@ export default function InvoiceMatchCard({
           onClick={() => onPay(match.invoices)}
         >
           <Check className="size-4" aria-hidden="true" />
-          {match.invoices.length > 1 ? `Mark ${match.invoices.length === 2 ? "both" : "all"} paid` : "Mark invoice paid"}
+          {match.invoices.length > 1
+            ? `Mark ${match.invoices.length === 2 ? "both" : "all"} paid`
+            : first.purpose === "deposit"
+              ? "Record deposit"
+              : match.kind === "with_tip"
+                ? "Mark paid with tip"
+                : "Mark invoice paid"}
         </Button>
         <Button type="button" variant="ghost" size="sm" className="rounded-full px-4" disabled={disabled} onClick={onNotThis}>
           {match.invoices.length > 1 ? "Not these" : "Not this"}

@@ -227,6 +227,16 @@ One change from the plan: the client page's Pay button pays the deposit while on
 
 Goal: a Plaid deposit can be recognized as a deposit payment, a balance payment, a full payment, or a balance plus tip.
 
+**Built and tested.**
+- Targets come from `invoicePaymentOptions` (`openInvoiceTargets`). A target is an `InvoiceMatchCandidate` whose `total` is the amount it would pay, plus a `purpose`. Groups never use two targets of one invoice.
+- The tip tier (`with_tip`) is opt-in (`pickPaidInvoices(…, { tips: true })`), and only the open-invoice lookup turns it on.
+- "Already recorded" matches each recent hand-recorded payment, tip included (`manualPaymentTargets`), found through `lastManualPaymentOn`.
+- **End-to-end test:** the backend matcher ran against real invoices on simulated deposits.
+  - $690 became a $600 balance + $90 tip, booked as $600 services + $90 tips.
+  - $500 paid an invoice in full; deleting its entry reopened the invoice and returned the deposit to review.
+  - $200 was recognized as a deposit already recorded by hand.
+- Not run end to end: a deposit arriving net of processor fees, since it needs a processor-named deposit. It's covered by the unit tests.
+
 1. **Match targets.** In `shared/invoiceMatching.ts`, each open invoice offers targets instead of one `total`:
    - **Deposit unpaid:** the deposit amount and the full balance.
    - **Otherwise:** the balance.

@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { IncomeCategorySchema, PaymentMethodSchema } from "./entry"
+import { InvoicePaymentPurposeSchema } from "./invoice"
 
 // -------------------------------------------------------------
 // PlaidPendingTransaction
@@ -54,19 +55,27 @@ export const PlaidSuggestionSourceSchema = z.enum([
 
 export type PlaidSuggestionSource = z.infer<typeof PlaidSuggestionSourceSchema>
 
+// One invoice payment a deposit would make: `amount` is what it takes off
+// the invoice (the deposit, the balance, or everything — `purpose`), and
+// tipAmount a tip on top (with_tip). For the already-paid check, `amount` is
+// what a hand-recorded payment brought in.
 export const PlaidInvoiceRefSchema = z.object({
   invoiceId: z.string(),
   number: z.string(),
   clientName: z.string(),
   amount: z.number(),
+  purpose: InvoicePaymentPurposeSchema.default("full"),
+  tipAmount: z.number().nonnegative().default(0),
 })
 
-// "exact": one invoice equals the deposit. "combined": 2–3 invoices sum to
+// "exact": one payment equals the deposit. "combined": 2–3 payments sum to
 // it (two checks deposited together). "net_of_fees": a processor payout
-// short of the invoice total by its fee.
+// short of them by its fee. "with_tip": an invoice's final payment plus a
+// tip.
 export const PlaidInvoiceMatchSchema = z.object({
-  kind: z.enum(["exact", "combined", "net_of_fees"]),
+  kind: z.enum(["exact", "combined", "net_of_fees", "with_tip"]),
   invoices: z.array(PlaidInvoiceRefSchema).min(1).max(3),
+  // Income the match books: the payments and any tips.
   invoiceTotal: z.number(),
   // invoiceTotal minus the deposit; 0 unless net_of_fees.
   feeAmount: z.number().nonnegative(),

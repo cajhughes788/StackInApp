@@ -1,5 +1,6 @@
 import { isPeerToPeerDescriptor, suggestPlaidIncomePaymentMethod } from "./plaidClassification"
-import type { InvoiceType } from "./schemas/invoice"
+import { invoicePaymentOptions } from "./invoicePayments"
+import type { InvoicePaymentPurpose, InvoiceType } from "./schemas/invoice"
 import type { PlaidInvoiceMatch, PlaidInvoiceRef } from "./schemas/plaidPendingTransaction"
 
 // ---------------------------------------------------------------------------
@@ -7,14 +8,23 @@ import type { PlaidInvoiceMatch, PlaidInvoiceRef } from "./schemas/plaidPendingT
 //
 // Finds the invoice(s) an incoming bank deposit pays, so the income review
 // can offer "Acme paid Invoice #0012" instead of booking the deposit as new
-// income on top of the invoice. Tiers, first hit wins:
+// income on top of the invoice.
 //
-// 1. exact        — one invoice equals the deposit.
-// 2. combined     — 2–3 invoices sum exactly to it (checks deposited together).
-// 3. net_of_fees  — payment-processor deposits only: 1–3 invoices whose total
+// Each open invoice offers targets — the amounts it can be paid in
+// (invoicePaymentOptions): its deposit or everything while a deposit is
+// owed, otherwise what's left. A group never uses two targets of one
+// invoice. Tiers, first hit wins:
+//
+// 1. exact        — one target equals the deposit.
+// 2. combined     — 2–3 targets sum exactly to it (checks deposited together).
+// 3. net_of_fees  — payment-processor deposits only: 1–3 targets whose total
 //                   is above the deposit by no more than a processor's fee.
 //                   A plain deposit that comes up short is more likely a short
 //                   payment than a fee, so it's left to the normal review.
+// 4. with_tip     — when asked for (open invoices): one invoice's final
+//                   payment (its balance or the whole thing) plus a tip, the
+//                   deposit above it by no more than half again. Not for
+//                   processor deposits, where extra money is ambiguous.
 //
 // Within a tier, groups whose client matches the payer's remembered name win,
 // then the smallest fee, then fewer invoices. Groups still tied on those are
@@ -38,6 +48,9 @@ export const INVOICE_MATCH_MAX_GROUP_SIZE = 3
 export const INVOICE_FEE_MAX_RATE = 0.05
 export const INVOICE_FEE_MAX_FLAT_CENTS = 100
 
+// The most a tip can be, as a share of the payment it's on.
+export const INVOICE_TIP_MAX_RATE = 0.5
+
 // How far a deposit can sit from the day an invoice was marked paid by hand
 // and still be that same money arriving at the bank.
 export const MANUAL_PAID_LOOKBACK_DAYS = 14
@@ -45,10 +58,12 @@ export const MANUAL_PAID_LOOKAHEAD_DAYS = 3
 
 const MAX_ALTERNATIVES = 4
 
+// One amount an invoice could be paid in. `total` is that amount (the
+// invoice's whole total for a plain unpaid invoice), `purpose` what it pays.
 export type InvoiceMatchCandidate = Pick<
   InvoiceType,
   "id" | "number" | "clientName" | "total" | "issueDate" | "dueDate"
->
+> & { purpose?: InvoicePaymentPurpose }
 
 export type InvoiceMatchDeposit = {
   date: string
@@ -88,22 +103,58 @@ export function selectOpenInvoiceCandidates<
     .slice(0, INVOICE_MATCH_MAX_CANDIDATES)
 }
 
-// Invoices marked paid by hand whose money might be this deposit — a match
-// means the deposit is already counted and should be dismissed, not booked.
+// The targets of the open invoices a deposit could be paying.
+export function openInvoiceTargets(
+  invoices: Array<InvoiceType>,
+  depositDate: string
+): InvoiceMatchCandidate[] {
+  return selectOpenInvoiceCandidates(invoices, depositDate).flatMap((invoice) =>
+    invoicePaymentOptions(invoice).map((option) => ({
+      id: invoice.id,
+      number: invoice.number,
+      clientName: invoice.clientName,
+      issueDate: invoice.issueDate,
+      dueDate: invoice.dueDate,
+      total: option.amount,
+      purpose: option.purpose,
+    }))
+  )
+}
+
+function isRecentManualPayment(payment: InvoiceType["payments"][number], depositDate: string): boolean {
+  if (payment.via !== "manual") return false
+  const gap = dayDiff(depositDate, payment.receivedOn)
+  return gap >= -MANUAL_PAID_LOOKAHEAD_DAYS && gap <= MANUAL_PAID_LOOKBACK_DAYS
+}
+
+// Invoices with a payment recorded by hand whose money might be this
+// deposit — a match means the deposit is already counted and should be
+// dismissed, not booked.
 export function selectManuallyPaidInvoiceCandidates<
   T extends InvoiceMatchCandidate & Pick<InvoiceType, "status" | "payments">,
 >(invoices: T[], depositDate: string): T[] {
   return invoices
-    .filter((invoice) => {
-      if (invoice.status !== "paid") return false
-      return invoice.payments.some((payment) => {
-        if (payment.via !== "manual") return false
-        const gap = dayDiff(depositDate, payment.receivedOn)
-        return gap >= -MANUAL_PAID_LOOKAHEAD_DAYS && gap <= MANUAL_PAID_LOOKBACK_DAYS
-      })
-    })
+    .filter((invoice) => invoice.status !== "void" && invoice.payments.some((p) => isRecentManualPayment(p, depositDate)))
     .sort(byOldestDue)
     .slice(0, INVOICE_MATCH_MAX_CANDIDATES)
+}
+
+// Each recent hand-recorded payment as a target of what arrived (its tip
+// included): one invoice's deposit and balance can each be the money.
+export function manualPaymentTargets(invoices: Array<InvoiceType>, depositDate: string): InvoiceMatchCandidate[] {
+  return selectManuallyPaidInvoiceCandidates(invoices, depositDate).flatMap((invoice) =>
+    invoice.payments
+      .filter((payment) => isRecentManualPayment(payment, depositDate))
+      .map((payment) => ({
+        id: invoice.id,
+        number: invoice.number,
+        clientName: invoice.clientName,
+        issueDate: invoice.issueDate,
+        dueDate: invoice.dueDate,
+        total: (toCents(payment.amount) + toCents(payment.tipAmount)) / 100,
+        purpose: payment.purpose,
+      }))
+  )
 }
 
 export function isPaymentProcessorDeposit(merchantName: string | null, rawName: string): boolean {
@@ -127,13 +178,17 @@ function clientMatchesPayer(clientName: string, payerLabel: string | null): bool
   return shorter.length >= 3 && ` ${longer} `.includes(` ${shorter} `)
 }
 
-function* groupsOfSize<T>(items: T[], size: number, start = 0): Generator<T[]> {
+// Groups of `size` targets, never two of the same invoice.
+function* groupsOfSize<T extends { id: string }>(items: T[], size: number, start = 0): Generator<T[]> {
   if (size === 0) {
     yield []
     return
   }
   for (let i = start; i <= items.length - size; i++) {
-    for (const rest of groupsOfSize(items, size - 1, i + 1)) yield [items[i], ...rest]
+    for (const rest of groupsOfSize(items, size - 1, i + 1)) {
+      if (rest.some((item) => item.id === items[i].id)) continue
+      yield [items[i], ...rest]
+    }
   }
 }
 
@@ -141,11 +196,17 @@ type ScoredGroup = {
   invoices: InvoiceMatchCandidate[]
   totalCents: number
   feeCents: number
+  tipCents: number
   payerMatches: number
 }
 
 function compareGroups(a: ScoredGroup, b: ScoredGroup): number {
-  return b.payerMatches - a.payerMatches || a.feeCents - b.feeCents || a.invoices.length - b.invoices.length
+  return (
+    b.payerMatches - a.payerMatches ||
+    a.feeCents - b.feeCents ||
+    a.tipCents - b.tipCents ||
+    a.invoices.length - b.invoices.length
+  )
 }
 
 function compareGroupsByDue(a: ScoredGroup, b: ScoredGroup): number {
@@ -156,20 +217,33 @@ function compareGroupsByDue(a: ScoredGroup, b: ScoredGroup): number {
   return a.invoices.length - b.invoices.length
 }
 
-function toRef(invoice: InvoiceMatchCandidate): PlaidInvoiceRef {
-  return { invoiceId: invoice.id, number: invoice.number, clientName: invoice.clientName, amount: invoice.total }
+function toRef(target: InvoiceMatchCandidate, tipCents = 0): PlaidInvoiceRef {
+  return {
+    invoiceId: target.id,
+    number: target.number,
+    clientName: target.clientName,
+    amount: target.total,
+    purpose: target.purpose ?? "full",
+    tipAmount: tipCents / 100,
+  }
 }
 
-// `candidates` should come from selectOpenInvoiceCandidates (or
-// selectManuallyPaidInvoiceCandidates for the already-paid check).
+// `candidates` should come from openInvoiceTargets (or manualPaymentTargets
+// for the already-paid check). `tips` allows the with_tip tier.
 export function pickPaidInvoices(
   deposit: InvoiceMatchDeposit,
-  candidates: InvoiceMatchCandidate[]
+  candidates: InvoiceMatchCandidate[],
+  options: { tips?: boolean } = {}
 ): PlaidInvoiceMatch | null {
   const depositCents = toCents(deposit.amount)
   if (depositCents <= 0 || candidates.length === 0) return null
 
-  const pool = [...candidates].sort(byOldestDue).slice(0, INVOICE_MATCH_MAX_CANDIDATES)
+  // Every target of the oldest-due invoices (an invoice can offer two).
+  const invoiceIds = [...new Set([...candidates].sort(byOldestDue).map((target) => target.id))].slice(
+    0,
+    INVOICE_MATCH_MAX_CANDIDATES
+  )
+  const pool = [...candidates].filter((target) => invoiceIds.includes(target.id)).sort(byOldestDue)
   const isProcessor = isPaymentProcessorDeposit(deposit.merchantName, deposit.rawName)
 
   const tiers: Array<{ kind: PlaidInvoiceMatch["kind"]; sizes: number[]; netOfFees: boolean }> = [
@@ -195,6 +269,7 @@ export function pickPaidInvoices(
           invoices: group,
           totalCents,
           feeCents,
+          tipCents: 0,
           payerMatches: group.filter((invoice) => clientMatchesPayer(invoice.clientName, deposit.payerLabel)).length,
         })
       }
@@ -207,11 +282,42 @@ export function pickPaidInvoices(
 
     return {
       kind: tier.kind,
-      invoices: best.invoices.map(toRef),
+      invoices: best.invoices.map((target) => toRef(target)),
       invoiceTotal: best.totalCents / 100,
       feeAmount: best.feeCents / 100,
-      alternatives: tied.slice(1, 1 + MAX_ALTERNATIVES).map((group) => group.invoices.map(toRef)),
+      alternatives: tied.slice(1, 1 + MAX_ALTERNATIVES).map((group) => group.invoices.map((target) => toRef(target))),
       alreadyPaid: false,
+    }
+  }
+
+  // with_tip: one invoice's final payment and a tip on top.
+  if (options.tips && !isProcessor) {
+    const fits: ScoredGroup[] = pool
+      .filter((target) => target.purpose === "balance" || target.purpose === "full" || target.purpose === undefined)
+      .flatMap((target) => {
+        const totalCents = toCents(target.total)
+        const tipCents = depositCents - totalCents
+        if (tipCents <= 0 || tipCents > Math.floor(totalCents * INVOICE_TIP_MAX_RATE)) return []
+        return [{
+          invoices: [target],
+          totalCents,
+          feeCents: 0,
+          tipCents,
+          payerMatches: clientMatchesPayer(target.clientName, deposit.payerLabel) ? 1 : 0,
+        }]
+      })
+    if (fits.length > 0) {
+      fits.sort((a, b) => compareGroups(a, b) || compareGroupsByDue(a, b))
+      const [best] = fits
+      const tied = fits.filter((group) => compareGroups(group, best) === 0)
+      return {
+        kind: "with_tip",
+        invoices: [toRef(best.invoices[0], best.tipCents)],
+        invoiceTotal: depositCents / 100,
+        feeAmount: 0,
+        alternatives: tied.slice(1, 1 + MAX_ALTERNATIVES).map((group) => [toRef(group.invoices[0], group.tipCents)]),
+        alreadyPaid: false,
+      }
     }
   }
 
@@ -234,7 +340,7 @@ export function resolveChosenInvoiceGroup(match: PlaidInvoiceMatch, invoiceIds: 
 // suggested one, so this is worked out per group rather than read off
 // match.feeAmount. Null when the group can't explain the deposit.
 export function invoiceGroupFee(match: PlaidInvoiceMatch, group: PlaidInvoiceRef[], depositAmount: number): number | null {
-  const feeCents = group.reduce((sum, ref) => sum + toCents(ref.amount), 0) - toCents(depositAmount)
+  const feeCents = group.reduce((sum, ref) => sum + toCents(ref.amount) + toCents(ref.tipAmount), 0) - toCents(depositAmount)
   if (feeCents < 0) return null
   if (feeCents > 0 && match.kind !== "net_of_fees") return null
   return feeCents / 100

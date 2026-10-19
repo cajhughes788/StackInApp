@@ -36,6 +36,13 @@ const {
 } = require("../shared/schemas/invoice.ts");
 const { renderPublicInvoicePage } = require("../shared/invoicePublicPage.ts");
 const { buildInvoiceEmail } = require("../shared/invoiceEmail.ts");
+const {
+  pickPaidInvoices,
+  openInvoiceTargets,
+  manualPaymentTargets,
+  invoiceGroupFee,
+  resolveChosenInvoiceGroup,
+} = require("../shared/invoiceMatching.ts");
 
 function run(name, fn) {
   fn();
@@ -365,6 +372,93 @@ run("the client's page and email ask for the deposit first", () => {
   assert.ok(email.subject.includes("$100.00 deposit due Oct 8"));
   assert.ok(email.text.includes("Deposit due: $100.00"));
   assert.ok(email.text.includes("Invoice total: $800.00, the rest due Oct 31, 2026"));
+});
+
+/* --------------------------------------------------------
+ * Bank matching on deposits, balances and tips (phase 4)
+ * -------------------------------------------------------- */
+
+function bank(amount, overrides = {}) {
+  return { date: "2026-10-12", amount, merchantName: null, rawName: "ONLINE TRANSFER", payerLabel: null, ...overrides };
+}
+
+const withDeposit = (overrides = {}) =>
+  InvoiceSchema.parse(doc({ deposit: { amount: 100, dueDate: "2026-10-08", waivedAt: null }, ...overrides }));
+
+run("an invoice with a deposit owed offers the deposit or everything", () => {
+  const targets = openInvoiceTargets([withDeposit()], "2026-10-12");
+  assert.deepEqual(targets.map((t) => [t.purpose, t.total]), [["deposit", 100], ["full", 800]]);
+  const deposit = pickPaidInvoices(bank(100), targets, { tips: true });
+  assert.equal(deposit.kind, "exact");
+  assert.deepEqual([deposit.invoices[0].purpose, deposit.invoices[0].amount], ["deposit", 100]);
+  const full = pickPaidInvoices(bank(800), targets, { tips: true });
+  assert.deepEqual([full.invoices[0].purpose, full.invoices[0].amount], ["full", 800]);
+  // Never the deposit and the whole thing of one invoice together.
+  assert.equal(pickPaidInvoices(bank(900), targets), null);
+});
+
+run("after the deposit, what's left is the balance", () => {
+  const paidDeposit = invoiceWithPayments(withDeposit(), [payment("d", 100, { purpose: "deposit" })]);
+  const targets = openInvoiceTargets([paidDeposit], "2026-10-12");
+  assert.deepEqual(targets.map((t) => [t.purpose, t.total]), [["balance", 700]]);
+  assert.equal(pickPaidInvoices(bank(700), targets).invoices[0].purpose, "balance");
+});
+
+run("balance plus a tip, when tips are allowed", () => {
+  const paidDeposit = invoiceWithPayments(withDeposit(), [payment("d", 100, { purpose: "deposit" })]);
+  const targets = openInvoiceTargets([paidDeposit], "2026-10-12");
+  const tipped = pickPaidInvoices(bank(840), targets, { tips: true });
+  assert.equal(tipped.kind, "with_tip");
+  assert.deepEqual([tipped.invoices[0].amount, tipped.invoices[0].tipAmount], [700, 140]);
+  assert.equal(tipped.invoiceTotal, 840);
+  assert.equal(tipped.feeAmount, 0);
+  assert.equal(invoiceGroupFee(tipped, tipped.invoices, 840), 0);
+  // Off by default (the already-paid check), capped at half the payment,
+  // never on a deposit, never on a processor payout.
+  assert.equal(pickPaidInvoices(bank(840), targets), null);
+  assert.equal(pickPaidInvoices(bank(1051), targets, { tips: true }), null);
+  assert.ok(pickPaidInvoices(bank(1050), targets, { tips: true }));
+  assert.equal(pickPaidInvoices(bank(120), openInvoiceTargets([withDeposit()], "2026-10-12"), { tips: true }), null);
+  assert.equal(pickPaidInvoices(bank(840, { merchantName: "Square", rawName: "SQ *SQUARE INC" }), targets, { tips: true }), null);
+});
+
+run("the smallest tip wins; equal tips are a choice", () => {
+  const a = invoiceWithPayments(InvoiceSchema.parse(doc({ id: "a", number: "0001", total: 600, lines: [{ description: "x", amount: 600, category: "services" }] })), []);
+  const b = InvoiceSchema.parse(doc({ id: "b", number: "0002", total: 650, lines: [{ description: "y", amount: 650, category: "services" }] }));
+  const tipped = pickPaidInvoices(bank(700), openInvoiceTargets([a, b], "2026-10-12"), { tips: true });
+  assert.deepEqual([tipped.invoices[0].invoiceId, tipped.invoices[0].tipAmount], ["b", 50]);
+  assert.deepEqual(tipped.alternatives, []);
+  const twin = InvoiceSchema.parse(doc({ id: "c", number: "0003", total: 650, lines: [{ description: "z", amount: 650, category: "services" }] }));
+  const choice = pickPaidInvoices(bank(700), openInvoiceTargets([b, twin], "2026-10-12"), { tips: true });
+  assert.equal(choice.alternatives.length, 1);
+  assert.equal(resolveChosenInvoiceGroup(choice, ["c"])[0].tipAmount, 50);
+});
+
+run("a deposit and another client's invoice can arrive together", () => {
+  const other = InvoiceSchema.parse(doc({ id: "o", number: "0009", clientName: "Bo", total: 250, lines: [{ description: "x", amount: 250, category: "services" }] }));
+  const combined = pickPaidInvoices(bank(350), openInvoiceTargets([withDeposit(), other], "2026-10-12"));
+  assert.equal(combined.kind, "combined");
+  assert.deepEqual(
+    combined.invoices.map((ref) => [ref.invoiceId, ref.purpose, ref.amount]).sort(),
+    [["inv1", "deposit", 100], ["o", "full", 250]]
+  );
+});
+
+run("already recorded: a bank deposit matches a hand-recorded payment, tip included", () => {
+  const recorded = invoiceWithPayments(withDeposit(), [
+    payment("d", 100, { purpose: "deposit", receivedOn: "2026-10-10" }),
+    payment("b", 300, { purpose: "partial", tipAmount: 40, receivedOn: "2026-10-11" }),
+  ]);
+  const targets = manualPaymentTargets([recorded], "2026-10-12");
+  assert.deepEqual(targets.map((t) => [t.purpose, t.total]), [["deposit", 100], ["partial", 340]]);
+  assert.equal(pickPaidInvoices(bank(100), targets).invoices[0].purpose, "deposit");
+  assert.equal(pickPaidInvoices(bank(340), targets).invoices[0].amount, 340);
+  // Both arriving in one deposit is the same money twice over: one invoice.
+  assert.equal(pickPaidInvoices(bank(440), targets), null);
+  // Too long ago, or not recorded by hand, isn't a candidate.
+  assert.deepEqual(manualPaymentTargets([recorded], "2026-11-12"), []);
+  const online = invoiceWithPayments(withDeposit(), [payment("s", 100, { via: "online", receivedOn: "2026-10-10" })]);
+  assert.deepEqual(manualPaymentTargets([online], "2026-10-12"), []);
 });
 
 process.stdout.write("invoice payments checks passed\n");
