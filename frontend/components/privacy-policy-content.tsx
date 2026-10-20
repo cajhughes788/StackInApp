@@ -9,15 +9,25 @@ const PRIVACY_SECTIONS: Array<{ title: string; paragraphs: string[] }> = [
       "If you connect a bank account using Plaid, Plaid transmits certain account and transaction information to us on your behalf — such as account balances, transaction history, and merchant and category details — so that 521 can help you review and categorize that activity. We do not receive or store your online banking username or password; those credentials are entered directly with Plaid or your financial institution and are never shared with us. Plaid's own use of your information is governed by Plaid's End User Privacy Policy, available at plaid.com/legal. When we can't otherwise suggest a category for a bank transaction, we may send the merchant's business name and the bank's category label to an AI service provider to suggest one; we do not send amounts, dates, account details, or information that identifies you.",
       "If you use receipt capture or upload features, we collect the photos you provide and information extracted from them (such as merchant name, date, and amount) to help create or organize expense records. Receipt images are processed using a third-party optical character recognition service to extract this information.",
       "If you subscribe to a paid plan, our payment processor collects and processes your payment card details directly; we do not receive or store your full card number.",
+      "If you create invoices, we collect the invoice details you enter, such as line items, amounts, due dates, notes, and your business details, along with the delivery and payment status of each invoice.",
+      "If you set up online invoice payments, you create a payment account with Stripe. Stripe collects the identity, tax, and bank payout information it requires directly from you; we do not receive or store your full bank account or tax identification numbers. We receive and store your Stripe account identifier, its setup status, and information about the payments, refunds, and payouts made through it so that 521 can record and match them to your invoices.",
       "If you enable location-based features, reminders, or workplace tools, we collect precise location information and related saved location details, such as workplace coordinates or addresses, and link that information to your account or workspace.",
       "To deliver push notifications (such as alerts about new bank transactions to review), we collect a device notification token tied to your device and account.",
       "We automatically collect limited technical and usage information, such as app version, device type, and error or crash information, to help us maintain and improve the service.",
     ],
   },
   {
+    title: "Information about your clients",
+    paragraphs: [
+      "When you create an invoice, you may enter information about the person or business you are billing, such as their name, email address, phone number, and mailing address. We store this information in your account and use it only to deliver invoices and payment reminders on your behalf, to show the invoice on a private link, and to pre-fill a text message in your own messaging app when you choose to text an invoice. Texts are sent from your device and phone number, not by 521.",
+      "When a client pays an invoice online, Stripe collects and processes their payment details directly; we do not receive or store their full card or bank account number.",
+      "We do not use client information for marketing, and we do not sell it or share it for advertising. If you are a client of a 521 user and want your information corrected or removed, you can contact the business that invoiced you or contact us using the information in the Contact section below.",
+    ],
+  },
+  {
     title: "How we use information",
     paragraphs: [
-      "We use collected information to provide the core functionality of 521, including account authentication, workspace management, income and expense tracking, bank transaction review, pay and tax estimate features, receipt storage and processing, reminders, and customer support.",
+      "We use collected information to provide the core functionality of 521, including account authentication, workspace management, income and expense tracking, bank transaction review, pay and tax estimate features, receipt storage and processing, invoicing and invoice payments, reminders, and customer support.",
       "We also use information to maintain security, detect and prevent misuse, troubleshoot issues, process user requests, send service-related notifications, and operate, improve, and support the reliability of the service.",
     ],
   },
@@ -39,11 +49,11 @@ const PRIVACY_SECTIONS: Array<{ title: string; paragraphs: string[] }> = [
     paragraphs: [
       "We share information with the following categories of service providers, only as needed for them to perform their function on our behalf and under obligations to protect your information:",
       "Plaid Inc. — to enable bank account connectivity and retrieve transaction and account data you authorize us to access.",
-      "Payment processing providers (including Stripe) — to process subscription payments and billing.",
+      "Payment processing providers (including Stripe) — to process subscription payments and billing, to set up the payment accounts you use to accept invoice payments, and to process invoice payments, refunds, and payouts. Stripe's own use of information is governed by its privacy policy, available at stripe.com/privacy.",
       "Cloud infrastructure providers (including Google Cloud Platform and Firebase) — for hosting, databases, authentication, file storage, and push notification delivery.",
       "Optical character recognition and document-processing providers (including Amazon Web Services) — to extract information from receipt images you upload.",
       "AI service providers (including Anthropic) — to suggest expense categories for bank transactions, using only the merchant's business name and the bank's category label.",
-      "Email delivery providers (including SendGrid) — to send account, billing, and support-related emails.",
+      "Email delivery providers (including SendGrid) — to send account, billing, and support-related emails, and to deliver invoices and payment reminders to your clients on your behalf.",
       "We may also disclose information when required by law, to respond to valid legal requests, to enforce our terms, or to protect the rights, safety, and security of 521, our users, or others.",
     ],
   },
@@ -61,6 +71,7 @@ const PRIVACY_SECTIONS: Array<{ title: string; paragraphs: string[] }> = [
       "If you request deletion of your account and do not have an active paid subscription, your data is deleted promptly upon request.",
       "If you have an active paid subscription at the time you request deletion, deletion is scheduled to occur once your current paid period ends, and is then completed automatically, typically within about 24 hours of that date.",
       "If you disconnect a linked bank account without deleting your entire account, that connection is revoked immediately, independent of your account's overall status.",
+      "When your account is deleted, your invoices, your clients' information, and the private invoice links you created are deleted with it. Stripe keeps its own records of your payment account and the payments made through it, as required by law and its own policies.",
       "We may retain limited records, such as a log that a deletion request was made and completed, after other data has been deleted, solely to demonstrate compliance with this policy.",
     ],
   },
@@ -112,7 +123,7 @@ export default function PrivacyPolicyContent() {
           <strong className="text-foreground">Effective Date:</strong> 09/06/2026
         </p>
         <p>
-          <strong className="text-foreground">Last Updated:</strong> 10/13/2026
+          <strong className="text-foreground">Last Updated:</strong> 10/19/2026
         </p>
       </section>
 
