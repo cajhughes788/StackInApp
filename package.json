@@ -16,6 +16,7 @@
     "test:sync": "node ./scripts/test-sync.cjs",
     "test:invoice-matching": "node ./scripts/test-invoice-matching.cjs",
     "test:invoice-payments": "node ./scripts/test-invoice-payments.cjs",
+    "test:invoice-reminders": "node ./scripts/test-invoice-reminders.cjs",
     "test:signup-attribution": "node ./scripts/test-signup-attribution.cjs",
     "install:all": "npm install --workspaces",
     "verify": "npm ls zod",

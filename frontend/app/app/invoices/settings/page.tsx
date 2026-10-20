@@ -19,9 +19,8 @@ import {
   useInvoicesWorkspace,
 } from "@/components/invoices/invoice-ui"
 import OnlinePaymentsCard from "@/components/invoices/online-payments-card"
-import { saveInvoiceSettings } from "@/lib/api/invoicesApi"
+import { saveInvoiceSettingsInBackground } from "@/lib/domain/invoiceService"
 import { prepareInvoiceLogo } from "@/lib/invoiceLogo"
-import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
 import { cn } from "@/lib/utils"
 import { INVOICE_TERMS_LABELS, formatInvoicePhone } from "@shared/invoiceDisplay"
 import {
@@ -68,10 +67,8 @@ function InvoiceSettingsPage() {
   const router = useRouter()
   const { toast } = useToast()
   const { ready, workspaceId, settings, loadStatus } = useInvoicesWorkspace()
-  const setSettings = useInvoicesStore((state) => state.setSettings)
   const [draft, setDraft] = useState<Draft>(() => toDraft(null))
   const [hexText, setHexText] = useState(DEFAULT_INVOICE_ACCENT_COLOR)
-  const [saving, setSaving] = useState(false)
   const [logoBusy, setLogoBusy] = useState(false)
   const initialized = useRef(false)
   const stripeParam = useQueryParam("stripe")
@@ -130,34 +127,24 @@ function InvoiceSettingsPage() {
     }
   }
 
-  async function save() {
+  // Saved in the background (invoiceService): the screen closes at once.
+  function save() {
     if (!workspaceId || emailInvalid || depositError) return
-    setSaving(true)
-    try {
-      const saved = await saveInvoiceSettings(workspaceId, {
-        ...draft,
-        defaultDeposit:
-          draft.defaultDeposit.type === "none" || depositValue === null
-            ? { ...draft.defaultDeposit, type: "none", value: 0 }
-            : { ...draft.defaultDeposit, value: depositValue },
-        businessName: draft.businessName.trim(),
-        businessEmail: draft.businessEmail.trim(),
-        businessPhone: draft.businessPhone.trim(),
-        businessAddress: draft.businessAddress.trim(),
-        defaultNote: draft.defaultNote.trim(),
-        defaultPolicies: draft.defaultPolicies.trim(),
-      })
-      setSettings(workspaceId, saved)
-      if (fromStripe) router.replace("/app/invoices")
-      else router.back()
-    } catch (error) {
-      toast({
-        title: "Couldn't save your settings",
-        description: error instanceof Error ? error.message : "Check your connection and try again.",
-        variant: "destructive",
-      })
-      setSaving(false)
-    }
+    saveInvoiceSettingsInBackground(workspaceId, {
+      ...draft,
+      defaultDeposit:
+        draft.defaultDeposit.type === "none" || depositValue === null
+          ? { ...draft.defaultDeposit, type: "none", value: 0 }
+          : { ...draft.defaultDeposit, value: depositValue },
+      businessName: draft.businessName.trim(),
+      businessEmail: draft.businessEmail.trim(),
+      businessPhone: draft.businessPhone.trim(),
+      businessAddress: draft.businessAddress.trim(),
+      defaultNote: draft.defaultNote.trim(),
+      defaultPolicies: draft.defaultPolicies.trim(),
+    })
+    if (fromStripe) router.replace("/app/invoices")
+    else router.back()
   }
 
   const previewSettings = { ...draft, updatedAt: undefined }
@@ -174,7 +161,7 @@ function InvoiceSettingsPage() {
           className="space-y-4"
           onSubmit={(event) => {
             event.preventDefault()
-            void save()
+            save()
           }}
         >
           <section aria-label="Preview" className="overflow-hidden rounded-[18px] border border-card-border bg-white text-[#161B1E]">
@@ -429,6 +416,20 @@ function InvoiceSettingsPage() {
               </span>
               <Switch checked={draft.offerTips} onCheckedChange={(offerTips) => update({ offerTips })} aria-label="Ask for a tip" />
             </label>
+            <label className="flex items-center justify-between gap-3">
+              <span>
+                <span className="block text-sm font-medium text-foreground">Send payment reminders automatically</span>
+                <span className="block text-xs text-muted-foreground">
+                  We email your client 3 days before an invoice is due, on the due date, and 3, 7 and 14 days after,
+                  until it&apos;s paid. You can stop them on any invoice.
+                </span>
+              </span>
+              <Switch
+                checked={draft.autoReminders}
+                onCheckedChange={(autoReminders) => update({ autoReminders })}
+                aria-label="Send payment reminders automatically"
+              />
+            </label>
             <label className={fieldLabelClass}>
               Note to customer
               <Textarea
@@ -441,8 +442,9 @@ function InvoiceSettingsPage() {
               />
             </label>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Shows under &ldquo;How to pay&rdquo; on every invoice. Put your Venmo, Zelle or Cash App details here so
-              clients know where to send money.
+              Shows under &ldquo;How to pay&rdquo; on every invoice. Put your Venmo or Zelle details here so clients
+              know where to send money. With online payments on, clients can also pay with the Pay now button through
+              Stripe Checkout.
             </p>
             <label className={fieldLabelClass}>
               Policies &amp; terms
@@ -461,8 +463,8 @@ function InvoiceSettingsPage() {
             </p>
           </section>
 
-          <Button type="submit" disabled={saving || emailInvalid} className="h-[52px] w-full rounded-full text-base font-semibold">
-            {saving ? "Saving..." : "Save"}
+          <Button type="submit" disabled={emailInvalid} className="h-[52px] w-full rounded-full text-base font-semibold">
+            Save
           </Button>
         </form>
       )}

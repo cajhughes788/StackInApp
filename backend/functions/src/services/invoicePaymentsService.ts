@@ -4,11 +4,12 @@ import { db } from "../admin"
 import {
   InvoicePaymentPurposeSchema,
   InvoiceSchema,
+  type InvoicePayment,
   type InvoicePaymentPurpose,
   type InvoiceType,
 } from "@shared/schemas/invoice"
 import { invoiceCheckoutAmounts, invoicePaymentOptions, type InvoiceCheckoutChoice } from "@shared/invoicePayments"
-import { publicInvoiceUrl } from "@shared/invoiceDisplay"
+import { invoicePaidNotification, publicInvoiceUrl } from "@shared/invoiceDisplay"
 import { StripePayoutSchema } from "@shared/stripePayouts"
 import { payoutsCol } from "./stripePayoutsStore"
 import { findSharedInvoice, invoicesCol } from "./invoicesService"
@@ -283,6 +284,21 @@ export async function handleAsyncPaymentFailed(stripeAccountId: string, session:
   }).catch((error) => console.error("invoicePayments: failed-payment notification failed", error))
 }
 
+// Tells the owner a client paid. Once per payment: Stripe retries webhooks,
+// and a retry finds the payment already booked, so a marker is claimed first.
+async function notifyOwnerOfPayment(workspaceId: string, ownerUid: string, invoice: InvoiceType, payment: InvoicePayment): Promise<void> {
+  try {
+    await db.doc(`workspaces/${workspaceId}/notificationState/paid_${payment.id}`).create({ sentAt: new Date().toISOString() })
+  } catch {
+    return // Already told (or being told) by an earlier delivery.
+  }
+  const { sendTransactionNotification } = await import("./pushNotificationService.js")
+  await sendTransactionNotification(ownerUid, {
+    ...invoicePaidNotification(invoice, payment),
+    data: { deepLink: `stackin://invoices/${invoice.id}`, workspaceId },
+  }).catch((error) => console.error("invoicePayments: paid notification failed", error))
+}
+
 async function bookPaidSession(
   stripeAccountId: string,
   workspaceId: string,
@@ -338,7 +354,7 @@ async function bookPaidSession(
 
   const { applyInvoicePayment, PaymentRejectedError } = await import("./invoicePaymentEngine.js")
   try {
-    await applyInvoicePayment(
+    const { invoice, payment } = await applyInvoicePayment(
       workspaceId,
       ownerUid,
       {
@@ -363,6 +379,7 @@ async function bookPaidSession(
         fee: { vendor: "Stripe", description: `Stripe fee on Invoice #${session.metadata?.invoiceNumber ?? ""}`.trim() },
       }
     )
+    await notifyOwnerOfPayment(workspaceId, ownerUid, invoice, payment)
   } catch (error) {
     if (!(error instanceof PaymentRejectedError)) throw error // Stripe retries the webhook.
     // Paid twice (two tabs), or after it was voided, closed or settled

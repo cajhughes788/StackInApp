@@ -85,5 +85,6 @@ export { cleanupOrphanReceiptAssets } from "./scheduled/cleanupOrphanReceiptAsse
 export { flagStalePlaidItemsDaily } from "./scheduled/flagStalePlaidItemsDaily"
 export { sendWeeklyDigest } from "./scheduled/sendWeeklyDigest"
 export { sendOwnerReportWeekly } from "./scheduled/sendOwnerReportWeekly"
+export { sendInvoiceRemindersDaily } from "./scheduled/sendInvoiceRemindersDaily"
 export { notifySupportReportCreated } from "./triggers/notifySupportReportCreated"
 export { sendContentLogSignupRow } from "./triggers/sendContentLogSignupRow"

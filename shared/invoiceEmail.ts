@@ -1,5 +1,6 @@
 import { formatInvoiceDate, formatInvoiceMoney, textColorOnAccent } from "./invoiceDisplay"
 import { invoiceBalanceDue, invoiceDueNow } from "./invoicePayments"
+import type { InvoiceReminderStep } from "./invoiceReminders"
 import { escapeHtml } from "./invoicePublicPage"
 import { DEFAULT_INVOICE_ACCENT_COLOR, type InvoiceSettings, type InvoiceType } from "./schemas/invoice"
 
@@ -14,13 +15,25 @@ import { DEFAULT_INVOICE_ACCENT_COLOR, type InvoiceSettings, type InvoiceType } 
 
 export type InvoiceEmail = { subject: string; text: string; html: string }
 
-export function buildInvoiceEmail(params: {
+type InvoiceEmailParams = {
   invoice: InvoiceType
   settings: InvoiceSettings
   link: string
   message?: string | null
   payableOnline: boolean
-}): InvoiceEmail {
+}
+
+export function buildInvoiceEmail(params: InvoiceEmailParams): InvoiceEmail {
+  return buildEmail(params, null)
+}
+
+// An automatic reminder (sendInvoiceRemindersDaily): the same email, with a
+// subject and opening line for where the client is relative to the due date.
+export function buildInvoiceReminderEmail(params: Omit<InvoiceEmailParams, "message"> & { step: InvoiceReminderStep }): InvoiceEmail {
+  return buildEmail(params, params.step)
+}
+
+function buildEmail(params: InvoiceEmailParams, reminder: InvoiceReminderStep | null): InvoiceEmail {
   const { invoice, settings, link, payableOnline } = params
   const message = params.message?.trim() || null
   const business = settings.businessName?.trim() || "Your service provider"
@@ -35,10 +48,29 @@ export function buildInvoiceEmail(params: {
   // (the deposit or everything) and any tip before Stripe Checkout.
   const payLink = payableOnline ? link : null
 
-  const subject = `Invoice #${invoice.number} from ${business} — ${isDeposit ? `${due} deposit` : due} due ${dueDate.replace(/, \d{4}$/, "")}`
+  const shortDueDate = dueDate.replace(/, \d{4}$/, "")
+  const dueText = isDeposit ? `${due} deposit` : due
+  const what = isDeposit ? `The deposit for Invoice #${invoice.number}` : `Invoice #${invoice.number}`
+  const reminderLine =
+    reminder === "before_3"
+      ? `A friendly reminder: ${what} is due ${dueDate}.`
+      : reminder === "due"
+        ? `A friendly reminder: ${what} is due today.`
+        : reminder
+          ? `${what} was due ${dueDate}. If you've already paid, thank you — you can ignore this.`
+          : null
+
+  const subject =
+    reminder === "before_3"
+      ? `Reminder: Invoice #${invoice.number} from ${business} — ${dueText} due ${shortDueDate}`
+      : reminder === "due"
+        ? `Due today: Invoice #${invoice.number} from ${business} — ${dueText}`
+        : reminder
+          ? `Past due: Invoice #${invoice.number} from ${business} — ${dueText} was due ${shortDueDate}`
+          : `Invoice #${invoice.number} from ${business} — ${dueText} due ${shortDueDate}`
 
   const text = [
-    `${business} sent you Invoice #${invoice.number}.`,
+    reminderLine ? `Reminder from ${business}: ${reminderLine}` : `${business} sent you Invoice #${invoice.number}.`,
     "",
     `${amountLabel}: ${due}`,
     `Due: ${dueDate}`,
@@ -64,7 +96,7 @@ export function buildInvoiceEmail(params: {
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#FFFFFF;border-radius:14px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#161B1E;">
 <tr><td style="height:6px;background:${accent};font-size:0;line-height:0;">&nbsp;</td></tr>
 <tr><td style="padding:24px 24px 8px;font-size:17px;font-weight:600;">${e(business)}</td></tr>
-<tr><td style="padding:0 24px 20px;font-size:15px;color:#5F6864;">sent you Invoice #${e(invoice.number)}</td></tr>
+<tr><td style="padding:0 24px 20px;font-size:15px;color:#5F6864;">${reminderLine ? e(reminderLine) : `sent you Invoice #${e(invoice.number)}`}</td></tr>
 <tr><td style="padding:0 24px;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #E2E1DC;border-bottom:1px solid #E2E1DC;">
 <tr><td style="padding:16px 0 4px;font-size:12px;color:#5F6864;text-transform:uppercase;letter-spacing:.04em;">${amountLabel}</td></tr>

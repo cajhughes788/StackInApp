@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Check, FileText, Landmark, Link2, Mail, MoreHorizontal } from "lucide-react"
+import { BellOff, BellRing, Check, FileText, Landmark, Link2, Mail, MoreHorizontal } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -54,6 +54,7 @@ import {
   voidInvoiceInBackground,
   closeInvoiceInBackground,
   waiveDepositInBackground,
+  setRemindersPausedInBackground,
 } from "@/lib/domain/invoiceService"
 import { shareLink } from "@/lib/documentExport"
 import { shareInvoicePdf } from "@/lib/invoicePdf"
@@ -75,7 +76,20 @@ import {
   invoiceRefundable,
   invoiceRefundTarget,
 } from "@shared/invoicePayments"
+import { invoiceNextReminder, type InvoiceReminder } from "@shared/invoiceReminders"
 import type { InvoiceTerms, InvoiceType } from "@shared/schemas/invoice"
+
+function nextReminderLabel(reminder: InvoiceReminder, today: string): string {
+  const when = reminder.sendOn === today ? "today" : formatInvoiceDate(reminder.sendOn)
+  const what = reminder.purpose === "deposit" ? "the deposit" : "it"
+  const why =
+    reminder.step === "before_3"
+      ? `3 days before ${what}'s due`
+      : reminder.step === "due"
+        ? `the day ${what}'s due`
+        : `${reminder.step.replace("overdue_", "")} days after ${what} was due`
+  return `Next reminder ${when} · ${why}`
+}
 
 function formatMoment(iso: string): string {
   return new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
@@ -260,6 +274,11 @@ function InvoiceDetailPage() {
 
   const depositOverdue =
     !!invoice?.deposit && invoiceDepositOutstanding(invoice) > 0 && !invoice.pendingPayment && invoice.deposit.dueDate < today
+
+  // Automatic reminders: shown while they're on in settings and this
+  // invoice would get one (or the user stopped them here).
+  const remindersOn = !!settings?.autoReminders && invoice?.status === "sent" && !!invoice.clientEmail && !!invoice.sharedAt
+  const nextReminder = invoice && remindersOn ? invoiceNextReminder(invoice, today) : null
 
   // Not while a bank payment clears: it would land against a changed invoice.
   const editable = (invoice?.status === "draft" || invoice?.status === "sent") && !invoice?.pendingPayment
@@ -477,6 +496,30 @@ function InvoiceDetailPage() {
             </div>
           ) : null}
 
+          {workspaceId && remindersOn && (invoice.remindersPaused || nextReminder) ? (
+            <div className="flex items-center gap-2.5 rounded-[14px] bg-muted px-3.5 py-3 text-sm text-foreground">
+              {invoice.remindersPaused ? (
+                <BellOff className="size-[18px] shrink-0 text-muted-foreground" aria-hidden="true" />
+              ) : (
+                <BellRing className="size-[18px] shrink-0 text-muted-foreground" aria-hidden="true" />
+              )}
+              <span className="min-w-0 flex-1">
+                {invoice.remindersPaused || !nextReminder
+                  ? `Reminders stopped for this invoice`
+                  : nextReminderLabel(nextReminder, today)}
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="shrink-0 rounded-full bg-card"
+                onClick={() => setRemindersPausedInBackground(workspaceId, invoice, !invoice.remindersPaused)}
+              >
+                {invoice.remindersPaused ? "Resume" : "Stop"}
+              </Button>
+            </div>
+          ) : null}
+
           <InvoicePreview invoice={invoice} settings={settings} />
 
           <section aria-label="History" className="space-y-2 px-1 pb-2 text-sm text-muted-foreground">
@@ -500,6 +543,12 @@ function InvoiceDetailPage() {
                 {payment.feeAmount > 0
                   ? ` · ${payment.via === "online" ? "Stripe kept" : "processing fee"} ${formatInvoiceMoney(payment.feeAmount)}`
                   : ""}
+              </div>
+            ))}
+            {[...invoice.reminderSends].reverse().map((send) => (
+              <div key={`${send.key}_${send.sentAt}`} className="flex items-center gap-2.5">
+                <span className="size-2 rounded-full bg-input" aria-hidden="true" />
+                Reminder emailed · {formatMoment(send.sentAt)}
               </div>
             ))}
             {invoice.lastEmailedAt ? (

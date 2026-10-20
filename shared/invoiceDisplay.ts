@@ -1,5 +1,5 @@
 import { invoiceAmountPaid, invoiceBalanceDue, invoiceDepositOutstanding, invoiceLatestPayment } from "./invoicePayments"
-import { invoiceRefundedTotal, type InvoiceTerms, type InvoiceType } from "./schemas/invoice"
+import { invoiceRefundedTotal, type InvoicePayment, type InvoiceTerms, type InvoiceType } from "./schemas/invoice"
 
 // ---------------------------------------------------------------------------
 // Invoice display helpers
@@ -108,6 +108,24 @@ export function invoiceDisplayStatus(
   }
 }
 
+
+// The push the owner gets when a client pays online. `invoice` is as saved
+// with the payment on it.
+export function invoicePaidNotification(
+  invoice: Pick<InvoiceType, "clientName" | "number" | "status" | "total" | "payments" | "deposit" | "dueDate">,
+  payment: Pick<InvoicePayment, "purpose" | "amount" | "tipAmount">
+): { title: string; body: string } {
+  const tip = payment.tipAmount > 0 ? ` + ${formatInvoiceMoney(payment.tipAmount)} tip` : ""
+  const left = invoiceBalanceDue(invoice)
+  if (invoice.status === "paid") {
+    return { title: `${invoice.clientName} paid ${formatInvoiceMoney(payment.amount)}${tip}`, body: `Invoice #${invoice.number} is paid in full.` }
+  }
+  const rest = left > 0 ? ` · ${formatInvoiceMoney(left)} left, due ${formatInvoiceDate(invoice.dueDate)}` : ""
+  if (payment.purpose === "deposit") {
+    return { title: `${invoice.clientName} paid the ${formatInvoiceMoney(payment.amount)} deposit`, body: `Invoice #${invoice.number}${rest}.` }
+  }
+  return { title: `${invoice.clientName} paid ${formatInvoiceMoney(payment.amount)}${tip}`, body: `Invoice #${invoice.number}${rest}.` }
+}
 
 // "Invoice-0012-Acme-Corp.pdf" — safe on every OS and share target.
 export function invoiceFileName(invoice: Pick<InvoiceType, "number" | "clientName">): string {

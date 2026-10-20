@@ -17,23 +17,28 @@
 //   A failed create offers "Try again" (same clientMutationId, so it can't
 //   make two invoices).
 //
-// Sending, sharing and refunds stay server-confirmed: they wait for
+// Emailing an invoice and saving invoice settings work the same way: the
+// screen moves on at once, and a failure puts things back and says so.
+//
+// Sharing a link, texting and refunds stay server-confirmed: they wait for
 // invoiceSaved() first, then for their own call.
 
 import { createElement } from "react"
 
 import { ToastAction, type ToastActionElement } from "@/components/ui/toast"
 import { toast } from "@/hooks/use-toast"
-import { createInvoice, deleteInvoice, editInvoice, updateInvoiceStatus } from "@/lib/api/invoicesApi"
+import { createInvoice, deleteInvoice, editInvoice, saveInvoiceSettings, updateInvoiceStatus } from "@/lib/api/invoicesApi"
 import { useEntriesStore } from "@/lib/stores/useEntriesStore"
 import { isTempInvoiceId, useInvoicesStore } from "@/lib/stores/useInvoicesStore"
 import { invoicePaymentPurposeFor, invoiceWithPayments } from "@shared/invoicePayments"
 import {
+  InvoiceSettingsSchema,
   invoiceTotalFromLines,
   type InvoiceCreateInput,
   type InvoicePaidMethod,
   type InvoicePatch,
   type InvoicePayment,
+  type InvoiceSettingsPatch,
   type InvoiceType,
 } from "@shared/schemas/invoice"
 
@@ -145,6 +150,8 @@ export function createInvoiceInBackground(workspaceId: string, input: CreateInpu
     lastEmailedAt: null,
     lastEmailedTo: null,
     recentEmailSends: [],
+    reminderSends: [],
+    remindersPaused: false,
     lines: input.lines,
     total: invoiceTotalFromLines(input.lines),
     issueDate: input.issueDate,
@@ -290,6 +297,80 @@ export function closeInvoiceInBackground(workspaceId: string, invoice: InvoiceTy
     const { invoice: closed } = await updateInvoiceStatus(workspaceId, requireSaved(id), { action: "close" })
     applyServerCopy(workspaceId, invoice.id, closed)
   }).catch((error) => onFailure(workspaceId, `Couldn't close invoice #${previous.number}`, error, previous))
+}
+
+/**
+ * Emails the client the invoice (sharing it first, which sends a draft). It
+ * shows as sent and emailed now; a failure (a send cap, no connection) puts
+ * the invoice back and says so.
+ */
+export function emailInvoiceInBackground(workspaceId: string, invoice: InvoiceType, request: { to: string; message?: string }) {
+  const previous = latestInvoice(workspaceId, invoice.id) ?? invoice
+  const now = new Date().toISOString()
+  store().upsertInvoice(workspaceId, {
+    ...previous,
+    status: previous.status === "draft" ? "sent" : previous.status,
+    clientEmail: request.to,
+    lastEmailedAt: now,
+    lastEmailedTo: request.to,
+    sharedAt: previous.sharedAt ?? now,
+    updatedAt: now,
+  })
+  enqueue(invoice.id, async (id) => {
+    // The email shows the business details just saved.
+    await invoiceSettingsSaved(workspaceId)
+    const { invoice: sent } = await updateInvoiceStatus(workspaceId, requireSaved(id), {
+      action: "email",
+      to: request.to,
+      ...(request.message ? { message: request.message } : {}),
+    })
+    applyServerCopy(workspaceId, invoice.id, sent)
+  }).catch((error) => onFailure(workspaceId, `Couldn't email invoice #${previous.number}`, error, previous))
+}
+
+/* --------------------------------------------------------
+ * Invoice settings — saved in the background, one save at a time
+ * -------------------------------------------------------- */
+
+const settingsQueues = new Map<string, { tail: Promise<void>; pending: number }>()
+
+/** Waits for invoice settings still on their way to the server. */
+export async function invoiceSettingsSaved(workspaceId: string): Promise<void> {
+  await settingsQueues.get(workspaceId)?.tail
+}
+
+export function saveInvoiceSettingsInBackground(workspaceId: string, patch: InvoiceSettingsPatch) {
+  const previous = store().byWorkspaceId[workspaceId]?.settings ?? null
+  store().setSettings(workspaceId, InvoiceSettingsSchema.parse({ ...(previous ?? {}), ...patch }))
+  const queue = settingsQueues.get(workspaceId) ?? { tail: Promise.resolve(), pending: 0 }
+  queue.pending += 1
+  const run = queue.tail.then(() => saveInvoiceSettings(workspaceId, patch))
+  queue.tail = run.then(
+    (saved) => {
+      queue.pending -= 1
+      // A later save's optimistic copy stays until its own answer.
+      if (queue.pending === 0) store().setSettings(workspaceId, saved)
+    },
+    (error) => {
+      queue.pending -= 1
+      if (previous) store().setSettings(workspaceId, previous)
+      toast({ title: "Couldn't save your invoice settings", description: errorMessage(error), variant: "destructive" })
+      void store().load(workspaceId, { force: true }).catch(() => {})
+    }
+  )
+  settingsQueues.set(workspaceId, queue)
+}
+
+/** Stops or resumes automatic reminders for one invoice. */
+export function setRemindersPausedInBackground(workspaceId: string, invoice: InvoiceType, paused: boolean) {
+  const previous = latestInvoice(workspaceId, invoice.id) ?? invoice
+  store().upsertInvoice(workspaceId, { ...previous, remindersPaused: paused, updatedAt: new Date().toISOString() })
+  enqueue(invoice.id, async (id) => {
+    const { invoice: saved } = await updateInvoiceStatus(workspaceId, requireSaved(id), { action: "set_reminders", paused })
+    applyServerCopy(workspaceId, invoice.id, saved)
+  }).catch((error) =>
+    onFailure(workspaceId, `Couldn't ${paused ? "stop" : "resume"} reminders on #${previous.number}`, error, previous)
+  )
 }
 
 export function voidInvoiceInBackground(workspaceId: string, invoice: InvoiceType) {

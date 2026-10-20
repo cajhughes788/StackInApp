@@ -28,7 +28,7 @@ const {
   splitAcrossCategories,
   invoiceCheckoutAmounts,
 } = require("../shared/invoicePayments.ts");
-const { invoiceDisplayStatus } = require("../shared/invoiceDisplay.ts");
+const { invoiceDisplayStatus, invoicePaidNotification } = require("../shared/invoiceDisplay.ts");
 const {
   InvoiceCreateInputSchema,
   InvoicePatchSchema,
@@ -589,6 +589,27 @@ run("the client page shows quantities, addresses and policies", () => {
   assert.ok(page.includes("Deposits are non-refundable."));
   // A void invoice drops its policies.
   assert.equal(renderPublicInvoicePage({ ...invoice, status: "void" }, settings, "2026-10-05").includes("Policies &amp; terms"), false);
+});
+
+run("the owner's paid notification says what came in and what's left", () => {
+  const open = InvoiceSchema.parse(doc());
+  const full = invoiceWithPayments(open, [payment("a", 800, { purpose: "full", tipAmount: 120 })]);
+  assert.deepEqual(invoicePaidNotification(full, full.payments[0]), {
+    title: "Acme paid $800.00 + $120.00 tip",
+    body: "Invoice #0012 is paid in full.",
+  });
+  const withDeposit = InvoiceSchema.parse(doc({ deposit: { amount: 200, dueDate: "2026-10-10" } }));
+  const deposit = invoiceWithPayments(withDeposit, [payment("d", 200, { purpose: "deposit" })]);
+  assert.deepEqual(invoicePaidNotification(deposit, deposit.payments[0]), {
+    title: "Acme paid the $200.00 deposit",
+    body: "Invoice #0012 · $600.00 left, due Oct 31, 2026.",
+  });
+  const part = invoiceWithPayments(open, [payment("p", 300)]);
+  assert.equal(invoicePaidNotification(part, part.payments[0]).title, "Acme paid $300.00");
+  assert.equal(invoicePaidNotification(part, part.payments[0]).body, "Invoice #0012 · $500.00 left, due Oct 31, 2026.");
+  // The balance after a deposit finishes it.
+  const rest = invoiceWithPayments(withDeposit, [payment("d", 200, { purpose: "deposit" }), payment("b", 600, { purpose: "balance" })]);
+  assert.equal(invoicePaidNotification(rest, rest.payments[1]).body, "Invoice #0012 is paid in full.");
 });
 
 process.stdout.write("invoice payments checks passed\n");

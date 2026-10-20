@@ -145,6 +145,14 @@ export const InvoiceOpenCheckoutSchema = z.object({
   tipCents: z.number().int().nonnegative().default(0),
 })
 
+// One automatic reminder emailed to the client. The key names what was owed
+// and the step ("balance:2026-10-31:overdue_7"), so a changed due date
+// starts the steps over.
+export const InvoiceReminderSendSchema = z.object({
+  key: z.string(),
+  sentAt: z.string(),
+})
+
 export const InvoiceSchema = z
   .object({
     id: z.string(),
@@ -162,6 +170,10 @@ export const InvoiceSchema = z
     lastEmailedAt: z.string().nullable().default(null),
     lastEmailedTo: z.string().nullable().default(null),
     recentEmailSends: z.array(z.string()).default([]),
+    // Automatic reminders (shared/invoiceReminders.ts): each step sent, keyed
+    // so it fires once, and the user's "stop reminders" for this invoice.
+    reminderSends: z.array(InvoiceReminderSendSchema).default([]),
+    remindersPaused: z.boolean().default(false),
     lines: z.array(InvoiceLineSchema).min(1),
     // Derived from lines, stored so open invoices can be matched by amount
     // without reading every line.
@@ -254,6 +266,7 @@ export type InvoicePayment = z.infer<typeof InvoicePaymentSchema>
 export type InvoicePaymentPurpose = z.infer<typeof InvoicePaymentPurposeSchema>
 export type InvoiceDeposit = z.infer<typeof InvoiceDepositSchema>
 export type InvoicePendingPayment = z.infer<typeof InvoicePendingPaymentSchema>
+export type InvoiceReminderSend = z.infer<typeof InvoiceReminderSendSchema>
 
 // What's been given back across all payments. What can still be given back
 // is per payment: invoicePaymentRefundable in shared/invoicePayments.ts.
@@ -394,6 +407,8 @@ export const InvoiceStatusActionSchema = z.discriminatedUnion("action", [
   // The deposit isn't needed after all: the whole amount is due by the
   // invoice's due date instead.
   z.object({ action: z.literal("waive_deposit") }),
+  // Stops (or resumes) automatic reminders for this invoice.
+  z.object({ action: z.literal("set_reminders"), paused: z.boolean() }),
 ])
 
 export type InvoiceCreateInput = z.infer<typeof InvoiceCreateInputSchema>
@@ -444,6 +459,9 @@ const InvoiceSettingsFields = {
   // The invoice page asks clients paying online for a tip on the payment
   // that finishes the invoice.
   offerTips: z.boolean(),
+  // 521 emails clients a reminder before and after an invoice is due
+  // (shared/invoiceReminders.ts). Off until the user turns it on.
+  autoReminders: z.boolean(),
 }
 
 export const InvoiceSettingsSchema = z.object({
@@ -458,6 +476,7 @@ export const InvoiceSettingsSchema = z.object({
   defaultNote: InvoiceSettingsFields.defaultNote.default(""),
   defaultDeposit: InvoiceSettingsFields.defaultDeposit.default({ type: "none", value: 0, dueInDays: 7 }),
   offerTips: InvoiceSettingsFields.offerTips.default(false),
+  autoReminders: InvoiceSettingsFields.autoReminders.default(false),
   updatedAt: z.string().optional(),
 })
 
@@ -475,6 +494,7 @@ export const InvoiceSettingsPatchSchema = z.object({
   defaultNote: InvoiceSettingsFields.defaultNote.optional(),
   defaultDeposit: InvoiceSettingsFields.defaultDeposit.optional(),
   offerTips: InvoiceSettingsFields.offerTips.optional(),
+  autoReminders: InvoiceSettingsFields.autoReminders.optional(),
 })
 
 export type InvoiceSettings = z.infer<typeof InvoiceSettingsSchema>

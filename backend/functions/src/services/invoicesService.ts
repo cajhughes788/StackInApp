@@ -314,6 +314,9 @@ export async function updateInvoiceStatus(
   if (action.action === "share") {
     return shareInvoice(workspaceId, ref)
   }
+  if (action.action === "set_reminders") {
+    return setRemindersPaused(ref, action.paused)
+  }
   if (action.action === "email") {
     const { emailInvoice } = await import("./invoiceEmailService.js")
     return emailInvoice(workspaceId, ref, { to: action.to, message: action.message })
@@ -430,6 +433,21 @@ async function waiveDeposit(workspaceId: string, ref: FirebaseFirestore.Document
     return next
   })
   if (staleSessionId) await expireCheckoutSession(workspaceId, staleSessionId)
+  return { invoice }
+}
+
+// Stops or resumes automatic reminders for one invoice. Any status: it only
+// matters while the invoice is open.
+async function setRemindersPaused(ref: FirebaseFirestore.DocumentReference, paused: boolean): Promise<{ invoice: InvoiceType }> {
+  const invoice = await db.runTransaction(async (txn) => {
+    const snap = await txn.get(ref)
+    if (!snap.exists) throw new NotFoundError("Invoice not found")
+    const current = InvoiceSchema.parse(snap.data())
+    if (current.remindersPaused === paused) return current
+    const next = InvoiceSchema.parse({ ...current, remindersPaused: paused, updatedAt: new Date().toISOString() })
+    txn.set(ref, next)
+    return next
+  })
   return { invoice }
 }
 

@@ -2,8 +2,8 @@ import sgMail from "@sendgrid/mail"
 import { db } from "../admin"
 import { SENDGRID_API_KEY } from "../secrets"
 import { ConflictError, NotFoundError, TooManyRequestsError } from "../lib/httpErrors"
-import { InvoiceSchema, type InvoiceType } from "@shared/schemas/invoice"
-import { buildInvoiceEmail } from "@shared/invoiceEmail"
+import { InvoiceSchema, type InvoiceSettings, type InvoiceType } from "@shared/schemas/invoice"
+import { buildInvoiceEmail, type InvoiceEmail } from "@shared/invoiceEmail"
 import { publicInvoiceUrl } from "@shared/invoiceDisplay"
 import { readInvoiceSettings, shareInvoice } from "./invoicesService"
 
@@ -22,12 +22,12 @@ import { readInvoiceSettings, shareInvoice } from "./invoicesService"
 export const INVOICE_EMAIL_FROM = "invoices@the521app.com"
 
 // Caps so 521 can't be used to flood an inbox: per invoice, and per
-// workspace per day.
-const MAX_SENDS_PER_INVOICE_PER_DAY = 5
-const MAX_SENDS_PER_WORKSPACE_PER_DAY = 50
-const DAY_MS = 86_400_000
+// workspace per day. Automatic reminders count too (invoiceReminderService.ts).
+export const MAX_SENDS_PER_INVOICE_PER_DAY = 5
+export const MAX_SENDS_PER_WORKSPACE_PER_DAY = 50
+export const DAY_MS = 86_400_000
 
-function emailCounterDoc(workspaceId: string) {
+export function emailCounterDoc(workspaceId: string) {
   return db.collection("workspaces").doc(workspaceId).collection("counters").doc("invoiceEmails")
 }
 
@@ -71,19 +71,7 @@ export async function emailInvoice(
     payableOnline: online.payable,
   })
 
-  sgMail.setApiKey(SENDGRID_API_KEY.value())
-  await sgMail.send({
-    to: request.to,
-    from: { email: INVOICE_EMAIL_FROM, name: `${(settings.businessName || "521").slice(0, 60)} via 521` },
-    ...(settings.businessEmail ? { replyTo: settings.businessEmail } : {}),
-    subject: email.subject,
-    text: email.text,
-    html: email.html,
-    categories: ["invoice"],
-    // Click tracking would rewrite the private invoice link through
-    // SendGrid's redirect domain.
-    trackingSettings: { clickTracking: { enable: false, enableText: false }, openTracking: { enable: false } },
-  })
+  await sendInvoiceEmailMessage(request.to, settings, email, "invoice")
 
   const sentAt = new Date().toISOString()
   return db.runTransaction(async (txn) => {
@@ -98,5 +86,27 @@ export async function emailInvoice(
     })
     txn.set(ref, next)
     return { invoice: next, shareUrl }
+  })
+}
+
+// Sends one invoice email (an invoice or a reminder) from the business.
+export async function sendInvoiceEmailMessage(
+  to: string,
+  settings: InvoiceSettings,
+  email: InvoiceEmail,
+  category: "invoice" | "invoice_reminder"
+): Promise<void> {
+  sgMail.setApiKey(SENDGRID_API_KEY.value())
+  await sgMail.send({
+    to,
+    from: { email: INVOICE_EMAIL_FROM, name: `${(settings.businessName || "521").slice(0, 60)} via 521` },
+    ...(settings.businessEmail ? { replyTo: settings.businessEmail } : {}),
+    subject: email.subject,
+    text: email.text,
+    html: email.html,
+    categories: [category],
+    // Click tracking would rewrite the private invoice link through
+    // SendGrid's redirect domain.
+    trackingSettings: { clickTracking: { enable: false, enableText: false }, openTracking: { enable: false } },
   })
 }

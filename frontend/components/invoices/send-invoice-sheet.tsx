@@ -11,7 +11,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { useToast } from "@/hooks/use-toast"
 import { fieldLabelClass, softInputClass } from "@/components/invoices/invoice-ui"
 import { updateInvoiceStatus } from "@/lib/api/invoicesApi"
-import { invoiceSaved, latestInvoice } from "@/lib/domain/invoiceService"
+import { emailInvoiceInBackground, invoiceSaved, latestInvoice } from "@/lib/domain/invoiceService"
 import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
 import { formatInvoiceDate, formatInvoiceMoney, publicInvoiceUrl } from "@shared/invoiceDisplay"
 import { invoiceBalanceDue } from "@shared/invoicePayments"
@@ -48,7 +48,7 @@ export default function SendInvoiceSheet({
   const [to, setTo] = useState("")
   const [message, setMessage] = useState("")
   const [phone, setPhone] = useState("")
-  const [busy, setBusy] = useState<null | "email" | "text">(null)
+  const [busy, setBusy] = useState<null | "text">(null)
 
   useEffect(() => {
     if (!open) return
@@ -63,28 +63,12 @@ export default function SendInvoiceSheet({
   const amount = formatInvoiceMoney(invoiceBalanceDue(invoice))
   const due = formatInvoiceDate(invoice.dueDate).replace(/, \d{4}$/, "")
 
-  async function sendEmail() {
+  // Sent in the background (invoiceService): the invoice shows as emailed
+  // at once, and a new one still saving is emailed once it's saved.
+  function sendEmail() {
     if (!emailValid) return
-    setBusy("email")
-    try {
-      // A new invoice may still be saving; it's emailed once it is.
-      const id = await invoiceSaved(invoice.id)
-      const { invoice: sent } = await updateInvoiceStatus(workspaceId, id, {
-        action: "email",
-        to: to.trim(),
-        ...(message.trim() ? { message: message.trim() } : {}),
-      })
-      upsertInvoice(workspaceId, sent)
-      toast({ title: "Invoice sent", description: `Emailed to ${to.trim()}.` })
-      onOpenChange(false)
-    } catch (error) {
-      toast({
-        title: "Couldn't send the email",
-        description: error instanceof Error ? error.message : "Check your connection and try again.",
-        variant: "destructive",
-      })
-      setBusy(null)
-    }
+    emailInvoiceInBackground(workspaceId, invoice, { to: to.trim(), ...(message.trim() ? { message: message.trim() } : {}) })
+    onOpenChange(false)
   }
 
   async function sendText() {
@@ -158,10 +142,10 @@ export default function SendInvoiceSheet({
             type="button"
             className="h-[52px] w-full rounded-full text-base font-semibold"
             disabled={!emailValid || busy !== null}
-            onClick={() => void sendEmail()}
+            onClick={() => sendEmail()}
           >
             <Mail className="size-[18px]" aria-hidden="true" />
-            {busy === "email" ? "Sending..." : "Email invoice"}
+            Email invoice
           </Button>
           <p className="text-xs leading-relaxed text-muted-foreground">
             Sent from &ldquo;{settings?.businessName || "521"} via 521&rdquo; with a link to the invoice.{" "}
