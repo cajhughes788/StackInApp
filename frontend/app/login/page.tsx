@@ -19,7 +19,7 @@ import { detectNativeSignupCountryEligibility } from "@/lib/mobile/nativeSignupE
 
 const STACKIN_WEBSITE_SIGNUP_URL =
     process.env.NEXT_PUBLIC_STACKIN_WEBSITE_SIGNUP_URL?.trim() ||
-    "https://stackin-app.com/signup";
+    "https://the521app.com/signup";
 
 function getLoginErrorCopy(error: unknown) {
     if (error instanceof FirebaseError) {

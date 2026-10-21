@@ -58,6 +58,10 @@ export default function WelcomePage() {
   const [nativeCheckoutAllowed, setNativeCheckoutAllowed] = useState(false)
   const [selectedTier, setSelectedTier] = useState<SubscriptionTier | null>(null)
   const [openingCheckout, setOpeningCheckout] = useState(false)
+  // Set once checkout has been opened in the browser; shows the "finished
+  // checkout?" panel and makes returns to the app re-check access.
+  const [awaitingCheckout, setAwaitingCheckout] = useState(false)
+  const [checkingSubscription, setCheckingSubscription] = useState(false)
 
   useEffect(() => {
     setNativeCheckoutAllowed(isNativeApp && detectNativeSignupCountryEligibility())
@@ -92,6 +96,76 @@ export default function WelcomePage() {
     },
     [isNativeApp, refreshAccountAuthority, toast, user]
   )
+
+  const checkForNewSubscription = useCallback(
+    async (options: { attempts?: number; announce?: boolean } = {}) => {
+      const attempts = options.attempts ?? 6
+      setCheckingSubscription(true)
+      try {
+        for (let attempt = 0; attempt < attempts; attempt += 1) {
+          const refreshed = await loadAccountAuthority({ silent: true })
+          if (refreshed?.isSubscriptionActive) {
+            setAwaitingCheckout(false)
+            toast({
+              title: "You're all set",
+              description: "Your subscription is active. Now name your first workspace.",
+            })
+            return true
+          }
+          if (attempt < attempts - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 2000))
+          }
+        }
+        if (options.announce) {
+          toast({
+            title: "Subscription not active yet",
+            description:
+              "If you finished checkout, give it a moment and tap “I've finished checkout” again.",
+          })
+        }
+        return false
+      } finally {
+        setCheckingSubscription(false)
+      }
+    },
+    [loadAccountAuthority, toast]
+  )
+
+  // Stripe sends the person back through app.the521app.com/checkout/return,
+  // which opens stackin://checkout/return?result=success|cancel.
+  useEffect(() => {
+    if (!isNativeApp) return
+    let remove: (() => void) | undefined
+    let cancelled = false
+
+    void (async () => {
+      try {
+        const { App } = await import("@capacitor/app")
+        const handle = await App.addListener("appUrlOpen", (event) => {
+          if (!event.url.startsWith("stackin://checkout/return")) return
+          const result = new URL(event.url).searchParams.get("result")
+          if (result === "success") {
+            setAwaitingCheckout(true)
+            void checkForNewSubscription({ announce: true })
+          } else {
+            toast({
+              title: "Checkout canceled",
+              description: "No charge was made. Pick a plan whenever you're ready.",
+            })
+          }
+        })
+        if (cancelled) handle.remove()
+        else remove = () => handle.remove()
+      } catch {
+        // @capacitor/app is always present in the native build.
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      remove?.()
+    }
+  }, [checkForNewSubscription, isNativeApp, toast])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -179,6 +253,7 @@ export default function WelcomePage() {
       // purchase link). Capacitor hands top-level navigations to external
       // hosts to UIApplication.open, which launches Safari. The resume
       // listener above refreshes access when the person comes back.
+      setAwaitingCheckout(true)
       window.location.href = result.url
     } catch (err: any) {
       toast({
@@ -198,13 +273,16 @@ export default function WelcomePage() {
   const currentWorkspaceCount =
     workspaceState.status === "ready" ? workspaceState.workspaces.length : 0
   const maxWorkspaces = authority?.maxWorkspaces ?? 0
+  // maxWorkspaces is 0 for an account with no subscription yet, which is
+  // "nothing purchased", not "limit reached" — only a paid plan has a limit.
   const hasReachedWorkspaceLimit =
-    typeof maxWorkspaces === "number" && currentWorkspaceCount >= maxWorkspaces
+    Boolean(authority?.isSubscriptionActive) &&
+    typeof maxWorkspaces === "number" &&
+    currentWorkspaceCount >= maxWorkspaces
   const canCreateWorkspace = allowedWorkspaceTypes.length > 0
   const canCreateAnotherWorkspace = canCreateWorkspace && !hasReachedWorkspaceLimit
   const hasSingleWorkspaceType = allowedWorkspaceTypes.length === 1
-  const showNativePlanPicker =
-    nativeCheckoutAllowed && !authority?.isSubscriptionActive && !hasReachedWorkspaceLimit
+  const showNativePlanPicker = nativeCheckoutAllowed && !authority?.isSubscriptionActive
   const accessUnavailableMessage = hasReachedWorkspaceLimit
     ? isNativeApp
       ? "This 521 account has reached its current workspace limit."
@@ -354,6 +432,16 @@ export default function WelcomePage() {
                 >
                   {openingCheckout ? "Opening checkout..." : "Continue to checkout"}
                 </Button>
+                {awaitingCheckout && (
+                  <Button
+                    variant="outline"
+                    onClick={() => void checkForNewSubscription({ attempts: 3, announce: true })}
+                    disabled={checkingSubscription}
+                    className="w-full mt-3"
+                  >
+                    {checkingSubscription ? "Checking your subscription..." : "I've finished checkout"}
+                  </Button>
+                )}
               </div>
             </CardContent>
           ) : (

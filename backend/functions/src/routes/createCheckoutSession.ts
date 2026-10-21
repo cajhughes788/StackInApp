@@ -25,7 +25,10 @@ const BLOCKING_STRIPE_SUBSCRIPTION_STATUSES = new Set<Stripe.Subscription.Status
 const websiteSubscribeUrl =
     process.env.STACKIN_WEBSITE_SUBSCRIBE_URL?.trim() ||
         process.env.STACKIN_WEBSITE_PRICING_URL?.trim() ||
-        "https://stackin-app.com";
+        // The website's own domain. stackin-app.com only redirects to its
+        // homepage (dropping the path), so checkout success pages never
+        // showed for website purchases.
+        "https://the521app.com";
 const websiteBaseUrl = new URL(websiteSubscribeUrl).origin;
 const websitePricingUrl = process.env.STACKIN_WEBSITE_PRICING_URL?.trim() ||
     new URL("/#pricing", websiteBaseUrl).toString();
@@ -102,12 +105,31 @@ async function clearPendingCheckout(subscriptionRef: FirebaseFirestore.DocumentR
     }, { merge: true });
 }
 
+// Checkout started in the iOS app runs in Safari; it comes back through the
+// web app's /checkout/return page, which opens stackin://checkout/return so
+// the person lands in the app again (frontend/app/checkout/return/page.tsx).
+const APP_HOSTING_URL = "https://app.the521app.com";
+
+function buildAppReturnUrl(source: CheckoutSource, result: "success" | "cancel"): string {
+    const url = new URL("/checkout/return", APP_HOSTING_URL);
+    url.searchParams.set(CHECKOUT_SOURCE_PARAM, source);
+    url.searchParams.set("result", result);
+    return url.toString();
+}
+
 function buildCheckoutSuccessUrl(source?: CheckoutSource): string {
+    if (source === "ios-app") {
+        return buildAppReturnUrl(source, "success");
+    }
     const successUrl = new URL("/checkout/success", websiteBaseUrl);
     if (source) {
         successUrl.searchParams.set(CHECKOUT_SOURCE_PARAM, source);
     }
     return successUrl.toString();
+}
+
+function buildCheckoutCancelUrl(source?: CheckoutSource): string {
+    return source === "ios-app" ? buildAppReturnUrl(source, "cancel") : websitePricingUrl;
 }
 
 export async function createCheckoutSessionHandler(req: Request, res: Response): Promise<void> {
@@ -225,7 +247,7 @@ export async function createCheckoutSessionHandler(req: Request, res: Response):
                 },
             ],
             success_url: successUrl,
-            cancel_url: websitePricingUrl,
+            cancel_url: buildCheckoutCancelUrl(source),
             metadata: {
                 uid,
                 tier,
