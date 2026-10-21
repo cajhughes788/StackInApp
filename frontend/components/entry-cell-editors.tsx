@@ -38,6 +38,18 @@ export const paymentFieldConfig = {
         categories: ["services", "tips", "products", "other"] as IncomeCategory[],
         defaultCategory: "services" as IncomeCategory,
     },
+    checks: {
+        label: "Checks",
+        paymentMethod: "check",
+        categories: ["services", "tips", "products", "other"] as IncomeCategory[],
+        defaultCategory: "services" as IncomeCategory,
+    },
+    cashApp: {
+        label: "Cash App",
+        paymentMethod: "cash_app",
+        categories: ["services", "tips", "products", "other"] as IncomeCategory[],
+        defaultCategory: "services" as IncomeCategory,
+    },
     posSales: {
         label: "Card / POS Sales",
         paymentMethod: "pos",

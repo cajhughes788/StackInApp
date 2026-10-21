@@ -23,7 +23,8 @@ export const categoryLabels: Record<IncomeCategory, string> = {
 }
 
 // How a source's amount is entered, matching how its statement shows it:
-// - "split": one amount received (a Venmo/Apple Pay/Zelle payment), split
+// - "split": one amount received (a Venmo/Apple Pay/Zelle/Cash App payment,
+//   a check), split
 //   into categories that always add up to it — Tips is one of them.
 // - "salesPlusTips": the main amount is sales (split into Services /
 //   Products / Other), and tips are entered separately ON TOP, the way a
@@ -33,7 +34,7 @@ export const categoryLabels: Record<IncomeCategory, string> = {
 export type IncomeEntryStyle = "split" | "salesPlusTips"
 
 export const paymentCategoryConfig: Record<
-  "venmo" | "appleCash" | "zelle" | "posSales" | "cashSales",
+  "venmo" | "appleCash" | "zelle" | "checks" | "cashApp" | "posSales" | "cashSales",
   {
     paymentMethod: PaymentMethod
     // For "salesPlusTips" these are the sales categories; tips are separate.
@@ -62,6 +63,20 @@ export const paymentCategoryConfig: Record<
     categories: ["services", "tips", "products", "other"],
     defaultCategory: "services",
     label: "Zelle",
+    entryStyle: "split",
+  },
+  checks: {
+    paymentMethod: "check",
+    categories: ["services", "tips", "products", "other"],
+    defaultCategory: "services",
+    label: "Checks",
+    entryStyle: "split",
+  },
+  cashApp: {
+    paymentMethod: "cash_app",
+    categories: ["services", "tips", "products", "other"],
+    defaultCategory: "services",
+    label: "Cash App",
     entryStyle: "split",
   },
   posSales: {

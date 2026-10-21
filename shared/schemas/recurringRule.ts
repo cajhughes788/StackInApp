@@ -32,6 +32,8 @@ export const RecurringIncomeSourceSchema = z.enum([
   "venmo",
   "appleCash",
   "zelle",
+  "checks",
+  "cashApp",
   "posSales",
   "cashSales",
   "custom",

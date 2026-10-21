@@ -2,7 +2,7 @@ import { DateTime } from "luxon";
 import { db } from "../admin";
 import { assertWorkspaceMembership } from "../lib/workspaceMembership";
 import { findExpenseCategoryGuideEntry, getCpaExpenseCategory } from "@shared/expenseCategories";
-import { EntrySchema, type EntryType, type IncomeCategory, } from "@shared/schemas/entry";
+import { EntrySchema, type EntryType, type IncomeCategory, type PaymentMethod, } from "@shared/schemas/entry";
 import { ExpenseSchema, type ExpenseType, } from "@shared/schemas/expense";
 import { calculateAvgHoursPerWeek } from "@shared/hoursStats";
 import type { ProfitLossDetailItem, ProfitLossHours } from "@shared/schemas/profitLoss";
@@ -20,12 +20,16 @@ const INCOME_CATEGORY_CONFIG: Array<{
     { key: "products", label: "Products" },
     { key: "other", label: "Other" },
 ];
-const PAYMENT_METHOD_LABELS = {
+// Typed against every payment method so a new income source can't fall
+// through to the generic "Income" label unnoticed.
+const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
     cash: "Cash",
     card: "Card",
     venmo: "Venmo",
     apple_cash: "Apple Cash",
     zelle: "Zelle",
+    check: "Checks",
+    cash_app: "Cash App",
     pos: "POS",
     other: "Other",
 };

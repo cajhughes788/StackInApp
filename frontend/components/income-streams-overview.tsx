@@ -2,7 +2,7 @@
 
 import { TotalCardSkeleton } from "@/components/loading-skeletons"
 import { useId, useMemo, useState, type ReactNode } from "react"
-import { Banknote, ChevronDown, CreditCard, Landmark, MoreHorizontal, Smartphone, Store, Wallet } from "lucide-react"
+import { Banknote, ChevronDown, CreditCard, FileCheck, Landmark, MoreHorizontal, Smartphone, Store, Wallet } from "lucide-react"
 
 import { formatCurrency } from "@/lib/helpers"
 import { useEntriesData, useEntriesRenderState } from "@/lib/stores/useEntriesStore"
@@ -44,6 +44,8 @@ import PeriodSelector from "@/components/period-selector"
 const STREAM_META: Record<Exclude<IncomeStreamKey, `named:${string}`>, { label: string; icon: ReactNode }> = {
   venmo: { label: "Venmo", icon: <span className="text-base font-semibold">V</span> },
   zelle: { label: "Zelle", icon: <span className="text-base font-semibold">Z</span> },
+  cash_app: { label: "Cash App", icon: <span className="text-base font-semibold">$</span> },
+  check: { label: "Checks", icon: <FileCheck className="size-5" /> },
   apple_cash: { label: "Apple Pay", icon: <Smartphone className="size-5" /> },
   cash: { label: "Cash", icon: <Banknote className="size-5" /> },
   card: { label: "Card", icon: <CreditCard className="size-5" /> },
@@ -58,7 +60,14 @@ function streamMeta(stream: IncomeStream): { label: string; icon: ReactNode } {
     const name = stream.name ?? "Other income"
     return { label: name, icon: <span className="text-base font-semibold">{name.charAt(0).toUpperCase()}</span> }
   }
-  return STREAM_META[stream.key as Exclude<IncomeStreamKey, `named:${string}`>]
+  // A method this build doesn't know (one added after it shipped) still
+  // shows, under a generic tile, rather than breaking the Income tab.
+  return (
+    STREAM_META[stream.key as Exclude<IncomeStreamKey, `named:${string}`>] ?? {
+      label: String(stream.key).replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()),
+      icon: <Landmark className="size-5" />,
+    }
+  )
 }
 
 const DAYS_SHOWN_COLLAPSED = 6
@@ -107,6 +116,8 @@ const STREAM_GRID_FIELD: Partial<Record<IncomeStreamKey, PaymentField>> = {
   venmo: "venmo",
   apple_cash: "appleCash",
   zelle: "zelle",
+  check: "checks",
+  cash_app: "cashApp",
   pos: "posSales",
   card: "posSales",
   cash: "cashSales",

@@ -57,6 +57,8 @@ const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   venmo: "Venmo",
   zelle: "Zelle",
   apple_cash: "Apple Pay",
+  cash_app: "Cash App",
+  check: "Check",
   pos: "Card / POS sales",
   card: "Card",
   cash: "Cash",
@@ -65,7 +67,7 @@ const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
 // No separate "Card": card money belongs under Card / POS everywhere (the
 // entries grid and Payment streams fold "card" into it), so offering both
 // would only split the same money across two choices.
-const PAYMENT_METHODS: PaymentMethod[] = ["venmo", "zelle", "apple_cash", "pos", "cash", "other"]
+const PAYMENT_METHODS: PaymentMethod[] = ["venmo", "zelle", "apple_cash", "cash_app", "check", "pos", "cash", "other"]
 const DEFAULT_INCOME_CATEGORY: IncomeCategory = "services"
 
 // Same skeleton-flash guard as the expense panel, under its own key so the
@@ -168,6 +170,13 @@ function IncomeReviewCard({
               <div className="text-xs text-muted-foreground">
                 Venmo cash-out. If you&apos;ll import your Venmo statement, choose Not income so it isn&apos;t counted
                 twice.
+              </div>
+            ) : suggestPlaidIncomePaymentMethod(transaction.merchantName, transaction.rawName, { cashApp: true }) === "cash_app" ? (
+              // Like a Venmo cash-out: client payments land in Cash App, and
+              // this is the user moving that balance to the bank.
+              <div className="text-xs text-muted-foreground">
+                Looks like a Cash App cash-out. If you already logged these Cash App payments in 521, choose Not income
+                so they aren&apos;t counted twice.
               </div>
             ) : null}
           </div>

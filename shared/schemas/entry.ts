@@ -15,6 +15,9 @@ export const PaymentMethodSchema = z.enum([
   "zelle",
   "pos",
   "other",
+  // A paper or mobile-deposited check.
+  "check",
+  "cash_app",
 ])
 
 export const IncomeBreakdownSchema = z

@@ -131,7 +131,7 @@ export async function claimInvoicePayments(workspaceId: string, requests: Paymen
 }
 
 // Step 2: the payment's income Entry. Its tip goes on "tips"; "Other" money
-// (a check, a bank transfer) is named after the client.
+// (a bank transfer) is named after the client. Checks have their own source.
 export async function bookPaymentEntry(
   workspaceId: string,
   uid: string,

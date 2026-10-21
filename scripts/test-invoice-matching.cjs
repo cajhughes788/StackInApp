@@ -714,4 +714,37 @@ run("only unmatched manual refunds are candidates", () => {
   assert.deepEqual(selectUnmatchedManualRefunds([inv], "txn_9").map((r) => r.refundId), ["manual_a", "manual_b"]);
 });
 
+// Default payment method for a bank deposit (income review, invoice matching).
+const { suggestPlaidIncomePaymentMethod } = require("../shared/plaidClassification.ts");
+
+run("bank deposits: Cash App and check deposits get their own method once turned on", () => {
+  const method = (raw, merchant = null) => suggestPlaidIncomePaymentMethod(merchant, raw, { checks: true, cashApp: true });
+  assert.equal(method("CASH APP*JOHN SMITH"), "cash_app");
+  assert.equal(method("SQ *CASH APP"), "cash_app");
+  assert.equal(method("Square Cash"), "cash_app");
+  assert.equal(method("CHECK DEPOSIT"), "check");
+  assert.equal(method("MOBILE CHECK DEP 0412"), "check");
+  assert.equal(method("DEPOSIT - CHECK #1042"), "check");
+  assert.equal(method("REMOTE DEPOSIT CAPTURE"), "check");
+  // Square card settlements stay Card / POS; payment apps keep their names.
+  assert.equal(method("SQ *ACME BARBERSHOP"), "pos");
+  assert.equal(method("Square Inc"), "pos");
+  assert.equal(method("VENMO CASHOUT"), "venmo");
+  assert.equal(method("Zelle payment from Jane"), "zelle");
+  // Transfers from a checking account, payroll and cash deposits aren't checks.
+  assert.equal(method("Online Transfer from Checking xxxx1234"), "other");
+  assert.equal(method("DIRECT DEPOSIT ACME PAYROLL"), "other");
+  assert.equal(method("ATM DEPOSIT"), "other");
+});
+
+run("bank deposits: with Checks / Cash App off, nothing changes from before", () => {
+  const method = (raw) => suggestPlaidIncomePaymentMethod(null, raw);
+  assert.equal(method("CHECK DEPOSIT"), "other");
+  assert.equal(method("CASH APP*JOHN SMITH"), "other");
+  assert.equal(method("SQ *CASH APP"), "pos");
+  assert.equal(method("Square Cash"), "pos");
+  assert.equal(suggestPlaidIncomePaymentMethod(null, "CHECK DEPOSIT", { cashApp: true }), "other");
+  assert.equal(suggestPlaidIncomePaymentMethod(null, "CASH APP*JOHN SMITH", { checks: true }), "other");
+});
+
 process.stdout.write("invoice matching checks passed\n");

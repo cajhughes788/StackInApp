@@ -181,8 +181,9 @@ run("a payment's purpose is judged before it's applied", () => {
   assert.equal(invoicePaymentPurposeFor(afterDeposit, 100), "partial");
 });
 
-run("a check is booked as Other income; everything else keeps its method", () => {
-  assert.equal(entryPaymentMethodFor("check"), "other");
+run("every payment, check and Cash App included, is booked under its own method", () => {
+  assert.equal(entryPaymentMethodFor("check"), "check");
+  assert.equal(entryPaymentMethodFor("cash_app"), "cash_app");
   assert.equal(entryPaymentMethodFor("zelle"), "zelle");
   assert.equal(entryPaymentMethodFor("pos"), "pos");
 });

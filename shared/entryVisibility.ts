@@ -33,6 +33,8 @@ export type IndependentFormVisibility = {
   showVenmo: boolean
   showAppleCash: boolean
   showZelle: boolean
+  showChecks: boolean
+  showCashApp: boolean
   showPosSales: boolean
   showCashSales: boolean
 
@@ -113,6 +115,8 @@ export function resolveIndependentFormVisibility(
     showVenmo: settings?.enableVenmo === true,
     showAppleCash: settings?.enableApplePay === true,
     showZelle: settings?.enableZelle === true,
+    showChecks: settings?.enableChecks === true,
+    showCashApp: settings?.enableCashApp === true,
     showPosSales: isPosSalesSourceEnabled(settings),
     showCashSales: isCashSourceEnabled(settings),
 
@@ -178,6 +182,8 @@ export type EntryGridVisibility =
       showVenmo: boolean
       showAppleCash: boolean
       showZelle: boolean
+      showChecks: boolean
+      showCashApp: boolean
       showPosSales: boolean
       showCashSales: boolean
       // "Other" income that isn't custom income — mainly bank deposits
@@ -248,6 +254,12 @@ export function resolveEntryGridVisibility(
   const zelleUsed = entries.some(
     (e) => getIncomeBreakdownTotalForPaymentMethod(e.independent, "zelle") > 0
   )
+  const checksUsed = entries.some(
+    (e) => getIncomeBreakdownTotalForPaymentMethod(e.independent, "check") > 0
+  )
+  const cashAppUsed = entries.some(
+    (e) => getIncomeBreakdownTotalForPaymentMethod(e.independent, "cash_app") > 0
+  )
   // Card tips (legacy "card" + tips) show in the Card / POS column and cash
   // tips in the Cash column — see getIndependentColumnTotal in entries-grid.
   const posUsed = cardUsed || entries.some(
@@ -271,6 +283,8 @@ export function resolveEntryGridVisibility(
     showVenmo: venmoUsed,
     showAppleCash: appleUsed,
     showZelle: zelleUsed,
+    showChecks: checksUsed,
+    showCashApp: cashAppUsed,
     showPosSales: posUsed,
     showCashSales: cashUsed,
     showOtherIncome: otherIncomeUsed,

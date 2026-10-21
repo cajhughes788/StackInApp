@@ -21,7 +21,8 @@ import { computeWorkTime } from "./computeWorkTime"
 //   INDEPENDENT ENTRY:
 //     • totalHours = hours (no break deduction logic)
 //     • paidHours = hours
-//     • dayTotal = venmo + appleCash + posSales + cashSales + sum(customIncome)
+//     • dayTotal = every incomeBreakdowns line (Venmo, Apple Cash, Zelle, Checks,
+//       Cash App, POS, Cash, Other) + Personal Cash when shown
 //     • taxableTotal = dayTotal
 //
 // NOTES:

@@ -35,6 +35,7 @@ export const PAID_METHOD_LABELS: Record<InvoicePaidMethod, string> = {
   zelle: "Zelle",
   venmo: "Venmo",
   check: "Check",
+  cash_app: "Cash App",
   card: "Card",
   pos: "Card",
   apple_cash: "Apple Pay",

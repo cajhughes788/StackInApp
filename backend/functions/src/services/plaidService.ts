@@ -27,6 +27,7 @@ import {
   isLikelyPlaidRefund,
   pickRefundedPurchase,
   suggestPayerName,
+  type OptInIncomeSources,
   type PlaidClassificationInput,
   type PlaidClassificationResult,
 } from "@shared/plaidClassification"
@@ -732,6 +733,9 @@ async function upsertPendingTransactionFromPlaid(
         transferSignal,
       })
     : null
+  // Which opt-in income sources (Checks, Cash App) this deposit may be
+  // suggested as — see OptInIncomeSources.
+  const incomeOptIn = direction === "income" ? await optInIncomeSourcesFor(workspaceId, merchantName, rawName) : {}
   // A Venmo cash-out is only a transfer when the Venmo statement is the
   // workspace's source for Venmo income — see isVenmoCashoutDescriptor.
   const isVenmoCashout = isVenmoCashoutDescriptor(merchantName, rawName, direction)
@@ -821,9 +825,9 @@ async function upsertPendingTransactionFromPlaid(
     suggestedPaymentMethod:
       direction === "income" && !isRefund
         ? (incomeMemory?.lastOutcome === "income" ? incomeMemory.paymentMethod : null) ??
-          suggestPlaidIncomePaymentMethod(merchantName, rawName)
+          suggestPlaidIncomePaymentMethod(merchantName, rawName, incomeOptIn)
         : null,
-    suggestedIncomeLabel: suggestedIncomeLabelFor(direction, isRefund, incomeMemory, merchantName, rawName),
+    suggestedIncomeLabel: suggestedIncomeLabelFor(direction, isRefund, incomeMemory, merchantName, rawName, incomeOptIn),
     isBusinessGuess: classification.isBusinessGuess,
     confidence: classification.confidence,
     isLikelyFuelPurchase: direction === "expense" && isLikelyFuelPurchase(merchantName ?? rawName),
@@ -2093,6 +2097,31 @@ function payerKeyFor(pending: PlaidPendingTransactionType): string {
   return normalizePlaidPayerKey(pending.merchantName, pending.rawName)
 }
 
+// Checks and Cash App are suggested only where the workspace turned them on
+// (OptInIncomeSources in shared/plaidClassification.ts). Settings are read
+// only for a deposit that looks like one, and cached briefly per workspace
+// so a sync of many deposits reads them once.
+const INCOME_OPT_IN_CACHE_MS = 60_000
+const incomeOptInCache = new Map<string, { at: number; value: OptInIncomeSources }>()
+
+async function optInIncomeSourcesFor(
+  workspaceId: string,
+  merchantName: string | null,
+  rawName: string
+): Promise<OptInIncomeSources> {
+  const asIfOn = suggestPlaidIncomePaymentMethod(merchantName, rawName, { checks: true, cashApp: true })
+  if (asIfOn !== "check" && asIfOn !== "cash_app") return {}
+  const cached = incomeOptInCache.get(workspaceId)
+  if (cached && Date.now() - cached.at < INCOME_OPT_IN_CACHE_MS) return cached.value
+  const snap = await db.doc(`workspaces/${workspaceId}/settings/current`).get()
+  const value: OptInIncomeSources = {
+    checks: snap.get("independent.enableChecks") === true,
+    cashApp: snap.get("independent.enableCashApp") === true,
+  }
+  incomeOptInCache.set(workspaceId, { at: Date.now(), value })
+  return value
+}
+
 // Only for deposits that will default to "Paid via: Other" — the payer's
 // remembered name if it was named last time, else one read off the
 // descriptor. Null for spending, refunds and named payment apps.
@@ -2101,11 +2130,12 @@ function suggestedIncomeLabelFor(
   isRefund: boolean,
   incomeMemory: PlaidIncomeMemoryType | null,
   merchantName: string | null,
-  rawName: string
+  rawName: string,
+  optIn: OptInIncomeSources
 ): string | null {
   if (direction !== "income" || isRefund) return null
   const remembered = incomeMemory?.lastOutcome === "income" ? incomeMemory : null
-  const method = remembered?.paymentMethod ?? suggestPlaidIncomePaymentMethod(merchantName, rawName)
+  const method = remembered?.paymentMethod ?? suggestPlaidIncomePaymentMethod(merchantName, rawName, optIn)
   if (method !== "other") return null
   return remembered?.incomeLabel ?? suggestPayerName(merchantName, rawName)
 }
@@ -2176,9 +2206,10 @@ async function recordIncomeDismissal(
     memory.incomeCount > 0 ||
     memory.notIncomeCount < NOT_INCOME_SUGGESTION_THRESHOLD ||
     // One payer key covers every Venmo cash-out (or every Zelle a bank
-    // doesn't name the sender on) — silencing it would hide client money
-    // along with the personal transfers.
-    isPeerToPeerDescriptor(pending.merchantName, pending.rawName)
+    // doesn't name the sender on, or every "MOBILE CHECK DEPOSIT") —
+    // silencing it would hide client money along with the personal ones.
+    isPeerToPeerDescriptor(pending.merchantName, pending.rawName) ||
+    suggestPlaidIncomePaymentMethod(pending.merchantName, pending.rawName, { checks: true }) === "check"
   ) {
     return null
   }

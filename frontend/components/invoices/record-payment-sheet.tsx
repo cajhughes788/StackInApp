@@ -20,6 +20,7 @@ const METHODS: Array<{ value: InvoicePaidMethod; label: string }> = [
   { value: "cash", label: "Cash" },
   { value: "zelle", label: "Zelle" },
   { value: "venmo", label: "Venmo" },
+  { value: "cash_app", label: "Cash App" },
   { value: "check", label: "Check" },
   { value: "pos", label: "Card" },
   { value: "other", label: "Other" },

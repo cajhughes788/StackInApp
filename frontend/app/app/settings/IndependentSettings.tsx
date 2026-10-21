@@ -210,7 +210,7 @@ export default function IndependentSettingsSection({
 
         <CardContent className="space-y-6">
           {/* One switch for every source: a Tips line inside Venmo / Apple
-              Pay / Zelle's split, and on top of sales for Card / POS and
+              Pay / Zelle / Checks / Cash App's split, and on top of sales for Card / POS and
               Cash (see paymentCategoryConfig in lib/incomeBreakdown.ts). It
               replaced the separate Credit Card Tips / Reported Cash toggles,
               which now just count as those sources being on. */}
@@ -237,6 +237,8 @@ export default function IndependentSettingsSection({
           !local.enableVenmo &&
           !local.enableApplePay &&
           !local.enableZelle &&
+          !local.enableChecks &&
+          !local.enableCashApp &&
           !isPosSalesSourceEnabled(local) &&
           !isCashSourceEnabled(local) ? (
             <p className="rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">
@@ -279,6 +281,26 @@ export default function IndependentSettingsSection({
               checked={local.enableZelle ?? false}
               onCheckedChange={(v) =>
                 update("enableZelle", v, "immediate")
+              }
+            />
+          </div>
+
+          <div className="flex items-center justify-between">
+            <Label>Cash App</Label>
+            <Switch
+              checked={local.enableCashApp ?? false}
+              onCheckedChange={(v) =>
+                update("enableCashApp", v, "immediate")
+              }
+            />
+          </div>
+
+          <div className="flex items-center justify-between">
+            <Label>Checks</Label>
+            <Switch
+              checked={local.enableChecks ?? false}
+              onCheckedChange={(v) =>
+                update("enableChecks", v, "immediate")
               }
             />
           </div>

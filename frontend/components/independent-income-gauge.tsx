@@ -82,6 +82,8 @@ export default function IndependentIncomeGauge() {
         acc.venmo += getIncomeBreakdownTotalForPaymentMethod(ind, "venmo")
         acc.appleCash += getIncomeBreakdownTotalForPaymentMethod(ind, "apple_cash")
         acc.zelle += getIncomeBreakdownTotalForPaymentMethod(ind, "zelle")
+        acc.checks += getIncomeBreakdownTotalForPaymentMethod(ind, "check")
+        acc.cashApp += getIncomeBreakdownTotalForPaymentMethod(ind, "cash_app")
         acc.posSales += getIncomeBreakdownTotalForPaymentMethod(ind, "pos")
         acc.cashSales += getIndependentCashSalesTotal(ind)
         acc.customIncome +=
@@ -96,6 +98,8 @@ export default function IndependentIncomeGauge() {
         venmo: 0,
         appleCash: 0,
         zelle: 0,
+        checks: 0,
+        cashApp: 0,
         posSales: 0,
         cashSales: 0,
         customIncome: 0,

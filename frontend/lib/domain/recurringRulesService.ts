@@ -24,6 +24,8 @@ import { computeEntry } from "@shared/computeEntry"
 import { getCurrentEntryPeriod } from "@shared/payPeriods"
 import { computeNextOccurrence } from "@shared/recurringSchedule"
 import { v4 as uuid } from "uuid"
+import type { PaymentMethod } from "@shared/schemas/entry"
+import type { RecurringIncomeSource } from "@shared/schemas/recurringRule"
 
 import {
   postRecurringRule,
@@ -53,10 +55,13 @@ function assertOnlineOrToast(): boolean {
 // Mirrors backend/functions/src/services/recurringRulesService.ts's
 // SOURCE_TO_PAYMENT_METHOD — kept in sync manually since the frontend needs
 // it to preview the generated entry's totals before the backend responds.
-const SOURCE_TO_PAYMENT_METHOD: Record<string, string> = {
+// Typed so a new income source that's missing here fails to compile.
+const SOURCE_TO_PAYMENT_METHOD: Record<RecurringIncomeSource, PaymentMethod> = {
   venmo: "venmo",
   appleCash: "apple_cash",
   zelle: "zelle",
+  checks: "check",
+  cashApp: "cash_app",
   posSales: "pos",
   cashSales: "cash",
   custom: "other",
@@ -68,7 +73,7 @@ const SOURCE_TO_PAYMENT_METHOD: Record<string, string> = {
 // of waiting on the backend's atomic rule+occurrence generation.
 function buildOptimisticIncomeEntry(settings: any, rawInput: any, nowIso: string) {
   const { source, category, amount, label } = rawInput.incomeTemplate
-  const paymentMethod = SOURCE_TO_PAYMENT_METHOD[source] ?? "other"
+  const paymentMethod = SOURCE_TO_PAYMENT_METHOD[source as RecurringIncomeSource] ?? "other"
   const occurrenceDate = rawInput.anchorDate
   const notes = rawInput.notes ?? ""
   const independent = {

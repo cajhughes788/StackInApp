@@ -206,20 +206,43 @@ export function classifyPlaidTransaction(input: PlaidClassificationInput): Plaid
   }
 }
 
+// A deposited check: "CHECK DEPOSIT", "MOBILE CHECK DEP", "DEPOSIT - CHECK
+// #1042", "REMOTE DEPOSIT", "eDeposit". \bcheck\b never matches
+// "checking", so transfers from a checking account aren't caught.
+const CHECK_DEPOSIT_PATTERN =
+  /\b(check|cheque|chk)s?\s*(deposit|dep)\b|\b(deposit|dep)\b[\s\-:#*]*(of\s+)?(check|cheque|chk)\b|\b(mobile|remote)\s*(deposit|dep)\b|\bedeposit\b/
+
 // Best guess at how an incoming bank deposit was paid, for the income
 // review's default payment method. A bank only ever sees the payout — a
 // Venmo cash-out, a Square/Stripe settlement — so this keys off whichever
 // payment app's name appears in the descriptor, falling back to "other".
+// Order matters: the first match wins. Cash App comes before the processor
+// pattern because its deposits often read "SQ *CASH APP" / "Square Cash";
+// a check deposit is matched last so "Venmo … deposit" stays Venmo.
 const INCOME_PAYMENT_METHOD_PATTERNS: Array<[RegExp, PaymentMethod]> = [
   [/\bvenmo\b/, "venmo"],
   [/\bzelle\b/, "zelle"],
   [/\bapple\s*(cash|pay)\b/, "apple_cash"],
+  [/\bcash\s*app\b|\bsquare\s*cash\b/, "cash_app"],
   [/\b(square|stripe|clover|shopify|toast|paypal)\b|\bsq \*/, "pos"],
+  [CHECK_DEPOSIT_PATTERN, "check"],
 ]
 
-export function suggestPlaidIncomePaymentMethod(merchantName: string | null, rawName: string): PaymentMethod {
+// Checks and Cash App are only suggested to workspaces that turned that
+// income source on. Without it a deposit is classified exactly as before
+// those sources existed (a check → "other", "SQ *CASH APP" → "pos"), so an
+// app version that doesn't know them never receives one. Omitted = both off.
+export type OptInIncomeSources = { checks?: boolean; cashApp?: boolean }
+
+export function suggestPlaidIncomePaymentMethod(
+  merchantName: string | null,
+  rawName: string,
+  optIn: OptInIncomeSources = {}
+): PaymentMethod {
   const haystack = `${merchantName ?? ""} ${rawName}`.toLowerCase()
   for (const [pattern, method] of INCOME_PAYMENT_METHOD_PATTERNS) {
+    if (method === "check" && !optIn.checks) continue
+    if (method === "cash_app" && !optIn.cashApp) continue
     if (pattern.test(haystack)) return method
   }
   return "other"

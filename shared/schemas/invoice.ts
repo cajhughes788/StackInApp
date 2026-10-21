@@ -79,11 +79,11 @@ export const InvoiceDisputeSchema = z.object({
   updatedAt: z.string(),
 })
 
-// The Entry payment methods plus "check". A check has no Entry payment
-// method of its own (no grid column or income-stream bucket), so it's booked
-// as named "Other" income under the client — which every income total
-// already counts — and remembered here for display.
-export const InvoicePaidMethodSchema = z.enum([...PaymentMethodSchema.options, "check"])
+// Exactly the Entry payment methods: every way an invoice can be paid is an
+// income source of its own, check and Cash App included. (Before Checks was
+// a source, a check was booked as named "Other" income under the client —
+// see refundEntryPaymentMethod in backend refundsService.ts for those.)
+export const InvoicePaidMethodSchema = PaymentMethodSchema
 
 export function invoiceTotalFromLines(lines: Array<{ amount: number }>): number {
   return lines.reduce((sum, line) => sum + Math.round(line.amount * 100), 0) / 100

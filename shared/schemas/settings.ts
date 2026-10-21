@@ -136,6 +136,8 @@ export const IndependentSettings = z.object({
   enableVenmo: z.boolean().optional(),
   enableApplePay: z.boolean().optional(),
   enableZelle: z.boolean().optional(),
+  enableChecks: z.boolean().optional(),
+  enableCashApp: z.boolean().optional(),
   enablePosSales: z.boolean().optional(),
   enableCashSales: z.boolean().optional(),
   trackVehicleExpenses: z.boolean().optional(),

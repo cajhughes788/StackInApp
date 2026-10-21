@@ -147,6 +147,8 @@ export default function EntriesGrid() {
             showVenmo: visibility.showVenmo,
             showAppleCash: visibility.showAppleCash,
             showZelle: visibility.showZelle,
+            showChecks: visibility.showChecks,
+            showCashApp: visibility.showCashApp,
             showPosSales: visibility.showPosSales,
             showCashSales: visibility.showCashSales,
             showOtherIncome: visibility.showOtherIncome,
@@ -162,6 +164,8 @@ export default function EntriesGrid() {
             venmo: number;
             appleCash: number;
             zelle: number;
+            checks: number;
+            cashApp: number;
             posSales: number;
             cashSales: number;
             otherIncome: number;
@@ -180,6 +184,8 @@ export default function EntriesGrid() {
                 acc.venmo += getIndependentColumnTotal(e, "venmo");
                 acc.appleCash += getIndependentColumnTotal(e, "appleCash");
                 acc.zelle += getIndependentColumnTotal(e, "zelle");
+                acc.checks += getIndependentColumnTotal(e, "checks");
+                acc.cashApp += getIndependentColumnTotal(e, "cashApp");
                 acc.posSales += getIndependentColumnTotal(e, "posSales");
                 acc.cashSales += getIndependentColumnTotal(e, "cashSales");
                 acc.otherIncome += getIndependentColumnTotal(e, "otherIncome");
@@ -204,6 +210,8 @@ export default function EntriesGrid() {
             venmo: 0,
             appleCash: 0,
             zelle: 0,
+            checks: 0,
+            cashApp: 0,
             posSales: 0,
             cashSales: 0,
             otherIncome: 0,
@@ -237,6 +245,10 @@ export default function EntriesGrid() {
         if (independentColumns?.showAppleCash)
             count += 1;
         if (independentColumns?.showZelle)
+            count += 1;
+        if (independentColumns?.showChecks)
+            count += 1;
+        if (independentColumns?.showCashApp)
             count += 1;
         if (independentColumns?.showPosSales)
             count += 1;
@@ -390,6 +402,12 @@ export default function EntriesGrid() {
       {independentColumns?.showZelle && (<th className={`${thBase} text-center sm:text-right`}>
           <ResponsiveHeader desktopLabel="Zelle"/>
         </th>)}
+      {independentColumns?.showCashApp && (<th className={`${thBase} text-center sm:text-right`}>
+          <ResponsiveHeader desktopLabel="Cash App" mobileLines={["Cash", "App"]}/>
+        </th>)}
+      {independentColumns?.showChecks && (<th className={`${thBase} text-center sm:text-right`}>
+          <ResponsiveHeader desktopLabel="Checks"/>
+        </th>)}
       {independentColumns?.showPosSales && (<th className={`${thBase} text-center sm:text-right`}>
           <ResponsiveHeader desktopLabel="Card / POS" mobileLines={["Card /", "POS"]}/>
         </th>)}
@@ -534,6 +552,16 @@ export default function EntriesGrid() {
         <BreakdownCell entry={e} field="zelle"/>
       </td>)}
 
+    {/* Cash App */}
+    {independentColumns?.showCashApp && (<td className={`${tdBase} text-center tabular-nums whitespace-nowrap sm:text-right leading-tight py-1`}>
+        <BreakdownCell entry={e} field="cashApp"/>
+      </td>)}
+
+    {/* Checks */}
+    {independentColumns?.showChecks && (<td className={`${tdBase} text-center tabular-nums whitespace-nowrap sm:text-right leading-tight py-1`}>
+        <BreakdownCell entry={e} field="checks"/>
+      </td>)}
+
     {/* POS Sales */}
     {independentColumns?.showPosSales && (<td className={`${tdBase} text-center tabular-nums whitespace-nowrap sm:text-right leading-tight py-1`}>
         <BreakdownCell entry={e} field="posSales"/>
@@ -631,6 +659,16 @@ export default function EntriesGrid() {
 
         {independentColumns?.showZelle && (<td className="px-2 py-1.5 text-center sm:text-right tabular-nums whitespace-nowrap text-foreground/80">
             {formatCurrency(totals.zelle)}
+          </td>)}
+
+        {/* Cash App */}
+        {independentColumns?.showCashApp && (<td className="px-2 py-1.5 text-center sm:text-right tabular-nums whitespace-nowrap text-foreground/80">
+            {formatCurrency(totals.cashApp)}
+          </td>)}
+
+        {/* Checks */}
+        {independentColumns?.showChecks && (<td className="px-2 py-1.5 text-center sm:text-right tabular-nums whitespace-nowrap text-foreground/80">
+            {formatCurrency(totals.checks)}
           </td>)}
 
         {/* POS */}

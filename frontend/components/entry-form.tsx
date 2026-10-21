@@ -102,8 +102,17 @@ function amountWidth(value: string | undefined): string {
     // Empty shows the "0.00" placeholder, which needs four characters.
     return `${(value ?? "").length || 4}ch`;
 }
-const PAYMENT_REPEAT_FIELDS = ["venmo", "appleCash", "zelle", "posSales", "cashSales"] as const;
+// Every built-in income source the form takes an amount for — the keys of
+// paymentCategoryConfig (lib/incomeBreakdown.ts). Adding a source there
+// without adding it here fails to compile (see the check below).
+const PAYMENT_REPEAT_FIELDS = ["venmo", "appleCash", "zelle", "checks", "cashApp", "posSales", "cashSales"] as const;
 type PaymentField = (typeof PAYMENT_REPEAT_FIELDS)[number];
+// Compile-time guard: the form's sources and paymentCategoryConfig's keys
+// must be the same set.
+type _MissingFromForm = Exclude<keyof typeof paymentCategoryConfig, PaymentField>;
+type _MissingFromConfig = Exclude<PaymentField, keyof typeof paymentCategoryConfig>;
+const _sourcesInSync: [_MissingFromForm, _MissingFromConfig] extends [never, never] ? true : never = true;
+void _sourcesInSync;
 export default function EntryForm() {
     const workspaceState = useWorkspaceStore((s) => s.state);
     const activeWorkspace = workspaceState.status === "ready"
@@ -121,7 +130,7 @@ export default function EntryForm() {
         return resolveEntryFormVisibility(settings, activeWorkspace.type);
     }, [settings, activeWorkspace]);
     // "Receives Tips": a Tips line on every income source — inside the split
-    // for Venmo/Apple Pay/Zelle, on top of sales for POS and Cash.
+    // for Venmo/Apple Pay/Zelle/Checks/Cash App, on top of sales for POS and Cash.
     const tipsEnabled = visibility?.mode === "independent" && visibility.showSourceTips;
     // Read by the memoized breakdown handlers below without re-creating them.
     const tipsEnabledRef = useRef(tipsEnabled);
@@ -178,6 +187,8 @@ export default function EntryForm() {
         venmo: "",
         appleCash: "",
         zelle: "",
+        checks: "",
+        cashApp: "",
         posSales: "",
         cashSales: "",
         // Tips entered ON TOP of POS / cash sales (paymentCategoryConfig's
@@ -188,6 +199,8 @@ export default function EntryForm() {
             venmo: emptyBreakdownDraft(),
             appleCash: emptyBreakdownDraft(),
             zelle: emptyBreakdownDraft(),
+            checks: emptyBreakdownDraft(),
+            cashApp: emptyBreakdownDraft(),
             posSales: emptyBreakdownDraft(),
             cashSales: emptyBreakdownDraft(),
         },
@@ -326,7 +339,7 @@ export default function EntryForm() {
         expanded,
         submitting,
     });
-    const updateCategorizedPaymentAmount = useCallback((field: "venmo" | "appleCash" | "zelle" | "posSales" | "cashSales", value: string) => {
+    const updateCategorizedPaymentAmount = useCallback((field: PaymentField, value: string) => {
         const config = paymentCategoryConfig[field];
         setForm((prev) => {
             const previousDraft = prev.paymentBreakdowns[field];
@@ -349,7 +362,7 @@ export default function EntryForm() {
             };
         });
     }, []);
-    const toggleBreakdownCategory = useCallback((field: "venmo" | "appleCash" | "zelle" | "posSales" | "cashSales", category: IncomeCategory, checked: boolean) => {
+    const toggleBreakdownCategory = useCallback((field: PaymentField, category: IncomeCategory, checked: boolean) => {
         setForm((prev) => {
             const draft = prev.paymentBreakdowns[field];
             const selected = checked
@@ -369,7 +382,7 @@ export default function EntryForm() {
             };
         });
     }, []);
-    const updateBreakdownAmount = useCallback((field: "venmo" | "appleCash" | "zelle" | "posSales" | "cashSales", category: IncomeCategory, value: string) => {
+    const updateBreakdownAmount = useCallback((field: PaymentField, category: IncomeCategory, value: string) => {
         setForm((prev) => {
             const total = parseMoney(prev[field]);
             const draft = prev.paymentBreakdowns[field];
@@ -386,7 +399,7 @@ export default function EntryForm() {
             };
         });
     }, []);
-    const renderPaymentBreakdownFields = (field: "venmo" | "appleCash" | "zelle" | "posSales" | "cashSales") => {
+    const renderPaymentBreakdownFields = (field: PaymentField) => {
         const config = paymentCategoryConfig[field];
         const splitCategories = getSplitCategories(field, tipsEnabled);
         const total = parseMoney(form[field]);
@@ -588,6 +601,8 @@ export default function EntryForm() {
             venmo: "",
             appleCash: "",
             zelle: "",
+            checks: "",
+            cashApp: "",
             posSales: "",
             cashSales: "",
             posTips: "",
@@ -596,6 +611,8 @@ export default function EntryForm() {
                 venmo: emptyBreakdownDraft(),
                 appleCash: emptyBreakdownDraft(),
                 zelle: emptyBreakdownDraft(),
+                checks: emptyBreakdownDraft(),
+                cashApp: emptyBreakdownDraft(),
                 posSales: emptyBreakdownDraft(),
                 cashSales: emptyBreakdownDraft(),
             },
@@ -722,7 +739,7 @@ export default function EntryForm() {
                 }> = [];
                 // tipsOnTop: POS / Cash tips, added to the same breakdown on
                 // top of the sales split (which must still add up to sales).
-                const buildCategorizedBreakdown = (field: "venmo" | "appleCash" | "zelle" | "posSales" | "cashSales", tipsOnTop = 0) => {
+                const buildCategorizedBreakdown = (field: PaymentField, tipsOnTop = 0) => {
                     const total = parseNum(form[field]) ?? 0;
                     const config = paymentCategoryConfig[field];
                     if (total <= 0) {
@@ -764,6 +781,8 @@ export default function EntryForm() {
                 buildCategorizedBreakdown("venmo");
                 buildCategorizedBreakdown("appleCash");
                 buildCategorizedBreakdown("zelle");
+                buildCategorizedBreakdown("checks");
+                buildCategorizedBreakdown("cashApp");
                 // Card tips are stored under POS now (no separate "card" tips
                 // line), cash tips under Cash — as before, just entered here.
                 buildCategorizedBreakdown("posSales", tipsEnabled ? parseNum(form.posTips) ?? 0 : 0);
@@ -1072,6 +1091,8 @@ export default function EntryForm() {
                         { field: "venmo", enabled: visibility.showVenmo, label: "Venmo", chip: "Venmo" },
                         { field: "appleCash", enabled: visibility.showAppleCash, label: "Apple Pay", chip: "Apple Pay" },
                         { field: "zelle", enabled: visibility.showZelle, label: "Zelle", chip: "Zelle" },
+                        { field: "cashApp", enabled: visibility.showCashApp, label: "Cash App", chip: "Cash App" },
+                        { field: "checks", enabled: visibility.showChecks, label: "Checks", chip: "Checks" },
                         { field: "posSales", enabled: visibility.showPosSales, label: paymentCategoryConfig.posSales.label, chip: "Card / POS" },
                         { field: "cashSales", enabled: visibility.showCashSales, label: `${paymentCategoryConfig.cashSales.label} sales`, chip: paymentCategoryConfig.cashSales.label },
                     ] as const).filter((source) => source.enabled && showIncomeSource(source.field));

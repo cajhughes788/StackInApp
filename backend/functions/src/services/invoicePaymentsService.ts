@@ -329,7 +329,7 @@ async function bookPaidSession(
   const timeZone = await workspaceTimeZone(workspaceId)
   const paidDate = DateTime.fromSeconds(paidSeconds).setZone(timeZone).toISODate() ?? new Date().toISOString().slice(0, 10)
   // A bank transfer has no Entry payment method of its own: booked as named
-  // Other income under the client, like a check. Cards go under Card / POS.
+  // Other income under the client. Cards go under Card / POS.
   const isBankTransfer = charge.payment_method_details?.type === "us_bank_account"
   const entryMethod = isBankTransfer ? ("other" as const) : ("pos" as const)
 

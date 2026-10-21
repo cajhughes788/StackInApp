@@ -47,6 +47,8 @@ const SOURCE_TO_PAYMENT_METHOD: Record<RecurringIncomeSource, string> = {
     venmo: "venmo",
     appleCash: "apple_cash",
     zelle: "zelle",
+    checks: "check",
+    cashApp: "cash_app",
     posSales: "pos",
     cashSales: "cash",
     custom: "other",

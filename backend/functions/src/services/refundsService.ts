@@ -3,7 +3,7 @@ import { DateTime } from "luxon"
 import { db } from "../admin"
 import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "../lib/httpErrors"
 import { assertWorkspaceMembership } from "../lib/workspaceMembership"
-import type { RefundInfo } from "@shared/schemas/entry"
+import type { PaymentMethod, RefundInfo } from "@shared/schemas/entry"
 import { InvoiceSchema, type InvoiceDispute, type InvoicePayment, type InvoiceRefund, type InvoiceType } from "@shared/schemas/invoice"
 import {
   entryPaymentMethodFor,
@@ -49,6 +49,19 @@ async function localDate(workspaceId: string, seconds: number): Promise<string> 
   return DateTime.fromSeconds(seconds).setZone(zone).toISODate() ?? new Date(seconds * 1000).toISOString().slice(0, 10)
 }
 
+// The payment method a refund is booked under: the same one the payment's
+// own Entry used, so it nets out of the same stream. That's normally
+// entryPaymentMethodFor(payment.method) — except checks recorded before
+// Checks became an income source, which were booked as named "Other" income
+// under the client. Those are read off the original Entry.
+async function refundEntryPaymentMethod(workspaceId: string, payment: InvoicePayment): Promise<PaymentMethod> {
+  const method = entryPaymentMethodFor(payment.method)
+  if (method !== "check" || !payment.entryId) return method
+  const snap = await db.doc(`workspaces/${workspaceId}/entries/${payment.entryId}`).get()
+  const lines = (snap.data()?.independent?.incomeBreakdowns ?? []) as Array<{ paymentMethod?: string }>
+  return lines.length > 0 && lines.every((line) => line.paymentMethod === "other") ? "other" : method
+}
+
 // One refund (or dispute) Entry against one payment: negative amounts, or
 // positive for a reversed dispute, out of the same stream and categories
 // the payment was booked under (its tip included, in proportion). "Other"
@@ -65,7 +78,7 @@ async function bookRefundEntry(params: {
 }): Promise<string> {
   const { workspaceId, invoice, payment, cents, date, clientMutationId, info } = params
   const sign = info.reason === "dispute_reversed" ? 1 : -1
-  const method = entryPaymentMethodFor(payment.method)
+  const method = await refundEntryPaymentMethod(workspaceId, payment)
   const parts = refundCentsByCategory(invoice.lines, payment, cents)
   const breakdown: Record<string, unknown> = { paymentMethod: method }
   for (const [category, partCents] of parts) breakdown[category] = (sign * partCents) / 100

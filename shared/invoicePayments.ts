@@ -78,10 +78,12 @@ export function invoicePaymentPurposeFor(invoice: LedgerInvoice, amount: number)
   return "partial"
 }
 
-// The Entry payment method a payment is booked under. A check has none of
-// its own: it's named "Other" income under the client.
+// The Entry payment method a payment is booked under: its own method, check
+// included. Payments recorded by check before Checks was an income source
+// were booked as named "Other" income — refunds of those follow the
+// original Entry (refundEntryPaymentMethod in backend refundsService.ts).
 export function entryPaymentMethodFor(method: InvoicePaidMethod): PaymentMethod {
-  return method === "check" ? "other" : method
+  return method
 }
 
 // Each payment's Entry is keyed by the invoice and the payment, so a retry

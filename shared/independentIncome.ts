@@ -15,6 +15,8 @@ export const paymentMethodValues = [
   "zelle",
   "pos",
   "other",
+  "check",
+  "cash_app",
 ] as const
 
 export type IncomeBreakdownLike = {
