@@ -273,10 +273,14 @@
   /* Notices sit bottom-centre on every screen size, above the home indicator. */
   .stackin-safe-message-viewport {
     top: auto;
-    right: auto;
+    right: 0;
     bottom: var(--stackin-message-bottom-offset);
-    left: 50%;
-    transform: translateX(-50%);
+    left: 0;
+    /* Centred with auto margins, not a -50% shift. The build's CSS minifier
+       rewrites `translate: -50% 0` into `transform: translate(-50%)`, which
+       then stacks with a page's -translate-* utilities (a separate CSS
+       property) and pushed the login/signup notices half off-screen. */
+    margin-inline: auto;
     width: min(
       420px,
       calc(

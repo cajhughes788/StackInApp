@@ -11,6 +11,14 @@ import { Toast, ToastDescription, ToastProvider, ToastTitle, ToastViewport } fro
 const DEFAULT_DURATION_MS = 4000
 const ERROR_DURATION_MS = 6000
 
+// Messages in the middle of the screen, for the signed-out pages (login,
+// signup), where the iOS keyboard is usually up and would cover the default
+// bottom position. Horizontal centring comes from the base viewport's auto
+// margins (.stackin-safe-message-viewport in globals.css); only the vertical
+// shift is added here, so there's no second horizontal shift to stack.
+export const CENTERED_TOAST_VIEWPORT =
+  'top-1/2 bottom-auto w-[calc(100%-2rem)] max-w-[420px] -translate-y-1/2 flex-col p-0'
+
 export function Toaster({ viewportClassName }: { viewportClassName?: string }) {
   const { toasts, dismiss } = useToast()
 

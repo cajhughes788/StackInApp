@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Toaster } from "@/components/ui/toaster";
+import { CENTERED_TOAST_VIEWPORT, Toaster } from "@/components/ui/toaster";
 import { Capacitor } from "@capacitor/core";
 import { detectNativeSignupCountryEligibility } from "@/lib/mobile/nativeSignupEligibility";
 
@@ -173,7 +173,7 @@ export default function LoginPage() {
         }
     };
     return (<div className="min-h-screen bg-secondary/30 flex items-center justify-center p-4">
-      <Toaster viewportClassName="left-1/2 top-1/2 right-auto bottom-auto w-[calc(100%-2rem)] max-w-[420px] -translate-x-1/2 -translate-y-1/2 flex-col p-0 sm:left-1/2 sm:top-1/2 sm:right-auto sm:bottom-auto sm:w-[420px] sm:max-w-[420px] sm:-translate-x-1/2 sm:-translate-y-1/2" />
+      <Toaster viewportClassName={CENTERED_TOAST_VIEWPORT} />
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle className="text-2xl font-bold text-center">Welcome back</CardTitle>

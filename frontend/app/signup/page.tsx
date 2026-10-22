@@ -16,14 +16,37 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Toaster } from "@/components/ui/toaster";
+import { CENTERED_TOAST_VIEWPORT, Toaster } from "@/components/ui/toaster";
 import { getAuthSafe } from "@/lib/firebase";
 import { API_ENDPOINTS, apiFetch } from "@/lib/api";
+import { ApiError } from "@/lib/api/core/errors";
 
 // Must match the versions accepted by backend/functions/src/routes/signup.ts.
 const LEGAL_CONSENT_VERSION = "2026-04-27";
 const LEGAL_TERMS_VERSION = "2026-04-27";
 const LEGAL_PRIVACY_VERSION = "2026-09-06";
+
+// Firebase lists each unmet password-policy rule in the error message, e.g.
+// "Missing password requirements: [Password must contain an upper case
+// character, Password must contain a numeric character] (auth/...)".
+function getMissingPasswordRequirements(message: string): string[] {
+    const match = message.match(/Missing password requirements:\s*\[([^\]]*)\]/i);
+    if (!match)
+        return [];
+    return match[1]
+        .split(",")
+        .map((rule) => rule.trim().replace(/^Password must contain\s*/i, ""))
+        .filter(Boolean);
+}
+
+// The signup route rejects a body that fails its zod schema with a 400 and
+// the flattened field errors in `details`.
+function getRejectedSignupField(details: unknown): string | null {
+    const fieldErrors = (details as { fieldErrors?: Record<string, unknown> } | null)?.fieldErrors;
+    if (!fieldErrors)
+        return null;
+    return ["email", "phone", "legalConsent"].find((field) => field in fieldErrors) ?? null;
+}
 
 function getSignupErrorCopy(error: unknown) {
     if (error instanceof FirebaseError) {
@@ -36,12 +59,42 @@ function getSignupErrorCopy(error: unknown) {
             case "auth/invalid-email":
                 return {
                     title: "Email looks off",
-                    description: "Please enter a valid email address and try again.",
+                    description: "That email address isn't valid. Check for typos, like a missing @ or domain.",
+                };
+            case "auth/missing-email":
+                return {
+                    title: "Email missing",
+                    description: "Enter your email address to create an account.",
+                };
+            case "auth/missing-password":
+                return {
+                    title: "Password missing",
+                    description: "Enter a password to create an account.",
                 };
             case "auth/weak-password":
                 return {
                     title: "Password too short",
                     description: "Use at least 6 characters for your password.",
+                };
+            case "auth/password-does-not-meet-requirements": {
+                const missing = getMissingPasswordRequirements(error.message);
+                return {
+                    title: "Password doesn't meet requirements",
+                    description: missing.length
+                        ? `Your password must contain ${missing.join(", ")}.`
+                        : "Use a longer password with a mix of upper and lower case letters, numbers and symbols.",
+                };
+            }
+            case "auth/operation-not-allowed":
+            case "auth/admin-restricted-operation":
+                return {
+                    title: "Signups are paused",
+                    description: "New accounts can't be created with email right now. Please contact support.",
+                };
+            case "auth/user-disabled":
+                return {
+                    title: "Account disabled",
+                    description: "This email belongs to an account that has been disabled. Please contact support.",
                 };
             case "auth/network-request-failed":
                 return {
@@ -55,9 +108,54 @@ function getSignupErrorCopy(error: unknown) {
                 };
         }
     }
+    if (error instanceof ApiError) {
+        // By now the sign-in itself exists; only saving the profile failed.
+        if (error.status === 400) {
+            switch (getRejectedSignupField(error.details)) {
+                case "email":
+                    return {
+                        title: "Email looks off",
+                        description: "We couldn't save that email address. Check it for typos and try again.",
+                    };
+                case "phone":
+                    return {
+                        title: "Phone number looks off",
+                        description: "Check your phone number, or leave it blank since it's optional.",
+                    };
+                case "legalConsent":
+                    return {
+                        title: "Update needed",
+                        description: "Our Terms or Privacy Policy changed. Update the app, then try again.",
+                    };
+            }
+        }
+        if (error.status === 401 || error.status === 403) {
+            return {
+                title: "Couldn't verify your sign-in",
+                description: "Close and reopen the app, then tap Continue again with the same email and password.",
+            };
+        }
+        return {
+            title: "Couldn't finish setting up your account",
+            description: `Your sign-in was created, but our server couldn't save your profile${error.status ? ` (error ${error.status})` : ""}. Tap Continue again to retry.`,
+        };
+    }
+    // apiFetch's own timeout surfaces as an AbortError, and a dropped
+    // connection as WebKit's TypeError "Load failed" — not a FirebaseError.
+    const name = error instanceof Error ? error.name : "";
+    const message = error instanceof Error ? error.message : "";
+    const isNetworkFailure = name === "TypeError" && /load failed|network|failed to fetch/i.test(message);
+    if (name === "AbortError" || isNetworkFailure || (error as { isTimeout?: boolean } | null)?.isTimeout) {
+        return {
+            title: "Connection is slow",
+            description: "We couldn't reach 521 in time. Check your connection and tap Continue again.",
+        };
+    }
+    // Show the Firebase code so an unmapped failure is still identifiable.
+    const code = error instanceof FirebaseError ? ` (${error.code})` : "";
     return {
         title: "Couldn't create your account",
-        description: "Something went wrong while creating your account. Please try again.",
+        description: `Something went wrong while creating your account${code}. Please try again.`,
     };
 }
 
@@ -117,6 +215,7 @@ export default function SignupPage() {
             router.push("/app");
         }
         catch (err: any) {
+            console.error("[signup] account creation failed", err);
             const copy = getSignupErrorCopy(err);
             toast({
                 title: copy.title,
@@ -130,7 +229,7 @@ export default function SignupPage() {
     };
 
     return (<div className="min-h-screen bg-secondary/30 flex items-center justify-center p-4">
-      <Toaster viewportClassName="left-1/2 top-1/2 right-auto bottom-auto w-[calc(100%-2rem)] max-w-[420px] -translate-x-1/2 -translate-y-1/2 flex-col p-0 sm:left-1/2 sm:top-1/2 sm:right-auto sm:bottom-auto sm:w-[420px] sm:max-w-[420px] sm:-translate-x-1/2 sm:-translate-y-1/2" />
+      <Toaster viewportClassName={CENTERED_TOAST_VIEWPORT} />
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle className="text-2xl font-bold text-center">Create your account</CardTitle>
@@ -154,11 +253,15 @@ export default function SignupPage() {
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
               <div className="relative">
-                <Input id="password" type={showPassword ? "text" : "password"} autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Create a password" required/>
+                <Input id="password" type={showPassword ? "text" : "password"} autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Create a password" aria-describedby="password-requirements" required/>
                 <button type="button" onClick={() => setShowPassword((current) => !current)} className="absolute right-3 top-2.5 text-muted-foreground">
                   {showPassword ? <EyeOff size={18}/> : <Eye size={18}/>}
                 </button>
               </div>
+              {/* Mirrors the Firebase Auth password policy (enforced since 2026-10-12). */}
+              <p id="password-requirements" className="text-xs text-muted-foreground">
+                At least 8 characters, with an uppercase letter, a lowercase letter and a symbol.
+              </p>
             </div>
 
             <div className="space-y-2">
