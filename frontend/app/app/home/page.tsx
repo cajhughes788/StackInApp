@@ -39,6 +39,7 @@ import AllRecordsSection from "@/components/all-records-section";
 import { getActiveProfileTrace } from "@/lib/observability/profileTrace";
 import { useAppBootstrapState } from "@/contexts/app-bootstrap-context";
 import { useHomepageLayoutShiftDiagnostics } from "@/hooks/useHomepageLayoutShiftDiagnostics";
+import HomeTour from "@/components/onboarding/home-tour";
 
 export default function HomePage() {
     const router = useRouter();
@@ -301,7 +302,7 @@ export default function HomePage() {
       <StackInHeader />
 
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-5 px-4 pb-10 pt-4">
-        <div className="order-0 grid grid-cols-2 rounded-full bg-muted p-1" role="group" aria-label="Show income or expenses">
+        <div className="order-0 grid grid-cols-2 rounded-full bg-secondary p-1 dark:bg-muted" role="group" aria-label="Show income or expenses" data-tour="mode-switch">
           {(["income", "expenses"] as const).map((tab) => (<button key={tab} type="button" aria-pressed={mode === tab} onClick={() => setMode(tab)} className={`rounded-full py-2 text-sm font-medium transition-colors ${mode === tab
                 ? "bg-foreground text-background shadow-sm"
                 : "text-muted-foreground hover:text-foreground"}`}>
@@ -316,12 +317,13 @@ export default function HomePage() {
           {showVenmoImportPanel ? <VenmoImportPanel /> : null}
         </div>
 
-        <div className="order-4">
+        <div className="order-4" data-tour="entry-form">
           {mode === "income" ? <EntryForm /> : <ExpenseForm />}
         </div>
 
         <AllRecordsSection kind={mode === "income" ? "entries" : "expenses"} count={mode === "income" ? entries.length : expenses.length}/>
       </main>
+      <HomeTour />
     </div>);
     }
     // W-2 home: the pay period's total, the entry form, and the grid (the
@@ -330,9 +332,16 @@ export default function HomePage() {
       <StackInHeader />
 
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-5 px-4 pb-10 pt-4">
-        <IncomeGauge />
-        <EntryForm />
-        <AllRecordsSection kind="entries" count={entries.length} defaultOpen className=""/>
+        <div data-tour="total">
+          <IncomeGauge />
+        </div>
+        <div data-tour="entry-form">
+          <EntryForm />
+        </div>
+        <div data-tour="records">
+          <AllRecordsSection kind="entries" count={entries.length} defaultOpen className=""/>
+        </div>
       </main>
+      <HomeTour />
     </div>);
 }

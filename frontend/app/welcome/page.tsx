@@ -309,7 +309,7 @@ export default function WelcomePage() {
 
   const handleCreateWorkspace = async () => {
     setNameError(name.trim() ? null : "Enter a name for this workspace.")
-    setTypeError(type ? null : "Choose a workspace type.")
+    setTypeError(type ? null : "Choose how you're paid.")
     if (!name.trim()) return
 
     // The button is disabled and the reason shown under the type picker.
@@ -385,14 +385,16 @@ export default function WelcomePage() {
             <CardTitle className="text-2xl font-bold">
               {isAddWorkspaceMode
                 ? "Add a Workspace"
-                : "Let’s Set Up Your First Workspace"}
+                : showNativePlanPicker
+                  ? "How do you earn?"
+                  : "Name your first job or business"}
             </CardTitle>
             <CardDescription>
               {isAddWorkspaceMode
                 ? "Create another workspace for a new job or business."
                 : showNativePlanPicker
-                  ? "Pick a plan to get started. Then you'll name your first workspace."
-                  : "Choose a workspace name and type to continue."}
+                  ? "Pick the plan that fits your work. Then you'll name your first workspace."
+                  : "We call this a workspace. You'll track each one separately, and you can add more later."}
             </CardDescription>
           </CardHeader>
 
@@ -447,13 +449,9 @@ export default function WelcomePage() {
           ) : (
           <CardContent className="space-y-6">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Workspace Name</label>
-              <p className="text-xs text-muted-foreground">
-                Use your company name, role, or business name. You can edit this later in your
-                account settings.
-              </p>
+              <label className="text-sm font-medium">Name</label>
               <Input
-                placeholder="e.g. Main Job, Freelance, Barber Shop"
+                placeholder="e.g. Main job, Freelance, Barber shop"
                 value={name}
                 onChange={(e) => {
                   setName(e.target.value)
@@ -466,11 +464,11 @@ export default function WelcomePage() {
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium">Workspace Type</label>
+              <label className="text-sm font-medium">How are you paid?</label>
 
               {hasSingleWorkspaceType && type ? (
                 <div className="rounded-xl border border-border bg-card px-4 py-3 text-sm">
-                  {type === "w2" ? "W-2 / Hourly" : "Independent / Self-Employed"}
+                  {type === "w2" ? "Paycheck (W-2)" : "Self-employed (1099)"}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -482,7 +480,7 @@ export default function WelcomePage() {
                       disabled={isSubmitting}
                       className="w-full"
                     >
-                      W-2 / Hourly
+                      Paycheck (W-2)
                     </Button>
                   )}
 
@@ -494,7 +492,7 @@ export default function WelcomePage() {
                       disabled={isSubmitting}
                       className="w-full"
                     >
-                      Independent / Self-Employed
+                      Self-employed (1099)
                     </Button>
                   )}
                 </div>
@@ -518,10 +516,10 @@ export default function WelcomePage() {
                 className="w-full"
               >
                 {isSubmitting
-                  ? "Creating Workspace..."
+                  ? "Creating workspace..."
                   : isAddWorkspaceMode
                     ? "Add Workspace"
-                    : "Create Workspace"}
+                    : "Create workspace"}
               </Button>
             </div>
           </CardContent>

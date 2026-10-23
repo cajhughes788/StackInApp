@@ -4,7 +4,7 @@ import { AlertCircle } from 'lucide-react'
 
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
-import { Toast, ToastDescription, ToastProvider, ToastTitle, ToastViewport } from '@/components/ui/toast'
+import { Toast, ToastClose, ToastDescription, ToastProvider, ToastTitle, ToastViewport } from '@/components/ui/toast'
 
 // How long a notice stays up unless a caller sets its own duration: errors
 // a little longer, since there's more to read.
@@ -19,6 +19,8 @@ const ERROR_DURATION_MS = 6000
 export const CENTERED_TOAST_VIEWPORT =
   'top-1/2 bottom-auto w-[calc(100%-2rem)] max-w-[420px] -translate-y-1/2 flex-col p-0'
 
+// Every message has an always-visible X in the top-right corner, so it can be
+// cleared straight away instead of waiting for it to time out.
 export function Toaster({ viewportClassName }: { viewportClassName?: string }) {
   const { toasts, dismiss } = useToast()
 
@@ -31,6 +33,7 @@ export function Toaster({ viewportClassName }: { viewportClassName?: string }) {
             key={id}
             variant={variant}
             duration={duration ?? (isError ? ERROR_DURATION_MS : DEFAULT_DURATION_MS)}
+            className="pr-11"
             {...props}
           >
             {isError ? <AlertCircle className="size-[18px] shrink-0 text-red-600 dark:text-red-400" aria-hidden="true" /> : null}
@@ -40,6 +43,10 @@ export function Toaster({ viewportClassName }: { viewportClassName?: string }) {
               {description && <ToastDescription className={cn(title && 'mt-0.5')}>{description}</ToastDescription>}
             </button>
             {action}
+            <ToastClose
+              aria-label="Dismiss"
+              className="right-1.5 top-1.5 rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground sm:opacity-100 group-[.destructive]:text-muted-foreground group-[.destructive]:hover:text-foreground"
+            />
           </Toast>
         )
       })}

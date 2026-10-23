@@ -159,7 +159,7 @@ export default function NeedsYouPanel() {
   const hidden = hasBank !== true && total === 0
 
   return (
-    <section aria-labelledby="needs-you-heading" className="space-y-3" hidden={hidden}>
+    <section aria-labelledby="needs-you-heading" className="space-y-3" hidden={hidden} data-tour="needs-you">
       <div className="flex items-baseline justify-between gap-3 px-1">
         <h2 id="needs-you-heading" className="text-lg font-semibold text-foreground">
           Needs you

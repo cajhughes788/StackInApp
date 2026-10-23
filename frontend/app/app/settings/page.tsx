@@ -16,7 +16,8 @@ import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore";
 import { debugError, debugLog } from "@/lib/debugLoop";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, } from "@/components/ui/dialog";
+import { SettingsIntroDialog } from "@/components/onboarding/setup-guide";
+import { isFirstWorkspaceOfType, useGuideStore } from "@/lib/stores/useGuideStore";
 import { getSettingsSaveStatusCopy } from "@/lib/domain/settingsSync";
 import { NavigationGuardMode, useNavigationGuardStore } from "@/lib/stores/useNavigationGuardStore";
 import { useSettingsSaveStore } from "@/lib/stores/useSettingsSaveStore";
@@ -111,14 +112,6 @@ function mergeSettings(base: SettingsType | null, patch: SettingsPatchType): Set
 export default function SettingsPage() {
     const router = useRouter();
     const { toast } = useToast();
-    // New user welcome modal flag (same behavior as old file)
-    let isNewUser = false;
-    try {
-        isNewUser = localStorage.getItem("new-user") === "true";
-        if (isNewUser)
-            localStorage.removeItem("new-user");
-    }
-    catch { }
     // ----------------------------------------------------------------------------------
     // Stores
     // ----------------------------------------------------------------------------------
@@ -154,7 +147,12 @@ export default function SettingsPage() {
     // ----------------------------------------------------------------------------------
     // Local component state
     // ----------------------------------------------------------------------------------
-    const [showWelcome, setShowWelcome] = useState(isNewUser);
+    // First-time setup opens with the intro guide; this records that it was closed.
+    const [setupIntroDone, setSetupIntroDone] = useState(false);
+    const requestHomeTour = useGuideStore((s) => s.requestHomeTour);
+    // The intro and the Home tour run for the first workspace of each type only.
+    const showFirstRunGuide = workspaceState.status === "ready" &&
+        isFirstWorkspaceOfType(workspaceState.workspaces, workspaceState.activeWorkspace);
     const [isTransitioningToHome, setIsTransitioningToHome] = useState(false);
     const [showInitialValidationFeedback, setShowInitialValidationFeedback] = useState(false);
     const [saveStatus, setSaveStatus] = useState<"idle" | "dirty">("idle");
@@ -720,6 +718,10 @@ export default function SettingsPage() {
             setIsTransitioningToHome(false);
             return;
         }
+        // Part two of the first-run guide: show the user around Home.
+        if (activeWorkspace && showFirstRunGuide) {
+            requestHomeTour(activeWorkspace.id, activeWorkspace.type);
+        }
         router.replace("/app/home");
     };
     useEffect(() => {
@@ -1007,7 +1009,7 @@ export default function SettingsPage() {
 
         {activeWorkspace?.type === "w2" && (<W2SettingsSection data={formData.w2} isInitialSetup={isInitialSettingsSetup} onChange={(patch, behavior) => updateSection("w2", patch, behavior)}/>)}
 
-        {activeWorkspace?.type === "independent" && (<IndependentSettingsSection data={formData.independent} onChange={(patch, behavior) => updateSection("independent", patch, behavior)}/>)}
+        {activeWorkspace?.type === "independent" && (<IndependentSettingsSection data={formData.independent} isInitialSetup={isInitialSettingsSetup} onChange={(patch, behavior) => updateSection("independent", patch, behavior)}/>)}
 
         <CommonSettingsSection data={formData.common} onChange={(patch, behavior) => updateSection("common", patch, behavior)}/>
 
@@ -1043,21 +1045,6 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <Dialog open={showWelcome} onOpenChange={setShowWelcome}>
-        <DialogContent className="max-w-md text-center space-y-4">
-          <DialogHeader>
-            <DialogTitle className="text-2xl font-bold">
-              Welcome to 521!
-            </DialogTitle>
-            <DialogDescription>
-              Configure your settings to start tracking your earnings
-              accurately.
-            </DialogDescription>
-          </DialogHeader>
-          <Button onClick={() => setShowWelcome(false)} className="w-full">
-            Get started
-          </Button>
-        </DialogContent>
-      </Dialog>
+      {activeWorkspace ? (<SettingsIntroDialog open={isInitialSettingsSetup && showFirstRunGuide && !setupIntroDone} onDone={() => setSetupIntroDone(true)} workspaceType={activeWorkspace.type} workspaceName={activeWorkspace.name} isFirstWorkspace={workspaceState.status === "ready" && workspaceState.workspaces.length <= 1}/>) : null}
     </>);
 }

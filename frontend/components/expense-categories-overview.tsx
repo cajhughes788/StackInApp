@@ -336,7 +336,7 @@ export default function ExpenseCategoriesOverview() {
   // review (order-1 / order-3 in its flex column).
   return (
     <>
-      <section className="relative order-1 rounded-[22px] bg-card border border-card-border p-5">
+      <section className="relative order-1 rounded-[22px] bg-card border border-card-border p-5" data-tour="total">
         <SyncStatusIndicator visible={expensesRevalidating || settingsRevalidating} label="Syncing expenses" />
         <PeriodSelector />
 

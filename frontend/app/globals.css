@@ -39,7 +39,17 @@
   --stackin-z-modal-overlay: 11000;
   --stackin-z-modal: 11010;
   /* 521 brand: charcoal #161B1E, off-white #ECEBE6, green #2FA866 */
-  --background: #F4F3EF;
+  /* First-run guide cards (Home tour, Settings intro and hints): the
+     opposite of the page, so a note never reads as one of its cards. Light
+     mode is a slate card outlined in green; dark mode an off-white card. */
+  --guide-bg: #3D4549;
+  --guide-fg: #FFFFFF;
+  --guide-muted: rgb(255 255 255 / 0.8);
+  --guide-accent: #6FD69B;
+  --guide-border: #2FA866;
+  --guide-subtle: rgb(255 255 255 / 0.08);
+  --guide-control: rgb(255 255 255 / 0.3);
+  --background: #E1E0DA;
   --foreground: #161B1E;
 
   --card: #FFFFFF;
@@ -54,7 +64,7 @@
   --primary: #2FA866;
   --primary-foreground: #0B1F14;
 
-  --secondary: #E9E8E3;
+  --secondary: #D6D5CE;
   --secondary-foreground: #161B1E;
 
   --muted: #F1F0EB;
@@ -93,6 +103,13 @@
 }
 
 .dark {
+  --guide-bg: #ECEBE6;
+  --guide-fg: #161B1E;
+  --guide-muted: rgb(22 27 30 / 0.72);
+  --guide-accent: #1E7A47;
+  --guide-border: #ECEBE6;
+  --guide-subtle: rgb(22 27 30 / 0.06);
+  --guide-control: rgb(22 27 30 / 0.25);
   --background: #161B1E;
   --foreground: #ECEBE6;
 

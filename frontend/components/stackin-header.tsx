@@ -15,6 +15,7 @@ import {
 import {
   BookOpen,
   ChartNoAxesColumnIncreasing,
+  Compass,
   House,
   Landmark,
   LifeBuoy,
@@ -29,6 +30,7 @@ import SupportDialog from "@/components/support/support-dialog"
 import WorkspaceSwitcher from "@/components/workspace-switcher"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import { useNavigationGuardStore } from "@/lib/stores/useNavigationGuardStore"
+import { useGuideStore } from "@/lib/stores/useGuideStore"
 import { useToast } from "@/hooks/use-toast"
 import { prefetchRouteData } from "@/lib/prefetch/routeData"
 
@@ -43,6 +45,7 @@ export default function StackInHeader() {
   const searchParams = useSearchParams()
   const workspaceState = useWorkspaceStore((s) => s.state)
   const navigationGuard = useNavigationGuardStore((s) => s.guard)
+  const requestHomeTour = useGuideStore((s) => s.requestHomeTour)
   const activeWorkspace =
     workspaceState.status === "ready" ? workspaceState.activeWorkspace : null
   const activeWorkspaceId =
@@ -168,6 +171,7 @@ export default function StackInHeader() {
                 <button
                   type="button"
                   aria-label="Open menu"
+                  data-tour="menu"
                   className="flex size-9 items-center justify-center rounded-full border border-card-border bg-card text-foreground transition hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 >
                   <Menu className="h-4 w-4" />
@@ -225,6 +229,18 @@ export default function StackInHeader() {
                     </DropdownMenuItem>
                   )
                 })}
+                {activeWorkspace ? (
+                  <DropdownMenuItem
+                    className="cursor-pointer gap-3 rounded-xl px-2.5 py-2 text-sm"
+                    onClick={() => {
+                      requestHomeTour(activeWorkspace.id, activeWorkspace.type)
+                      if (pathname !== "/app/home") void navigateWithPendingSaveGuard("/app/home")
+                    }}
+                  >
+                    <Compass className="size-4 text-muted-foreground" aria-hidden="true" />
+                    Take the tour
+                  </DropdownMenuItem>
+                ) : null}
                 <DropdownMenuItem
                   className="cursor-pointer gap-3 rounded-xl px-2.5 py-2 text-sm"
                   onClick={() => setSupportOpen(true)}

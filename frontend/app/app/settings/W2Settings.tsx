@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { SetupHint } from "@/components/onboarding/setup-guide";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
@@ -86,6 +87,9 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
       <Card>
         <CardHeader>
           <CardTitle>Pay period goal</CardTitle>
+          <SetupHint show={isInitialSetup} step={1}>
+            Optional: what you want to earn each pay period. Home shows your progress.
+          </SetupHint>
         </CardHeader>
         <CardContent className="space-y-2">
           <Label htmlFor="incomeTargetPerPeriod">Income goal per pay period ($)</Label>
@@ -105,6 +109,9 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
       <Card>
         <CardHeader>
           <CardTitle>Hourly income</CardTitle>
+          <SetupHint show={isInitialSetup} step={2}>
+            Paid by the hour? Turn this on and add your rate so 521 can work out your pay.
+          </SetupHint>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="flex items-center justify-between">
@@ -508,6 +515,9 @@ export default function W2SettingsSection({ data, isInitialSetup = false, onChan
       <Card>
         <CardHeader>
           <CardTitle>Pay schedule</CardTitle>
+          <SetupHint show={isInitialSetup} step={3}>
+            Pick how often you&rsquo;re paid so your totals line up with your paychecks.
+          </SetupHint>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="space-y-2">

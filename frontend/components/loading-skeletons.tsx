@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 /** Shaped like the home total card (period, headline number, subtitle). */
 export function TotalCardSkeleton({ label, className }: { label: string; className?: string }) {
   return (
-    <div className={cn("space-y-3 rounded-[22px] border border-card-border bg-card p-5", className)} role="status" aria-live="polite">
+    <div className={cn("space-y-3 rounded-[22px] border border-card-border bg-card p-5", className)} role="status" aria-live="polite" data-tour="total">
       <span className="sr-only">{label}</span>
       <Skeleton className="h-5 w-40 bg-muted" />
       <Skeleton className="h-4 w-24 bg-muted" />

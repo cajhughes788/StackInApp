@@ -12,12 +12,15 @@ import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
+import { SetupHint } from "@/components/onboarding/setup-guide"
 
 export default function IndependentSettingsSection({
   data,
+  isInitialSetup = false,
   onChange,
 }: {
   data?: Partial<IndependentSettingsType>
+  isInitialSetup?: boolean
   onChange: (
     patch: Partial<IndependentSettingsType>,
     behavior?: "immediate" | "deferred"
@@ -74,6 +77,9 @@ export default function IndependentSettingsSection({
       <Card>
         <CardHeader>
           <CardTitle>Monthly targets</CardTitle>
+          <SetupHint show={isInitialSetup} step={1}>
+            Set an income goal per month. Home shows how close you are.
+          </SetupHint>
         </CardHeader>
 
         <CardContent className="space-y-4">
@@ -252,6 +258,9 @@ export default function IndependentSettingsSection({
       <Card>
         <CardHeader>
           <CardTitle>Income sources</CardTitle>
+          <SetupHint show={isInitialSetup} step={2}>
+            Turn on each way you get paid, like Venmo or cash, so you can log income from it.
+          </SetupHint>
         </CardHeader>
 
         <CardContent className="space-y-4">
@@ -458,6 +467,9 @@ export default function IndependentSettingsSection({
       <Card>
         <CardHeader>
           <CardTitle>Invoices</CardTitle>
+          <SetupHint show={isInitialSetup} step={3}>
+            Bill clients? Add your business details now, or skip this until you send your first invoice.
+          </SetupHint>
         </CardHeader>
         <CardContent>
           <p className="mb-3 text-sm text-muted-foreground">
