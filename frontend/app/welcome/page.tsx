@@ -468,7 +468,7 @@ export default function WelcomePage() {
 
               {hasSingleWorkspaceType && type ? (
                 <div className="rounded-xl border border-border bg-card px-4 py-3 text-sm">
-                  {type === "w2" ? "Paycheck (W-2)" : "Self-employed (1099)"}
+                  {type === "w2" ? "Paycheck (W-2)" : "Self-employed"}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -492,7 +492,7 @@ export default function WelcomePage() {
                       disabled={isSubmitting}
                       className="w-full"
                     >
-                      Self-employed (1099)
+                      Self-employed
                     </Button>
                   )}
                 </div>
