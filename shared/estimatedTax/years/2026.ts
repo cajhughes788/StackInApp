@@ -9,6 +9,7 @@
 import { FEDERAL_2026 } from "../../tax/tables/federal2026"
 import type { EstimatedTaxYear } from "../types"
 import { STATE_TAX_2026 } from "../states"
+import { FORM_1099K_THRESHOLD } from "../../taxPackage"
 
 export const ESTIMATED_TAX_2026: EstimatedTaxYear = {
   year: 2026,
@@ -83,6 +84,8 @@ export const ESTIMATED_TAX_2026: EstimatedTaxYear = {
     currentYearShare: 0.9,
     minimumOwedForEstimates: 1_000,
   },
+
+  form1099K: FORM_1099K_THRESHOLD,
 
   // State income tax: only states confirmed from their own revenue
   // department for 2026 (sources in states.ts).

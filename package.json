@@ -21,6 +21,7 @@
     "test:all-income": "node ./scripts/test-all-income.cjs",
     "test:processing-fees": "node ./scripts/test-processing-fees.cjs",
     "test:estimated-tax": "node ./scripts/test-estimated-tax.cjs",
+    "test:tax-package": "node ./scripts/test-tax-package.cjs",
     "install:all": "npm install --workspaces",
     "verify": "npm ls zod",
     "profile:report": "node ./scripts/profile-report.mjs"

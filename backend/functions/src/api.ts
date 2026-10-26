@@ -436,6 +436,16 @@ export const deleteTaxPayment = withCorsAuth(async (req, res) => {
   await deleteTaxPaymentHandler(req, res)
 })
 
+// Tax-time package: reads every receipt file, so more memory and time.
+export const taxPackage = withCorsAuth(
+  async (req, res) => {
+    const { taxPackageHandler } = await import("./routes/taxPackage.js")
+    await taxPackageHandler(req, res)
+  },
+  true,
+  { memory: "1GiB", timeoutSeconds: 300 }
+)
+
 export const generateProfitLossStatement = withCorsAuth(async (req, res) => {
   const { generateProfitLossStatementHandler } = await import(
     "./routes/generateProfitLossStatement.js"

@@ -44,6 +44,9 @@ export type EstimatedTaxYear = {
     currentYearShare: number
     minimumOwedForEstimates: number
   }
+  // Form 1099-K: payment apps and card processors report a year's
+  // payments when BOTH limits are passed (per platform).
+  form1099K: { amountOver: number; transactionsOver: number; source: string }
   // State rules for this year, by two-letter code. A state missing here
   // isn't included in the estimate (states.ts).
   states: Record<string, StateTaxRule>

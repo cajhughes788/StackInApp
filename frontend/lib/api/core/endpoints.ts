@@ -107,6 +107,11 @@ export const API_ENDPOINTS = {
     deletePayment: "https://deletetaxpayment-3lc2fwdgwq-uc.a.run.app",
   },
 
+  taxPackage: {
+    // New function — confirm the URL in the Firebase console after first deploy.
+    url: "https://taxpackage-3lc2fwdgwq-uc.a.run.app",
+  },
+
   allIncome: {
     // New function — confirm the URL in the Firebase console after first deploy.
     get: "https://getallincomesummary-3lc2fwdgwq-uc.a.run.app",

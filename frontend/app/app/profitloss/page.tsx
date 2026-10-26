@@ -16,6 +16,7 @@ import HoursWorkedCard from "@/components/hours-worked-card"
 import MonthSoFarCard from "@/components/month-so-far-card"
 import IncomePatterns from "@/components/income-patterns"
 import { useProfitLossInsights } from "@/hooks/useProfitLossInsights"
+import TaxPackageSection from "@/components/tax/tax-package-section"
 import {
   Accordion,
   AccordionContent,
@@ -1111,6 +1112,10 @@ export default function ProfitLossPage() {
                 </ul>
               ) : null}
             </section>
+
+            {activeWorkspaceId && activeWorkspace?.type === "independent" ? (
+              <TaxPackageSection workspaceId={activeWorkspaceId} />
+            ) : null}
 
             {insights ? <IncomePatterns insights={insights} /> : null}
           </>

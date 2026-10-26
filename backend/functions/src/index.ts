@@ -24,6 +24,7 @@ export {
   saveTaxEstimateProfile,
   saveTaxPayment,
   deleteTaxPayment,
+  taxPackage,
   generateProfitLossStatement,
   deleteUserData,
   createExpense,
