@@ -409,6 +409,33 @@ export const getProfitLossInsights = withCorsAuth(async (req, res) => {
   await getProfitLossInsightsHandler(req, res)
 })
 
+// One month's income across all of the user's workspaces (Home "All income").
+export const getAllIncomeSummary = withCorsAuth(async (req, res) => {
+  const { getAllIncomeSummaryHandler } = await import("./routes/getAllIncomeSummary.js")
+  await getAllIncomeSummaryHandler(req, res)
+})
+
+// Self-employed quarterly tax estimate (Home "Taxes" card).
+export const getTaxEstimate = withCorsAuth(async (req, res) => {
+  const { getTaxEstimateHandler } = await import("./routes/getTaxEstimate.js")
+  await getTaxEstimateHandler(req, res)
+})
+
+export const saveTaxEstimateProfile = withCorsAuth(async (req, res) => {
+  const { saveTaxEstimateProfileHandler } = await import("./routes/saveTaxEstimateProfile.js")
+  await saveTaxEstimateProfileHandler(req, res)
+})
+
+export const saveTaxPayment = withCorsAuth(async (req, res) => {
+  const { saveTaxPaymentHandler } = await import("./routes/saveTaxPayment.js")
+  await saveTaxPaymentHandler(req, res)
+})
+
+export const deleteTaxPayment = withCorsAuth(async (req, res) => {
+  const { deleteTaxPaymentHandler } = await import("./routes/deleteTaxPayment.js")
+  await deleteTaxPaymentHandler(req, res)
+})
+
 export const generateProfitLossStatement = withCorsAuth(async (req, res) => {
   const { generateProfitLossStatementHandler } = await import(
     "./routes/generateProfitLossStatement.js"

@@ -27,6 +27,10 @@ export const IncomeBreakdownSchema = z
     tips: z.coerce.number().min(0).optional(),
     products: z.coerce.number().min(0).optional(),
     other: z.coerce.number().min(0).optional(),
+    // What the processor (Square, Stripe, Cash App, Venmo) kept from this
+    // line. The amounts above stay the full sale; the fee is counted as an
+    // expense ("Payment Processing Fees" — see shared/processingFees.ts).
+    fee: z.coerce.number().min(0).optional(),
   })
   .superRefine((value, ctx) => {
     const total =
@@ -39,6 +43,14 @@ export const IncomeBreakdownSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "At least one income category amount is required.",
+      })
+    }
+
+    if (Number(value.fee ?? 0) > total + 0.009) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["fee"],
+        message: "The processing fee can't be more than the payment.",
       })
     }
   })

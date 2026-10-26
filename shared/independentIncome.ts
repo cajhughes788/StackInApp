@@ -25,6 +25,7 @@ export type IncomeBreakdownLike = {
   tips?: number
   products?: number
   other?: number
+  fee?: number
 }
 
 export type CategorizedIncomeTotals = {

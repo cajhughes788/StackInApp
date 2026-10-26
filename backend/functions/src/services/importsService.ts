@@ -106,6 +106,7 @@ function normalizeImportItem(
     importedAt: raw.importedAt ?? nowIso,
     occurredAt: raw.occurredAt ?? null,
     amount: raw.amount ?? null,
+    fee: raw.fee ?? null,
     currency: raw.currency ?? null,
     description: raw.description ?? null,
     counterparty: raw.counterparty ?? null,

@@ -1,6 +1,6 @@
 "use client"
 
-import { startTransition, useState } from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Check, ChevronDown, Plus } from "lucide-react"
 
@@ -14,12 +14,11 @@ import {
 } from "@/components/ui/sheet"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import { debugRender } from "@/lib/debugLoop"
-import { useNavigationGuardStore } from "@/lib/stores/useNavigationGuardStore"
-import { useToast } from "@/hooks/use-toast"
+import { useSwitchWorkspace } from "@/hooks/useSwitchWorkspace"
 import { useAppBootstrapState } from "@/contexts/app-bootstrap-context"
 
 // A workspace's colored initial: green for self-employed, blue for W-2.
-function WorkspaceAvatar({ name, type, size = "sm" }: { name: string; type: string; size?: "sm" | "lg" }) {
+export function WorkspaceAvatar({ name, type, size = "sm" }: { name: string; type: string; size?: "sm" | "lg" }) {
   return (
     <span
       className={`flex shrink-0 items-center justify-center rounded-full font-semibold uppercase ${
@@ -39,10 +38,8 @@ function workspaceTypeLabel(type: string) {
 export default function WorkspaceSwitcher() {
   const [open, setOpen] = useState(false)
   const router = useRouter()
-  const { toast } = useToast()
+  const switchWorkspace = useSwitchWorkspace()
   const workspaceState = useWorkspaceStore((s) => s.state)
-  const setActiveWorkspace = useWorkspaceStore((s) => s.setActiveWorkspace)
-  const navigationGuard = useNavigationGuardStore((s) => s.guard)
   const { authority, authorityStatus } = useAppBootstrapState()
   const workspaceCount =
     workspaceState.status === "ready" ? workspaceState.workspaces.length : 0
@@ -72,30 +69,7 @@ export default function WorkspaceSwitcher() {
 
   async function handleWorkspaceSelect(workspaceId: string) {
     if (workspaceId === activeWorkspaceId) return
-    if (navigationGuard?.mode === "block") {
-      const flushed = await navigationGuard.flush()
-      if (!flushed) {
-        toast({
-          title: "Unable to switch workspace",
-          description:
-            navigationGuard.reason ??
-            "Finish resolving your settings changes before switching workspaces.",
-          variant: "destructive",
-        })
-        return
-      }
-    }
-
-    if (navigationGuard?.mode === "background") {
-      // Finishes quietly; a failure still reports itself.
-      void navigationGuard.flush()
-    }
-
-    setOpen(false)
-    setActiveWorkspace(workspaceId)
-    startTransition(() => {
-      router.push("/app/home")
-    })
+    if (await switchWorkspace(workspaceId)) setOpen(false)
   }
 
   return (

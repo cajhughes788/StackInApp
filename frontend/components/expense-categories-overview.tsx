@@ -2,12 +2,14 @@
 
 import { TotalCardSkeleton } from "@/components/loading-skeletons"
 import { useId, useMemo, useState } from "react"
-import { ChevronDown, MoreHorizontal, Receipt } from "lucide-react"
+import { ChevronDown, CreditCard, MoreHorizontal, Receipt } from "lucide-react"
 
 import { formatCurrency } from "@/lib/helpers"
 import { normalizeExpenseCategoryLabel } from "@/lib/expenseCategories"
 import { formatStreamShare } from "@/lib/incomeStreams"
+import { useEntriesData } from "@/lib/stores/useEntriesStore"
 import { useExpensesData, useExpensesRenderState } from "@/lib/stores/useExpensesStore"
+import { getEntryProcessingFees } from "@shared/processingFees"
 import { useSettingsData, useSettingsRenderState } from "@/lib/stores/useSettingsStore"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import { Button } from "@/components/ui/button"
@@ -170,6 +172,34 @@ function ExpenseDayItem({
   )
 }
 
+// Fees the processor kept from income (shared/processingFees.ts). Read-only
+// here: they live on the income entries, so they're edited there.
+function ProcessingFeesRow({ amount, days, share }: { amount: number; days: number; share: number }) {
+  return (
+    <li className="py-3.5">
+      <div className="flex w-full items-start gap-3">
+        <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-muted text-foreground">
+          <CreditCard className="size-5" />
+        </span>
+        <span className="min-w-0 flex-1 space-y-1.5">
+          <span className="flex items-baseline justify-between gap-3">
+            <span className="min-w-0 font-medium leading-snug text-foreground">Processing fees</span>
+            <span className="shrink-0 font-medium tabular-nums text-foreground">{formatCurrency(amount)}</span>
+          </span>
+          <span className="flex items-baseline justify-between gap-3 text-sm text-muted-foreground">
+            <span className="truncate">
+              From income · {days} {days === 1 ? "day" : "days"}
+            </span>
+            <span className="shrink-0 tabular-nums">{formatStreamShare(share)} of expenses</span>
+          </span>
+          <ShareBar share={share} />
+          <span className="block text-xs text-muted-foreground">Edit a fee on its income entry.</span>
+        </span>
+      </div>
+    </li>
+  )
+}
+
 function CategoryRow({ category, ctx }: { category: ExpenseCategory; ctx: ExpenseEditContext }) {
   const [expanded, setExpanded] = useState(false)
   const [showAllDays, setShowAllDays] = useState(false)
@@ -265,6 +295,7 @@ export default function ExpenseCategoriesOverview() {
   const activeWorkspaceId = workspaceState.status === "ready" ? workspaceState.activeWorkspaceId : null
 
   const expenses = useExpensesData(activeWorkspaceId)
+  const entries = useEntriesData(activeWorkspaceId)
   const settings = useSettingsData(activeWorkspaceId)
   const {
     isHydrating: expensesHydrating,
@@ -276,9 +307,22 @@ export default function ExpenseCategoriesOverview() {
   const [totalExpanded, setTotalExpanded] = useState(false)
   const totalPanelId = useId()
 
+  const processingFees = useMemo(() => {
+    let amount = 0
+    const days = new Set<string>()
+    for (const entry of entries) {
+      const fee = getEntryProcessingFees(entry)
+      if (fee <= 0) continue
+      amount += fee
+      days.add(entry.date)
+    }
+    return { amount: Math.round(amount * 100) / 100, days: days.size }
+  }, [entries])
+
   const { total, categories } = useMemo(() => {
     const byCategory = new Map<string, { amount: number; days: Map<string, CategoryDay> }>()
-    let sum = 0
+    // Processing fees from income are part of the total (as on the P&L).
+    let sum = processingFees.amount
     for (const expense of expenses) {
       const amount = expense.amount ?? 0
       sum += amount
@@ -299,7 +343,7 @@ export default function ExpenseCategoriesOverview() {
       days: Array.from(group.days.values()).sort((a, b) => b.date.localeCompare(a.date)),
     })).sort((a, b) => b.amount - a.amount)
     return { total: sum, categories: list }
-  }, [expenses])
+  }, [expenses, processingFees])
 
   const budget =
     settings?.independent?.expenseTargetPerMonth && settings.independent.expenseTargetPerMonth > 0
@@ -396,7 +440,7 @@ export default function ExpenseCategoriesOverview() {
                 <dd className="text-lg font-semibold tabular-nums text-foreground">
                   {budget
                     ? formatCurrency(Math.abs(budget - total))
-                    : formatCurrency(expenses.length ? total / expenses.length : 0)}
+                    : formatCurrency(expenses.length ? (total - processingFees.amount) / expenses.length : 0)}
                 </dd>
               </div>
             </dl>
@@ -407,7 +451,7 @@ export default function ExpenseCategoriesOverview() {
         <h2 id="expense-categories-heading" className="mb-2 px-1 text-lg font-semibold text-foreground">
           Expense categories
         </h2>
-        {categories.length === 0 ? (
+        {categories.length === 0 && processingFees.amount <= 0 ? (
           <p className="rounded-[22px] bg-card border border-card-border px-4 py-6 text-center text-sm text-muted-foreground">
             No expenses logged for this period yet.
           </p>
@@ -416,6 +460,13 @@ export default function ExpenseCategoriesOverview() {
             {categories.map((category) => (
               <CategoryRow key={category.name} category={category} ctx={editContext} />
             ))}
+            {processingFees.amount > 0 ? (
+              <ProcessingFeesRow
+                amount={processingFees.amount}
+                days={processingFees.days}
+                share={total > 0 ? processingFees.amount / total : 0}
+              />
+            ) : null}
           </ul>
         )}
       </section>

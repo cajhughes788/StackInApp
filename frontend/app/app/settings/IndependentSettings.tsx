@@ -337,6 +337,25 @@ export default function IndependentSettingsSection({
             />
           </div>
 
+          {/* Only matters for sources that keep a cut (shared/processingFees.ts). */}
+          {(isPosSalesSourceEnabled(local) || local.enableCashApp || local.enableVenmo) && (
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <Label>Track processing fees</Label>
+                <p className="text-xs text-muted-foreground">
+                  Enter the full sale and the fee Square, Stripe, Cash App or Venmo kept. Your income matches what
+                  they report, and fees count as a business expense.
+                </p>
+              </div>
+              <Switch
+                checked={local.trackProcessingFees ?? false}
+                onCheckedChange={(v) =>
+                  update("trackProcessingFees", v, "immediate")
+                }
+              />
+            </div>
+          )}
+
           <div className="flex items-center justify-between gap-4">
             <div>
               <Label>Personal cash</Label>

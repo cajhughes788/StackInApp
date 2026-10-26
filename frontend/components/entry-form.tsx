@@ -18,6 +18,7 @@ import { createProfileTrace } from "@/lib/observability/profileTrace";
 import { EntrySchema, IncomeBreakdownSchema, type IncomeCategory, type PaymentMethod, } from "@shared/schemas/entry";
 import { EntryFormVisibility, resolveEntryFormVisibility, } from "@shared/entryVisibility";
 import { getCurrentEntryPeriod } from "@shared/payPeriods";
+import { isProcessingFeeTrackingOn } from "@shared/processingFees";
 import { useEntriesStore } from "@/lib/stores/useEntriesStore";
 import { useSettingsStore } from "@/lib/stores/useSettingsStore";
 import * as entriesService from "@/lib/domain/entriesService";
@@ -107,6 +108,12 @@ function amountWidth(value: string | undefined): string {
 // without adding it here fails to compile (see the check below).
 const PAYMENT_REPEAT_FIELDS = ["venmo", "appleCash", "zelle", "checks", "cashApp", "posSales", "cashSales"] as const;
 type PaymentField = (typeof PAYMENT_REPEAT_FIELDS)[number];
+// Sources that keep a cut (shared/processingFees.ts) — they get a fee box
+// when "Track processing fees" is on.
+const FEE_FIELDS = ["venmo", "cashApp", "posSales"] as const;
+type FeeField = (typeof FEE_FIELDS)[number];
+const isFeeField = (field: string): field is FeeField => (FEE_FIELDS as readonly string[]).includes(field);
+const emptyFees = (): Record<FeeField, string> => ({ venmo: "", cashApp: "", posSales: "" });
 // Compile-time guard: the form's sources and paymentCategoryConfig's keys
 // must be the same set.
 type _MissingFromForm = Exclude<keyof typeof paymentCategoryConfig, PaymentField>;
@@ -132,6 +139,9 @@ export default function EntryForm() {
     // "Receives Tips": a Tips line on every income source — inside the split
     // for Venmo/Apple Pay/Zelle/Checks/Cash App, on top of sales for POS and Cash.
     const tipsEnabled = visibility?.mode === "independent" && visibility.showSourceTips;
+    // "Track processing fees": the amount stays the full sale; the fee the
+    // processor kept is entered under it.
+    const feesEnabled = visibility?.mode === "independent" && isProcessingFeeTrackingOn(settings?.independent);
     // Read by the memoized breakdown handlers below without re-creating them.
     const tipsEnabledRef = useRef(tipsEnabled);
     tipsEnabledRef.current = tipsEnabled;
@@ -195,6 +205,8 @@ export default function EntryForm() {
         // "salesPlusTips" style) — never taken out of the sales amount.
         posTips: "",
         cashTips: "",
+        // Processing fee per fee source — only used when feesEnabled.
+        fees: emptyFees(),
         paymentBreakdowns: {
             venmo: emptyBreakdownDraft(),
             appleCash: emptyBreakdownDraft(),
@@ -474,6 +486,32 @@ export default function EntryForm() {
           </p>) : null}
       </div>);
     };
+    /** Card / POS, Cash App and Venmo with "Track processing fees" on: the
+     * fee the processor kept, under the full sale, and what actually landed.
+     * $100 sale − $3 fee = $97 received. */
+    const renderProcessingFeeField = (field: PaymentField) => {
+        if (!feesEnabled || !isFeeField(field))
+            return null;
+        const tipsOnTop = field === "posSales" && tipsEnabled ? parseMoney(form.posTips) : 0;
+        const gross = parseMoney(form[field]) + tipsOnTop;
+        const fee = parseMoney(form.fees[field]);
+        return (<div className="mt-3 space-y-1 border-t border-border/70 pt-3">
+        <div className="flex items-center justify-between gap-3">
+          <Label htmlFor={`${field}-fee`} className="text-sm font-normal text-muted-foreground">
+            − Processing fee <span className="text-xs">(what they kept)</span>
+          </Label>
+          <div className="flex items-baseline gap-0.5">
+            <span className="text-sm text-muted-foreground">$</span>
+            <input id={`${field}-fee`} type="number" step="0.01" min="0" inputMode="decimal" placeholder="0.00" style={{ width: amountWidth(form.fees[field]) }} value={form.fees[field]} onChange={(e) => setForm((prev) => ({ ...prev, fees: { ...prev.fees, [field]: e.target.value } }))} className="max-w-28 bg-transparent text-right text-base tabular-nums outline-none placeholder:text-muted-foreground/50"/>
+          </div>
+        </div>
+        {gross > 0 && fee > 0 ? (<p className={`text-right text-xs tabular-nums ${fee > gross ? "text-amber-500" : "text-muted-foreground"}`}>
+            {fee > gross
+                ? "The fee is more than the payment"
+                : (<>You received{" "}<span className="font-medium text-foreground">{formatCurrency(gross - fee)}</span></>)}
+          </p>) : null}
+      </div>);
+    };
     /** A recurring rule can only carry one number with one category. `field`
      * is eligible only when: it (or, for "custom", the single custom income
      * row) has a positive amount; a payment field has at most one category
@@ -489,7 +527,7 @@ export default function EntryForm() {
      * "clear the other fields first" — those call for different messages,
      * and showing the wrong one before the user has typed anything is
      * confusing. */
-    const getRecurringIneligibilityReason = useCallback((f: typeof form, field: RecurringIncomeSource): "no_amount" | "multi_category" | "has_tips" | "other_fields_populated" | null => {
+    const getRecurringIneligibilityReason = useCallback((f: typeof form, field: RecurringIncomeSource): "no_amount" | "multi_category" | "has_tips" | "has_fee" | "other_fields_populated" | null => {
         if (field === "custom") {
             const item = (f.customIncome ?? [])[0];
             if ((f.customIncome ?? []).length !== 1 || !item || !(Number(item.amount ?? 0) > 0) || !item.label?.trim()) {
@@ -504,6 +542,10 @@ export default function EntryForm() {
             // income fields" would point at the wrong thing.
             if ((field === "posSales" && parseMoney(f.posTips)) || (field === "cashSales" && parseMoney(f.cashTips))) {
                 return "has_tips";
+            }
+            // A repeat books the same amount each time; it has no fee to carry.
+            if (isFeeField(field) && parseMoney(f.fees[field])) {
+                return "has_fee";
             }
         }
         if (parseMoney(f.tips) || parseMoney(f.reportedCash) || parseMoney(f.unreportedCash) || parseMoney(f.independentHours) ||
@@ -520,7 +562,7 @@ export default function EntryForm() {
         }
         return null;
     }, []);
-    const recurringIneligibilityMessage = (reason: "no_amount" | "multi_category" | "has_tips" | "other_fields_populated") => {
+    const recurringIneligibilityMessage = (reason: "no_amount" | "multi_category" | "has_tips" | "has_fee" | "other_fields_populated") => {
         switch (reason) {
             case "no_amount":
                 return "Please enter an amount for this field before turning on Repeats.";
@@ -528,6 +570,8 @@ export default function EntryForm() {
                 return "This field is split across multiple categories — Repeats needs a single category. Uncheck the extra categories first.";
             case "has_tips":
                 return "Repeats can only carry the sales amount — clear the tips for this entry first.";
+            case "has_fee":
+                return "Repeats can only carry the sales amount — clear the processing fee for this entry first.";
             case "other_fields_populated":
                 return "Recurring income can only apply to one income source per entry — clear the other income fields first.";
         }
@@ -607,6 +651,7 @@ export default function EntryForm() {
             cashSales: "",
             posTips: "",
             cashTips: "",
+            fees: emptyFees(),
             paymentBreakdowns: {
                 venmo: emptyBreakdownDraft(),
                 appleCash: emptyBreakdownDraft(),
@@ -736,15 +781,24 @@ export default function EntryForm() {
                     tips?: number;
                     products?: number;
                     other?: number;
+                    fee?: number;
                 }> = [];
                 // tipsOnTop: POS / Cash tips, added to the same breakdown on
                 // top of the sales split (which must still add up to sales).
                 const buildCategorizedBreakdown = (field: PaymentField, tipsOnTop = 0) => {
                     const total = parseNum(form[field]) ?? 0;
                     const config = paymentCategoryConfig[field];
+                    // The fee covers the whole line (sales plus tips on top).
+                    const fee = feesEnabled && isFeeField(field) ? parseNum(form.fees[field]) ?? 0 : 0;
+                    if (fee > 0 && fee > total + tipsOnTop + 0.009) {
+                        throw new Error(total + tipsOnTop > 0
+                            ? `The ${config.label} processing fee can't be more than the payment.`
+                            : `Enter the ${config.label} amount before its processing fee.`);
+                    }
+                    const withFee = <T extends object>(line: T) => (fee > 0 ? { ...line, fee } : line);
                     if (total <= 0) {
                         if (tipsOnTop > 0)
-                            incomeBreakdowns.push({ paymentMethod: config.paymentMethod, tips: tipsOnTop });
+                            incomeBreakdowns.push(withFee({ paymentMethod: config.paymentMethod, tips: tipsOnTop }));
                         return;
                     }
                     const draft = form.paymentBreakdowns[field];
@@ -776,7 +830,7 @@ export default function EntryForm() {
                     if (Math.abs(sum - total) > 0.009) {
                         throw new Error(`${config.label} category amounts must add up to ${formatCurrency(total)}.`);
                     }
-                    incomeBreakdowns.push(tipsOnTop > 0 ? { ...parsedBreakdown.data, tips: tipsOnTop } : parsedBreakdown.data);
+                    incomeBreakdowns.push(withFee(tipsOnTop > 0 ? { ...parsedBreakdown.data, tips: tipsOnTop } : parsedBreakdown.data));
                 };
                 buildCategorizedBreakdown("venmo");
                 buildCategorizedBreakdown("appleCash");
@@ -1100,7 +1154,8 @@ export default function EntryForm() {
                     const showCustom = visibility.showCustomIncome && showIncomeSource("custom");
                     const onlyOneSource = paymentSources.length + (showPersonalCash ? 1 : 0) === 1 && !showCustom;
                     const isPaymentShown = (field: PaymentField) => onlyOneSource || openSources.has(field) || repeatSourceField === field ||
-                        parseMoney(form[field]) > 0 || (field === "posSales" && parseMoney(form.posTips) > 0) || (field === "cashSales" && parseMoney(form.cashTips) > 0);
+                        parseMoney(form[field]) > 0 || (field === "posSales" && parseMoney(form.posTips) > 0) || (field === "cashSales" && parseMoney(form.cashTips) > 0) ||
+                        (isFeeField(field) && parseMoney(form.fees[field]) > 0);
                     const isPersonalCashShown = onlyOneSource || openSources.has("personalCash") || parseMoney(form.unreportedCash) > 0;
                     const chipClass = (on: boolean) => `rounded-full px-3.5 py-2 text-sm font-medium transition-colors ${on ? "bg-foreground text-background" : "bg-muted text-foreground hover:bg-secondary"}`;
                     const amountInputClass = "min-w-[1ch] max-w-36 bg-transparent text-right text-2xl font-semibold tabular-nums outline-none placeholder:text-muted-foreground/40";
@@ -1143,6 +1198,9 @@ export default function EntryForm() {
                                         const tipsKey = field === "posSales" ? "posTips" : "cashTips";
                                         setForm((prev) => ({ ...prev, [tipsKey]: "" }));
                                     }
+                                    if (isFeeField(field)) {
+                                        setForm((prev) => ({ ...prev, fees: { ...prev.fees, [field]: "" } }));
+                                    }
                                     if (repeatSourceField === field)
                                         setRepeatSourceField(null);
                                     closeSource(field);
@@ -1151,6 +1209,7 @@ export default function EntryForm() {
                       </div>
                       {renderPaymentBreakdownFields(field)}
                       {(field === "posSales" || field === "cashSales") && renderSalesTipsField(field)}
+                      {renderProcessingFeeField(field)}
                       {renderRepeatSwitch(field)}
                     </div>))}
 

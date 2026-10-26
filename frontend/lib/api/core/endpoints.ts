@@ -99,6 +99,19 @@ export const API_ENDPOINTS = {
     insights: "https://getprofitlossinsights-3lc2fwdgwq-uc.a.run.app",
   },
 
+  taxEstimate: {
+    // New functions — confirm the URLs in the Firebase console after first deploy.
+    get: "https://gettaxestimate-3lc2fwdgwq-uc.a.run.app",
+    saveProfile: "https://savetaxestimateprofile-3lc2fwdgwq-uc.a.run.app",
+    savePayment: "https://savetaxpayment-3lc2fwdgwq-uc.a.run.app",
+    deletePayment: "https://deletetaxpayment-3lc2fwdgwq-uc.a.run.app",
+  },
+
+  allIncome: {
+    // New function — confirm the URL in the Firebase console after first deploy.
+    get: "https://getallincomesummary-3lc2fwdgwq-uc.a.run.app",
+  },
+
   subscription: {
     get: "https://getsubscription-3lc2fwdgwq-uc.a.run.app",
     createCheckoutSession: "https://createcheckoutsession-3lc2fwdgwq-uc.a.run.app",

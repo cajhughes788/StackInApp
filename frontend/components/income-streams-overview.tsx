@@ -10,7 +10,9 @@ import { useExpensesData } from "@/lib/stores/useExpensesStore"
 import { useSettingsData, useSettingsRenderState } from "@/lib/stores/useSettingsStore"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import { computeIncomeGaugeForEntries } from "@shared/computeIncomeGauge"
+import { sumEntryProcessingFees } from "@shared/processingFees"
 import { computeSafeToSpend, resolveTaxSetAsidePercent, SHOW_TAX_SET_ASIDE } from "@shared/taxSetAside"
+import { useTaxEstimateStore } from "@/lib/stores/useTaxEstimateStore"
 import { computeGoalPace } from "@shared/goalPace"
 import { useSelectedPeriod } from "@/lib/stores/usePeriodSelectionStore"
 import { categoryLabels } from "@/lib/incomeBreakdown"
@@ -415,9 +417,28 @@ export default function IncomeStreamsOverview() {
         : null,
     [activeWorkspaceId, entries, settings]
   )
-  const totalExpenses = useMemo(() => expenses.reduce((sum, expense) => sum + (expense.amount ?? 0), 0), [expenses])
-  const taxSetAsidePercent = resolveTaxSetAsidePercent(settings?.independent?.taxSetAsidePercent)
-  const { profit, taxSetAside, safeToSpend } = computeSafeToSpend(total, totalExpenses, taxSetAsidePercent)
+  // Processing fees kept from income count as expenses, as on the P&L.
+  const processingFees = useMemo(() => sumEntryProcessingFees(entries), [entries])
+  const totalExpenses = useMemo(
+    () => expenses.reduce((sum, expense) => sum + (expense.amount ?? 0), 0) + processingFees,
+    [expenses, processingFees]
+  )
+  // "Safe to spend" uses the real tax estimate (the Taxes card) when it can
+  // be shown: the share of each business dollar that goes to federal tax.
+  // The old flat % stays behind SHOW_TAX_SET_ASIDE.
+  const taxEstimate = useTaxEstimateStore((s) => s.data)
+  const estimateTaxRate =
+    taxEstimate?.eligible && taxEstimate.health.canShowEstimate ? taxEstimate.quarterly?.businessTaxRate ?? null : null
+  const showTaxSetAside = estimateTaxRate != null || SHOW_TAX_SET_ASIDE
+  const taxSetAsidePercent =
+    estimateTaxRate != null
+      ? Math.round(estimateTaxRate * 100)
+      : resolveTaxSetAsidePercent(settings?.independent?.taxSetAsidePercent)
+  const { profit, taxSetAside, safeToSpend } = computeSafeToSpend(
+    total,
+    totalExpenses,
+    estimateTaxRate != null ? estimateTaxRate * 100 : taxSetAsidePercent
+  )
   // Hourly rate after expenses — only with hours tracking on (Settings) and
   // hours logged this period.
   const trackHours = settings?.independent?.trackHours === true
@@ -458,13 +479,13 @@ export default function IncomeStreamsOverview() {
             <span className="block text-4xl font-semibold tracking-tight tabular-nums text-foreground sm:text-5xl">
               {formatCurrency(total)}
             </span>
-            {SHOW_TAX_SET_ASIDE ? (
+            {showTaxSetAside ? (
               <span className="mt-1 block text-sm text-muted-foreground">
                 Safe to spend about{" "}
                 <span className="font-medium tabular-nums text-foreground">
                   {wholeDollars.format(safeToSpend)}
                 </span>{" "}
-                after expenses and a {taxSetAsidePercent}% tax set-aside
+                after expenses and {estimateTaxRate != null ? `about ${taxSetAsidePercent}% for taxes` : `a ${taxSetAsidePercent}% tax set-aside`}
               </span>
             ) : (
               <span className="mt-1 block text-sm text-muted-foreground">
@@ -527,16 +548,23 @@ export default function IncomeStreamsOverview() {
                 <dt className="text-muted-foreground">Expenses</dt>
                 <dd className="tabular-nums text-foreground">−{formatCurrency(totalExpenses)}</dd>
               </div>
-              {SHOW_TAX_SET_ASIDE ? (
+              {processingFees > 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Includes {formatCurrency(processingFees)} in processing fees.
+                </p>
+              ) : null}
+              {showTaxSetAside ? (
                 <div className="flex justify-between gap-3">
-                  <dt className="text-muted-foreground">Set aside for taxes ({taxSetAsidePercent}%)</dt>
+                  <dt className="text-muted-foreground">
+                    Set aside for taxes ({estimateTaxRate != null ? "about " : ""}{taxSetAsidePercent}%)
+                  </dt>
                   <dd className="tabular-nums text-foreground">−{formatCurrency(taxSetAside)}</dd>
                 </div>
               ) : null}
               <div className="flex justify-between gap-3 border-t border-border/70 pt-1.5 font-medium">
-                <dt className="text-foreground">{SHOW_TAX_SET_ASIDE ? "Safe to spend" : "You keep"}</dt>
+                <dt className="text-foreground">{showTaxSetAside ? "Safe to spend" : "You keep"}</dt>
                 <dd className="tabular-nums text-foreground">
-                  {formatCurrency(SHOW_TAX_SET_ASIDE ? safeToSpend : profit)}
+                  {formatCurrency(showTaxSetAside ? safeToSpend : profit)}
                 </dd>
               </div>
             </dl>
@@ -547,7 +575,11 @@ export default function IncomeStreamsOverview() {
                 after expenses over {Math.round(totalHours * 10) / 10} hours.
               </p>
             ) : null}
-            {SHOW_TAX_SET_ASIDE ? (
+            {estimateTaxRate != null ? (
+              <p className="text-xs text-muted-foreground">
+                From your tax estimate (federal, and state where included). Not tax advice.
+              </p>
+            ) : SHOW_TAX_SET_ASIDE ? (
               <p className="text-xs text-muted-foreground">
                 Tax set-aside is a rough estimate, not tax advice. Change the % in Settings.
               </p>

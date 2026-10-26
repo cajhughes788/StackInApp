@@ -79,6 +79,10 @@ export const ImportItemInputSchema = z.object({
   importedAt: z.string().optional(),
   occurredAt: z.string().nullable().optional(),
   amount: z.number().nullable().optional(),
+  // Processing fee the file reports for this sale (Square / Stripe), kept
+  // only when the workspace tracks processing fees; amount is then the full
+  // sale (see shared/processingFees.ts).
+  fee: z.number().nonnegative().nullable().optional(),
   currency: z.string().trim().min(1).nullable().optional(),
   description: z.string().trim().nullable().optional(),
   counterparty: z.string().trim().nullable().optional(),

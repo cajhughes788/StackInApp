@@ -17,6 +17,8 @@ import * as entriesService from "@/lib/domain/entriesService";
 import { CUSTOM_POSITION_ID, CUSTOM_POSITION_TITLE } from "@shared/hourlyRates";
 import { aggregateIncomeBreakdowns, getCustomIncomeMirrors, getNonCustomOtherIncome, } from "@shared/independentIncome";
 import { toast } from "@/hooks/use-toast";
+import { isProcessingFeeTrackingOn, sumBreakdownFees, supportsProcessingFee } from "@shared/processingFees";
+import { useSettingsData } from "@/lib/stores/useSettingsStore";
 import { ApiError } from "@/lib/api";
 
 export const paymentFieldConfig = {
@@ -244,6 +246,16 @@ export function BreakdownCellEditor({ entry, field, tipsEnabled, workspaceId, is
     // "Receives Tips" — or tips already recorded, so they stay editable.
     const showTipsBox = tipsEnabled || aggregated.tips > 0;
     const tipsOnTop = field === "posSales" || field === "cashSales";
+    // Processing fee for the whole column (shared/processingFees.ts): shown
+    // when "Track processing fees" is on, or a fee is already recorded.
+    const settings = useSettingsData(workspaceId);
+    const columnFee = (liveIndependent: EntryType["independent"] | undefined) => field === "otherIncome"
+        ? 0
+        : sumBreakdownFees((liveIndependent?.incomeBreakdowns ?? []).filter((item) => belongsToColumn(item, field)));
+    const initialFee = columnFee(independent);
+    const showFeeBox = supportsProcessingFee(config.paymentMethod) &&
+        (isProcessingFeeTrackingOn(settings?.independent) || initialFee > 0);
+    const [fee, setFee] = useState(initialFee > 0 ? initialFee.toFixed(2) : "");
     const [services, setServices] = useState(aggregated.services > 0
         ? aggregated.services.toFixed(2)
         : "");
@@ -266,6 +278,8 @@ export function BreakdownCellEditor({ entry, field, tipsEnabled, workspaceId, is
         setTips(liveAgg.tips > 0 ? liveAgg.tips.toFixed(2) : "");
         setProducts(liveAgg.products > 0 ? liveAgg.products.toFixed(2) : "");
         setOther(liveAgg.other > 0 ? liveAgg.other.toFixed(2) : "");
+        const liveFee = columnFee(liveIndependent);
+        setFee(liveFee > 0 ? liveFee.toFixed(2) : "");
     }, [entry]);
     const total = Number(services || 0) +
         Number(tips || 0) +
@@ -288,6 +302,11 @@ export function BreakdownCellEditor({ entry, field, tipsEnabled, workspaceId, is
                 : undefined,
             other: config.categories.includes("other") && Number(other || 0) > 0
                 ? Number(other || 0)
+                : undefined,
+            // Kept even when the box is hidden, so editing the amount never
+            // drops a recorded fee.
+            fee: (showFeeBox ? Number(fee || 0) : initialFee) > 0
+                ? (showFeeBox ? Number(fee || 0) : initialFee)
                 : undefined,
         };
         const parsed = total > 0
@@ -362,6 +381,14 @@ export function BreakdownCellEditor({ entry, field, tipsEnabled, workspaceId, is
           <span className="text-xs text-muted-foreground">Total</span>
           <span className="text-sm font-medium">{formatCurrency(total)}</span>
         </div>
+
+        {showFeeBox && (<div className="space-y-1">
+            <label className="text-xs text-muted-foreground">− Processing fee (what they kept)</label>
+            <Input value={fee} inputMode="decimal" onChange={(e) => setFee(e.target.value)}/>
+            {total > 0 && Number(fee || 0) > 0 ? (<p className="text-right text-xs text-muted-foreground">
+                You received {formatCurrency(Math.max(total - Number(fee || 0), 0))}
+              </p>) : null}
+          </div>)}
 
         <Button size="sm" className="w-full" onClick={save} disabled={saving}>
           {saving ? "Saving..." : "Save Breakdown"}

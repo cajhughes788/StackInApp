@@ -10,6 +10,7 @@ import { ProfitLossStatementSchema, ProfitLossStatementListSchema, type ProfitLo
 import { ProfitLossInsightsSchema, type ProfitLossInsights } from "@shared/schemas/profitLossInsights";
 import { listCompleteMonths } from "@shared/incomeInsights";
 import { getIndependentCategorizedIncomeTotals } from "@shared/independentIncome";
+import { buildProcessingFeeItems, PROCESSING_FEE_EXPENSE_CATEGORY } from "@shared/processingFees";
 const DEFAULT_TIME_ZONE = "America/Los_Angeles";
 const INCOME_CATEGORY_CONFIG: Array<{
     key: IncomeCategory;
@@ -139,10 +140,18 @@ function buildIncomeCategories(entries: EntryType[]) {
         };
     });
 }
-function buildExpenseCategories(expenses: ExpenseType[]) {
+function buildExpenseCategories(expenses: ExpenseType[], entries: EntryType[]) {
     const expenseByCategoryMap = new Map<string, {
         items: ProfitLossDetailItem[];
     }>();
+    // Fees the processor kept from income lines (shared/processingFees.ts) —
+    // grouped with any processing fees logged as expenses.
+    const feeItems = buildProcessingFeeItems(entries, PAYMENT_METHOD_LABELS);
+    if (feeItems.length > 0) {
+        expenseByCategoryMap.set(getCpaExpenseCategory(PROCESSING_FEE_EXPENSE_CATEGORY), {
+            items: feeItems.map((item) => ({ ...item, appCategory: PROCESSING_FEE_EXPENSE_CATEGORY })),
+        });
+    }
     for (const expense of expenses) {
         const amount = roundCurrency(Number(expense.amount) || 0);
         const builtInCategory = findExpenseCategoryGuideEntry(expense.account ?? "");
@@ -356,7 +365,7 @@ function buildStatement(workspaceId: string, descriptor: PeriodDescriptor, entri
     const refunds = buildRefunds(entries);
     const incomeTotal = roundCurrency(grossReceipts - refunds.total);
 
-    const byCategory = buildExpenseCategories(expenses);
+    const byCategory = buildExpenseCategories(expenses, entries);
     const totalExpenses = roundCurrency(byCategory.reduce((sum, item) => sum + item.amount, 0));
     let sourceUpdatedThrough: string | null = null;
     for (const entry of entries) {

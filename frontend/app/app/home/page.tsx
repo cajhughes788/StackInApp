@@ -40,6 +40,8 @@ import { getActiveProfileTrace } from "@/lib/observability/profileTrace";
 import { useAppBootstrapState } from "@/contexts/app-bootstrap-context";
 import { useHomepageLayoutShiftDiagnostics } from "@/hooks/useHomepageLayoutShiftDiagnostics";
 import HomeTour from "@/components/onboarding/home-tour";
+import AllIncomeCard from "@/components/all-income-card";
+import TaxEstimateCard from "@/components/tax/tax-estimate-card";
 
 export default function HomePage() {
     const router = useRouter();
@@ -302,6 +304,7 @@ export default function HomePage() {
       <StackInHeader />
 
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-5 px-4 pb-10 pt-4">
+        <AllIncomeCard className="order-0"/>
         <div className="order-0 grid grid-cols-2 rounded-full bg-secondary p-1 dark:bg-muted" role="group" aria-label="Show income or expenses" data-tour="mode-switch">
           {(["income", "expenses"] as const).map((tab) => (<button key={tab} type="button" aria-pressed={mode === tab} onClick={() => setMode(tab)} className={`rounded-full py-2 text-sm font-medium transition-colors ${mode === tab
                 ? "bg-foreground text-background shadow-sm"
@@ -313,6 +316,7 @@ export default function HomePage() {
         {mode === "income" ? <IncomeStreamsOverview /> : <ExpenseCategoriesOverview />}
 
         <div className="order-2 space-y-5">
+          <TaxEstimateCard />
           <NeedsYouPanel />
           {showVenmoImportPanel ? <VenmoImportPanel /> : null}
         </div>
@@ -332,6 +336,7 @@ export default function HomePage() {
       <StackInHeader />
 
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-5 px-4 pb-10 pt-4">
+        <AllIncomeCard />
         <div data-tour="total">
           <IncomeGauge />
         </div>

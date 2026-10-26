@@ -18,6 +18,9 @@
     "test:invoice-payments": "node ./scripts/test-invoice-payments.cjs",
     "test:invoice-reminders": "node ./scripts/test-invoice-reminders.cjs",
     "test:signup-attribution": "node ./scripts/test-signup-attribution.cjs",
+    "test:all-income": "node ./scripts/test-all-income.cjs",
+    "test:processing-fees": "node ./scripts/test-processing-fees.cjs",
+    "test:estimated-tax": "node ./scripts/test-estimated-tax.cjs",
     "install:all": "npm install --workspaces",
     "verify": "npm ls zod",
     "profile:report": "node ./scripts/profile-report.mjs"

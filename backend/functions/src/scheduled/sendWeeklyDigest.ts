@@ -3,6 +3,7 @@ import { DateTime } from "luxon"
 import { db } from "../admin"
 import type { EntryType } from "@shared/schemas/entry"
 import { computeIncomeGaugeForEntry } from "@shared/computeIncomeGauge"
+import { sumEntryProcessingFees } from "@shared/processingFees"
 import { needsReceiptForAuditDefense } from "@shared/receiptRequirements"
 import { buildWeeklyDigest } from "@shared/weeklyDigest"
 import { sendTransactionNotification } from "../services/pushNotificationService"
@@ -66,7 +67,8 @@ export const sendWeeklyDigest = onSchedule(
         )
         // Counted only if the person hasn't hidden missing receipts from Needs you.
         const countMissingReceipts = settings.independent?.missingReceiptsInNeedsYou !== false
-        let expenses = 0
+        // Processing fees kept from income count as expenses, as on the P&L.
+        let expenses = sumEntryProcessingFees(entriesSnap.docs.map((doc) => doc.data() as EntryType))
         let missingReceiptCount = 0
         for (const doc of expensesSnap.docs) {
           const expense = doc.data()

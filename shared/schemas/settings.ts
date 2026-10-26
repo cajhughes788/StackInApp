@@ -142,6 +142,9 @@ export const IndependentSettings = z.object({
   enableCashSales: z.boolean().optional(),
   trackVehicleExpenses: z.boolean().optional(),
   trackBusinessMileage: z.boolean().optional(),
+  // Card / POS, Cash App and Venmo income lines take the full sale plus the
+  // fee the processor kept (shared/processingFees.ts).
+  trackProcessingFees: z.boolean().optional(),
   incomeTargetPerMonth: z.number().optional(),
   expenseTargetPerMonth: z.number().optional(),
   // Share of profit (income − expenses) to set aside for taxes, 0–100.

@@ -19,6 +19,11 @@ export {
   generateCurrentPayStub,
   getProfitLossStatements,
   getProfitLossInsights,
+  getAllIncomeSummary,
+  getTaxEstimate,
+  saveTaxEstimateProfile,
+  saveTaxPayment,
+  deleteTaxPayment,
   generateProfitLossStatement,
   deleteUserData,
   createExpense,
@@ -84,6 +89,7 @@ export { deleteScheduledAccounts } from "./scheduled/deleteScheduledAccounts"
 export { cleanupOrphanReceiptAssets } from "./scheduled/cleanupOrphanReceiptAssets"
 export { flagStalePlaidItemsDaily } from "./scheduled/flagStalePlaidItemsDaily"
 export { sendWeeklyDigest } from "./scheduled/sendWeeklyDigest"
+export { sendTaxRemindersDaily } from "./scheduled/sendTaxRemindersDaily"
 export { sendOwnerReportWeekly } from "./scheduled/sendOwnerReportWeekly"
 export { sendInvoiceRemindersDaily } from "./scheduled/sendInvoiceRemindersDaily"
 export { notifySupportReportCreated } from "./triggers/notifySupportReportCreated"

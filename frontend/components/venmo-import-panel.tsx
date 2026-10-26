@@ -26,6 +26,7 @@ import { useEntriesStore } from "@/lib/stores/useEntriesStore"
 import { useExpensesStore } from "@/lib/stores/useExpensesStore"
 import { useExpenseMemoryStore } from "@/lib/stores/useExpenseMemoryStore"
 import { useSettingsStore } from "@/lib/stores/useSettingsStore"
+import { isProcessingFeeTrackingOn, supportsProcessingFee } from "@shared/processingFees"
 import {
   parseImportCsvBySource,
   SUPPORTED_IMPORT_SOURCES,
@@ -386,7 +387,9 @@ export default function VenmoImportPanel() {
 
     try {
       const text = await file.text()
-      const payload = parseImportCsvBySource(selectedSource, file.name, text)
+      const payload = parseImportCsvBySource(selectedSource, file.name, text, {
+        trackFees: isProcessingFeeTrackingOn(settingsEntry?.data?.independent),
+      })
       debugLog("venmo-import-panel", "import_payload_preflight", {
         workspaceId: activeWorkspaceId,
         selectedSource,
@@ -565,6 +568,12 @@ export default function VenmoImportPanel() {
         other: selectedCategories.includes("other")
           ? parseMoney(draft.other)
           : undefined,
+        // Amount is the full sale; the file's fee goes on the line
+        // (shared/processingFees.ts).
+        fee:
+          supportsProcessingFee(config.paymentMethod) && Number(item.fee ?? 0) > 0
+            ? Number(item.fee)
+            : undefined,
       }
 
       const entry = await entriesService.createEntry(activeWorkspaceId, {
@@ -976,9 +985,17 @@ export default function VenmoImportPanel() {
                           </p>
                         ) : null}
                       </div>
-                      <p className="text-base font-semibold">
-                        {formatCurrency(item.amount ?? 0)}
-                      </p>
+                      <div className="text-right">
+                        <p className="text-base font-semibold">
+                          {formatCurrency(item.amount ?? 0)}
+                        </p>
+                        {Number(item.fee ?? 0) > 0 ? (
+                          <p className="text-xs text-muted-foreground tabular-nums">
+                            {formatCurrency(Number(item.fee))} fee · you received{" "}
+                            {formatCurrency(Number(item.amount ?? 0) - Number(item.fee))}
+                          </p>
+                        ) : null}
+                      </div>
                     </div>
 
                     <div className="mt-4 flex flex-wrap gap-2">

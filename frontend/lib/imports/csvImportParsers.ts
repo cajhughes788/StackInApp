@@ -9,6 +9,8 @@ type ParsedCsvRow = {
   rawRow: Record<string, string>
   occurredAt: string | null
   amount: number | null
+  // Processing fee the file reports (Square / Stripe), when fees are tracked.
+  fee?: number | null
   description: string | null
   counterparty: string | null
   parseWarnings: string[]
@@ -93,6 +95,17 @@ function parseCsv(text: string): string[][] {
 
 function findColumnIndex(headers: string[], candidates: string[]): number {
   return headers.findIndex((header) => candidates.includes(header))
+}
+
+// Like findColumnIndex, but the candidates are in priority order — for
+// files that carry several amount columns (gross, fee, net) where the
+// column order in the file must not decide which one is read.
+function findPreferredColumnIndex(headers: string[], candidates: string[]): number {
+  for (const candidate of candidates) {
+    const index = headers.indexOf(candidate)
+    if (index !== -1) return index
+  }
+  return -1
 }
 
 function findHeaderRowIndex(
@@ -198,6 +211,7 @@ function incomeItemFromRow(source: ImportSource, row: ParsedCsvRow): ImportItemI
     status: "pending",
     occurredAt: row.occurredAt,
     amount: row.amount,
+    fee: row.fee ?? null,
     currency: "USD",
     description: row.description,
     counterparty: row.counterparty,
@@ -337,11 +351,18 @@ export function parseVenmoCsvToImportBatch(
   )
 }
 
+export type CsvImportOptions = {
+  // "Track processing fees" (shared/processingFees.ts): read the full sale
+  // and the fee separately instead of a single amount.
+  trackFees?: boolean
+}
+
 function parseGenericIncomeCsv(
   fileName: string,
   text: string,
   source: "stripe_csv" | "square_csv",
-  labelFallback: string
+  labelFallback: string,
+  options: CsvImportOptions = {}
 ): CreateImportBatchInput {
   const rows = parseCsv(text)
   if (rows.length < 2) {
@@ -352,7 +373,14 @@ function parseGenericIncomeCsv(
   const headers = rawHeaders.map(normalizeHeader)
 
   const dateIndex = findColumnIndex(headers, ["created", "createdutc", "date", "datetime", "paidat", "transactiondate"])
-  const amountIndex = findColumnIndex(headers, ["amount", "gross", "net", "total", "amountusd", "paymentamount"])
+  // The full sale first: Square's "Total Collected", Stripe's "Amount".
+  // Net is only a fallback (net + fee rebuilds the sale).
+  const grossIndex = findPreferredColumnIndex(headers, [
+    "totalcollected", "grossamount", "gross", "amount", "total", "amountusd", "paymentamount", "grosssales",
+  ])
+  const netIndex = findPreferredColumnIndex(headers, ["nettotal", "net", "netamount"])
+  const feeIndex = findPreferredColumnIndex(headers, ["fees", "fee", "processingfees", "processingfee", "feeamount", "totalfees"])
+  const amountIndex = grossIndex !== -1 ? grossIndex : netIndex
   const descriptionIndex = findColumnIndex(headers, ["description", "details", "productdescription", "item", "note"])
   const customerIndex = findColumnIndex(headers, ["customer", "customername", "name", "buyername", "cardholdername"])
   const statusIndex = findColumnIndex(headers, ["status", "paymentstatus"])
@@ -365,7 +393,22 @@ function parseGenericIncomeCsv(
   const items = rows
     .slice(1)
     .map((values) => {
-      const amount = parseAmount(values[amountIndex])
+      const net = netIndex >= 0 ? parseAmount(values[netIndex]) : null
+      // Square lists fees as negative amounts.
+      const reportedFee = feeIndex >= 0 ? parseAmount(values[feeIndex]) : null
+      const gross = grossIndex >= 0 ? parseAmount(values[grossIndex]) : null
+      const fee =
+        reportedFee != null
+          ? Math.abs(reportedFee)
+          : gross != null && net != null && gross > net
+            ? Math.round((gross - net) * 100) / 100
+            : null
+      const amount =
+        gross != null
+          ? gross
+          : net != null && options.trackFees && fee != null
+            ? Math.round((net + fee) * 100) / 100
+            : net
       const occurredAt = parseOccurredAt(values[dateIndex])
       const description = descriptionIndex >= 0 ? values[descriptionIndex]?.trim() ?? "" : ""
       const customer = customerIndex >= 0 ? values[customerIndex]?.trim() ?? "" : ""
@@ -386,6 +429,7 @@ function parseGenericIncomeCsv(
         },
         occurredAt,
         amount,
+        fee: options.trackFees && fee != null && fee > 0 ? fee : null,
         description: description || `${labelFallback} sale`,
         counterparty: customer || null,
         parseWarnings,
@@ -399,16 +443,18 @@ function parseGenericIncomeCsv(
 
 export function parseStripeCsvToImportBatch(
   fileName: string,
-  text: string
+  text: string,
+  options: CsvImportOptions = {}
 ): CreateImportBatchInput {
-  return parseGenericIncomeCsv(fileName, text, "stripe_csv", "Stripe")
+  return parseGenericIncomeCsv(fileName, text, "stripe_csv", "Stripe", options)
 }
 
 export function parseSquareCsvToImportBatch(
   fileName: string,
-  text: string
+  text: string,
+  options: CsvImportOptions = {}
 ): CreateImportBatchInput {
-  return parseGenericIncomeCsv(fileName, text, "square_csv", "Square")
+  return parseGenericIncomeCsv(fileName, text, "square_csv", "Square", options)
 }
 
 export function parseBankCsvToImportBatch(
@@ -480,15 +526,16 @@ export function parseBankCsvToImportBatch(
 export function parseImportCsvBySource(
   source: SupportedImportSource,
   fileName: string,
-  text: string
+  text: string,
+  options: CsvImportOptions = {}
 ): CreateImportBatchInput {
   switch (source) {
     case "venmo_csv":
       return parseVenmoCsvToImportBatch(fileName, text)
     case "stripe_csv":
-      return parseStripeCsvToImportBatch(fileName, text)
+      return parseStripeCsvToImportBatch(fileName, text, options)
     case "square_csv":
-      return parseSquareCsvToImportBatch(fileName, text)
+      return parseSquareCsvToImportBatch(fileName, text, options)
     case "bank_csv":
       return parseBankCsvToImportBatch(fileName, text)
     default:
