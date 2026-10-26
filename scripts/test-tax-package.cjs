@@ -121,6 +121,24 @@ test("package files: names, Schedule C rows, formula guard, escaped summary", ()
   assert.match(html, /missing a receipt<\/td><td class="n">1</);
 });
 
+test("Schedule C rows come out in line order", () => {
+  // As found on a real package: Advertising (8), Other (27a), Supplies (22)
+  const files = buildTaxPackageFiles({
+    ...data,
+    scheduleC: {
+      ...data.scheduleC,
+      expenseLines: [
+        { category: "Advertising", line: "8", amount: 89, count: 1 },
+        { category: "Other expenses", line: "27a (list in Part V)", amount: 56, count: 1 },
+        { category: "Supplies", line: "22", amount: 56, count: 1 },
+        { category: "Rent or lease - other business property", line: "20b", amount: 500, count: 1 },
+      ],
+    },
+  });
+  const rows = files[0].data.split("\r\n").map((r) => r.split(",")[0].replaceAll('"', ""));
+  assert.deepEqual(rows.slice(4, 8), ["8", "20b", "22", "27a (list in Part V)"]);
+});
+
 test("no mileage → no mileage file", () => {
   const files = buildTaxPackageFiles({ ...data, mileage: [] });
   assert.ok(!files.some((f) => f.path.startsWith("Mileage")));

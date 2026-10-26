@@ -167,6 +167,12 @@ export function receiptZipName(
   return name
 }
 
+// Schedule C order: by line number ("8" < "20b" < "27a"), then name.
+function byScheduleCLine(a: { line: string; category: string }, b: { line: string; category: string }): number {
+  const number = (line: string) => Number.parseInt(line, 10) || 99
+  return number(a.line) - number(b.line) || a.line.localeCompare(b.line) || a.category.localeCompare(b.category)
+}
+
 export function buildTaxPackageFiles(data: TaxPackageData): ZipEntry[] {
   const y = data.taxYear
   const s = data.scheduleC
@@ -179,7 +185,7 @@ export function buildTaxPackageFiles(data: TaxPackageData): ZipEntry[] {
       ["1", "Gross receipts or sales", money(s.grossReceipts), ""],
       ["2", "Returns and allowances (refunds)", money(s.returnsAndAllowances), ""],
       ["3", "Gross receipts minus returns", money(s.netIncomeFromSales), ""],
-      ...s.expenseLines.map((line) => [line.line, line.category, money(line.amount), line.count]),
+      ...[...s.expenseLines].sort(byScheduleCLine).map((line) => [line.line, line.category, money(line.amount), line.count]),
       ["28", "Total expenses", money(s.totalExpenses), ""],
       ["31", "Net profit (loss)", money(s.netProfit), ""],
       ["", "Includes payment processing fees", money(s.processingFees), ""],
