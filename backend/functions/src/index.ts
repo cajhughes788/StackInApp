@@ -37,6 +37,7 @@ export {
   getRecurringRules,
   getInvoices,
   createInvoice,
+  createQuickCharge,
   editInvoice,
   deleteInvoice,
   updateInvoiceStatus,

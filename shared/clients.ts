@@ -204,6 +204,8 @@ export function buildClientRows(
   for (const client of clients) rowFor(client, client.name)
 
   for (const invoice of invoices) {
+    // A walk-in quick charge belongs to no client.
+    if (invoice.quickCharge && !invoice.clientId) continue
     const linked = invoice.clientId ? byId.get(invoice.clientId) : undefined
     const matchedId = linked ? linked.id : index.get(clientKey(invoice.clientName))
     const row = rowFor(matchedId ? byId.get(matchedId) ?? null : null, invoice.clientName)

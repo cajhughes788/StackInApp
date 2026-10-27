@@ -299,6 +299,14 @@ function parseDollarsToCents(text: string): number | null {
 // on the payment that finishes the invoice (never a deposit), only when the
 // business asks for tips, and at most the payment itself; anything else
 // counts as no tip. Null when nothing can be paid online.
+/** Whether the payer is offered a tip: a quick charge decides for itself. */
+export function invoiceOffersTip(
+  invoice: { quickCharge?: { askForTip: boolean } | null },
+  settingsOfferTips: boolean
+): boolean {
+  return invoice.quickCharge ? invoice.quickCharge.askForTip : settingsOfferTips
+}
+
 export function invoiceCheckoutAmounts(
   invoice: LedgerInvoice & { dueDate: string },
   choice: InvoiceCheckoutChoice,

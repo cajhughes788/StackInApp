@@ -10,6 +10,8 @@ import {
   InvoiceSettingsPatchSchema,
   InvoiceSettingsSchema,
   InvoiceStatusActionSchema,
+  QuickChargeInputSchema,
+  WALK_IN_CLIENT_NAME,
   invoiceTotalFromLines,
   type InvoicePatch,
   type InvoiceSettings,
@@ -622,4 +624,70 @@ export async function expireCheckoutSession(workspaceId: string, sessionId: stri
     // Already completed or expired — nothing to close.
     console.warn("invoicesService.expireCheckoutSession: couldn't expire", sessionId, error instanceof Error ? error.message : error)
   }
+}
+
+// ---------------------------------------------------------------------------
+// Quick charge: a one-line invoice made at the counter, shared at once and
+// paid on the spot from a QR code (the Charge screen). Everything after this
+// — the pay page, Checkout, the webhook booking income and the Stripe fee —
+// is the invoice flow; see InvoiceSchema.quickCharge for what differs.
+// ---------------------------------------------------------------------------
+export async function createQuickCharge(
+  workspaceId: string,
+  uid: string,
+  raw: unknown
+): Promise<{ invoice: InvoiceType; shareUrl: string }> {
+  await assertWorkspaceMembership(workspaceId, uid)
+  const parsed = QuickChargeInputSchema.safeParse(raw)
+  if (!parsed.success) throw new BadRequestError("Invalid charge", formatIssues(parsed.error))
+  const input = parsed.data
+  await assertIndependentWorkspace(workspaceId)
+
+  // Only worth making if the customer can actually pay it here and now.
+  const { readPaymentAccount } = await import("./paymentAccountsService.js")
+  const account = await readPaymentAccount(workspaceId)
+  if (!account?.chargesEnabled || !account.acceptOnline) {
+    throw new ConflictError("Turn on online payments in Invoice settings to take card payments.")
+  }
+
+  const ref = invoicesCol(workspaceId).doc(`cmid_${input.clientMutationId}`)
+  const name = input.clientName?.trim() || ""
+  // A named customer is a client like any invoice's; a walk-in isn't saved.
+  const client = name ? await resolveInvoiceClient(workspaceId, { clientName: name }) : null
+
+  await db.runTransaction(async (txn) => {
+    const [existingSnap, counterSnap] = await txn.getAll(ref, counterDoc(workspaceId))
+    if (existingSnap.exists) return // a retry: share what was already made
+    const lastNumber = Number(counterSnap.data()?.lastNumber ?? 0)
+    const nowIso = new Date().toISOString()
+    const lines = [
+      { description: input.description?.trim() || "Payment", quantity: 1, rate: input.amount, amount: input.amount, category: "services" as const },
+    ]
+    const invoice = InvoiceSchema.parse({
+      id: ref.id,
+      workspaceId,
+      number: formatInvoiceNumber(lastNumber + 1),
+      clientName: name || WALK_IN_CLIENT_NAME,
+      clientId: client?.id ?? null,
+      clientEmail: client?.email ?? null,
+      clientPhone: client?.phone ?? null,
+      clientAddress: null,
+      lines,
+      total: invoiceTotalFromLines(lines),
+      issueDate: input.date,
+      dueDate: input.date,
+      // The pay screen shows neither; paying is the whole point of it.
+      note: "",
+      policies: "",
+      deposit: null,
+      quickCharge: { askForTip: input.askForTip },
+      status: "draft",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+    txn.create(ref, invoice)
+    txn.set(counterDoc(workspaceId), { lastNumber: lastNumber + 1, updatedAt: nowIso }, { merge: true })
+  })
+  // Sharing makes the public link and marks it sent.
+  return shareInvoice(workspaceId, ref)
 }

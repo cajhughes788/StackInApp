@@ -173,6 +173,12 @@ export const createInvoice = withCorsAuth(async (req, res) => {
   await createInvoiceHandler(req, res)
 })
 
+// A one-line invoice made and shared at the counter, paid by QR code.
+export const createQuickCharge = withCorsAuth(async (req, res) => {
+  const { createQuickChargeHandler } = await import("./routes/createQuickCharge.js")
+  await createQuickChargeHandler(req, res)
+})
+
 // Stripe key: changing the total or voiding closes the client's open Checkout.
 export const editInvoice = withCorsAuth(
   async (req, res) => {

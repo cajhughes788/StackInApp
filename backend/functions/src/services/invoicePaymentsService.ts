@@ -8,7 +8,7 @@ import {
   type InvoicePaymentPurpose,
   type InvoiceType,
 } from "@shared/schemas/invoice"
-import { invoiceCheckoutAmounts, invoicePaymentOptions, type InvoiceCheckoutChoice } from "@shared/invoicePayments"
+import { invoiceCheckoutAmounts, invoiceOffersTip, invoicePaymentOptions, type InvoiceCheckoutChoice } from "@shared/invoicePayments"
 import { invoicePaidNotification, publicInvoiceUrl } from "@shared/invoiceDisplay"
 import { StripePayoutSchema } from "@shared/stripePayouts"
 import { payoutsCol } from "./stripePayoutsStore"
@@ -60,7 +60,8 @@ export async function invoiceOnlinePayment(
   if (invoicePaymentOptions(invoice).length === 0) return { payable: false, bankTransfer: false }
   const account = await readPaymentAccount(workspaceId)
   const payable = !!account && account.chargesEnabled && account.acceptOnline
-  return { payable, bankTransfer: payable && account?.achStatus === "active" }
+  // A quick charge is paid at the counter: cards and wallets only.
+  return { payable, bankTransfer: payable && !invoice.quickCharge && account?.achStatus === "active" }
 }
 
 // The client chose what to pay (deposit, balance or everything) and a tip
@@ -73,7 +74,7 @@ export async function startInvoiceCheckout(shareToken: string, choice: InvoiceCh
   if (!shared) return { kind: "not_found" }
   const { workspaceId, invoice, settings } = shared
   const account = await readPaymentAccount(workspaceId)
-  const amounts = invoiceCheckoutAmounts(invoice, choice, settings.offerTips)
+  const amounts = invoiceCheckoutAmounts(invoice, choice, invoiceOffersTip(invoice, settings.offerTips))
   if (!amounts || !account?.chargesEnabled || !account.acceptOnline) {
     return { kind: "not_payable" }
   }
@@ -122,7 +123,8 @@ export async function startInvoiceCheckout(shareToken: string, choice: InvoiceCh
       // transfers once Stripe has enabled them on the account — 0.8% capped
       // at $5, the cheapest way for a client to pay a large invoice. A bank
       // transfer settles days later (checkout.session.async_payment_*).
-      payment_method_types: account.achStatus === "active" ? ["card", "us_bank_account"] : ["card"],
+      // A quick charge is paid at the counter, so no bank transfer (it takes days).
+      payment_method_types: account.achStatus === "active" && !invoice.quickCharge ? ["card", "us_bank_account"] : ["card"],
       // The whole invoice: its own lines. Part of it: one line saying which.
       // A tip is a line of its own.
       line_items: [

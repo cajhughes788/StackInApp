@@ -20,7 +20,7 @@ import { formatInvoiceMoney } from "@shared/invoiceDisplay"
 import { invoiceBalanceDue, invoiceDueNow, invoicePaymentsReceivedIn } from "@shared/invoicePayments"
 import type { InvoiceType } from "@shared/schemas/invoice"
 
-type Filter = "all" | "open" | "overdue" | "paid" | "draft"
+type Filter = "all" | "open" | "overdue" | "paid" | "draft" | "quick"
 
 const FILTERS: Array<{ id: Filter; label: string }> = [
   { id: "all", label: "All" },
@@ -28,9 +28,14 @@ const FILTERS: Array<{ id: Filter; label: string }> = [
   { id: "overdue", label: "Overdue" },
   { id: "paid", label: "Paid" },
   { id: "draft", label: "Drafts" },
+  { id: "quick", label: "Quick charges" },
 ]
 
 function matchesFilter(invoice: InvoiceType, filter: Filter, today: string): boolean {
+  // Quick charges (paid at the counter by QR code) have their own filter, so
+  // they don't crowd the invoices list.
+  if (filter === "quick") return !!invoice.quickCharge
+  if (invoice.quickCharge) return false
   switch (filter) {
     case "all":
       return true
@@ -220,7 +225,9 @@ function InvoicesListPage() {
               </nav>
 
               {visible.length === 0 ? (
-                <div className={cn(cardClass, "text-sm text-muted-foreground")}>No invoices here.</div>
+                <div className={cn(cardClass, "text-sm text-muted-foreground")}>
+                  {filter === "quick" ? "No quick charges yet. Tap Charge on Home to take a payment on the spot." : "No invoices here."}
+                </div>
               ) : (
                 <ul className="overflow-hidden rounded-[18px] border border-card-border bg-card">
                   {visible.map((invoice) => (

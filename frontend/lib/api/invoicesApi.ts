@@ -9,6 +9,7 @@ import {
   type InvoiceSettingsPatch,
   type InvoiceStatusAction,
   type InvoiceType,
+  type QuickChargeInput,
 } from "@shared/schemas/invoice"
 import type { PaymentAccount, PaymentAccountAction } from "@shared/schemas/paymentAccount"
 
@@ -96,6 +97,18 @@ export async function createInvoice(workspaceId: string, input: InvoiceCreateInp
     body: JSON.stringify(input),
   })
   return requireInvoice(res.invoice)
+}
+
+/** Makes a quick charge (a one-line invoice, shared at once) and returns its pay link. */
+export async function createQuickCharge(
+  workspaceId: string,
+  input: QuickChargeInput
+): Promise<{ invoice: InvoiceType; shareUrl: string }> {
+  const res = await apiFetch<{ invoice: InvoiceType; shareUrl: string }>(
+    `${API_ENDPOINTS.invoices.quickCharge}?${query(workspaceId)}`,
+    { timeout: INVOICE_TIMEOUT_MS, method: "POST", body: JSON.stringify(input) }
+  )
+  return { invoice: requireInvoice(res.invoice), shareUrl: res.shareUrl }
 }
 
 export async function editInvoice(workspaceId: string, invoiceId: string, patch: InvoicePatch): Promise<InvoiceType> {

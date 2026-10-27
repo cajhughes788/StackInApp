@@ -12,6 +12,7 @@ import {
   invoiceAmountPaid,
   invoiceBalanceDue,
   invoiceDueNow,
+  invoiceOffersTip,
   invoicePaymentOptions,
   type InvoicePaymentOption,
 } from "./invoicePayments"
@@ -253,7 +254,8 @@ export function renderPublicInvoicePage(
   // a payment that finishes the invoice).
   const payOptions = invoicePaymentOptions(invoice)
   const payAmount = payOptions[0]?.amount ?? balance
-  const showTips = !!settings.offerTips && payOptions.some((o) => o.purpose === "balance" || o.purpose === "full")
+  const showTips =
+    invoiceOffersTip(invoice, !!settings.offerTips) && payOptions.some((o) => o.purpose === "balance" || o.purpose === "full")
   const processing = invoice.status === "sent" && !!invoice.pendingPayment
   const banner =
     processing
@@ -261,12 +263,25 @@ export function renderPublicInvoicePage(
       : options.justPaid && invoice.status === "sent"
       ? `<div class="banner" style="background:${TONE_COLORS.paid.bg};color:${TONE_COLORS.paid.fg}">Thank you — your payment is being processed.</div>`
       : invoice.status === "void"
-      ? `<div class="banner" style="background:${tone.bg};color:${tone.fg}">This invoice was voided — nothing is owed.</div>`
+      ? `<div class="banner" style="background:${tone.bg};color:${tone.fg}">${invoice.quickCharge ? "This charge was canceled" : "This invoice was voided"} — nothing is owed.</div>`
       : invoice.status === "closed"
       ? `<div class="banner" style="background:${tone.bg};color:${tone.fg}">This invoice is closed — nothing more is owed.</div>`
       : invoice.status === "paid"
         ? `<div class="banner" style="background:${tone.bg};color:${tone.fg}">${escapeHtml(status.label)} — thank you!</div>`
         : ""
+
+  if (invoice.quickCharge) {
+    return renderQuickChargePage(invoice, settings, {
+      accent,
+      businessName,
+      banner,
+      showPay: showPay && !options.justPaid && payOptions.length > 0,
+      payPath: options.payPath ?? null,
+      payAmount,
+      showTips,
+      payOptions,
+    })
+  }
 
   const lines = invoice.lines
     .map(
@@ -348,6 +363,54 @@ export function renderPublicInvoicePage(
 <p class="foot">Sent with 521</p>`
 
   return shell(`Invoice #${invoice.number} from ${businessName}`, body, accent)
+}
+
+// A quick charge (InvoiceSchema.quickCharge): opened from a QR code at the
+// counter, so it's just who you're paying, what for, the amount, a tip and
+// Pay — no invoice number, line table, dates or policies.
+function renderQuickChargePage(
+  invoice: InvoiceType,
+  settings: InvoiceSettings,
+  view: {
+    accent: string
+    businessName: string
+    banner: string
+    showPay: boolean
+    payPath: string | null
+    payAmount: number
+    showTips: boolean
+    payOptions: InvoicePaymentOption[]
+  }
+): string {
+  const what = invoice.lines[0]?.description
+  const body = `<article class="card">
+  <div class="bar"></div>
+  ${view.banner}
+  <section class="section">
+    <div class="biz">
+      ${settings.logoDataUrl ? `<img src="${escapeHtml(settings.logoDataUrl)}" alt="">` : ""}
+      <div><div class="biz-name">${escapeHtml(view.businessName)}</div></div>
+    </div>
+  </section>
+  <section class="section">
+    <div class="label">${what && what !== "Payment" ? escapeHtml(what) : "Amount"}</div>
+    <div class="due">${escapeHtml(formatInvoiceMoney(invoice.total))}</div>
+    ${
+      view.showPay && view.payPath
+        ? `<form method="post" action="${escapeHtml(view.payPath)}" id="payform" style="margin-top:16px">
+      ${renderPayChoices(invoice, view.payOptions)}
+      ${view.showTips ? renderTipPicker(false) : ""}
+      <button class="btn pay" type="submit" id="paybtn">Pay ${escapeHtml(formatInvoiceMoney(view.payAmount))}</button>
+      <div class="pay-note">Card, Apple Pay or Google Pay · secure checkout by Stripe</div>
+    </form>
+    ${PAY_FORM_SCRIPT}`
+        : ""
+    }
+  </section>
+</article>
+${invoice.status === "paid" ? `<div class="actions"><button class="btn secondary" type="button" onclick="window.print()">Save receipt as PDF</button></div>` : ""}
+<p class="foot">Paid with 521</p>`
+  return shell(`Pay ${view.businessName}`, body, view.accent)
 }
 
 export function renderPublicInvoiceNotFound(): string {

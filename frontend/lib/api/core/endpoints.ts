@@ -18,6 +18,7 @@ export const API_ENDPOINTS = {
   invoices: {
     get: "https://getinvoices-3lc2fwdgwq-uc.a.run.app",
     post: "https://createinvoice-3lc2fwdgwq-uc.a.run.app",
+    quickCharge: "https://createquickcharge-3lc2fwdgwq-uc.a.run.app",
     patch: "https://editinvoice-3lc2fwdgwq-uc.a.run.app",
     delete: "https://deleteinvoice-3lc2fwdgwq-uc.a.run.app",
     status: "https://updateinvoicestatus-3lc2fwdgwq-uc.a.run.app",

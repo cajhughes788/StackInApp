@@ -2,6 +2,8 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { ChevronRight, QrCode } from "lucide-react";
 import AppLoader from "@/components/app-loader";
 import StackInHeader from "@/components/stackin-header";
 import IncomeGauge from "@/components/income-gauge";
@@ -325,6 +327,16 @@ export default function HomePage() {
         {mode === "income" ? <IncomeStreamsOverview onImportCsv={showImportSalesPanel ? () => setImportOpenRequest((n) => n + 1) : undefined}/> : <ExpenseCategoriesOverview />}
 
         <div className="order-2 space-y-5">
+          {supportsExpenses ? (<Link href="/app/charge" className="flex items-center gap-3 rounded-[22px] border border-card-border bg-card px-5 py-4 hover:bg-muted/50">
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                <QrCode className="size-5" aria-hidden="true"/>
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block font-semibold text-foreground">Charge</span>
+                <span className="block text-sm text-muted-foreground">Show a QR code your customer pays with</span>
+              </span>
+              <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true"/>
+            </Link>) : null}
           <TaxEstimateCard />
           <NeedsYouPanel />
           {showImportSalesPanel ? <ImportSalesPanel sources={stableImportSources} openRequest={importOpenRequest}/> : null}

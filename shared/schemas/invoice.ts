@@ -202,6 +202,11 @@ export const InvoiceSchema = z
     paymentFailedAt: z.string().nullable().default(null),
     // First time the public link was shared.
     sharedAt: z.string().nullable().default(null),
+    // Set on a quick charge: a one-line invoice made at the counter and paid
+    // on the spot by QR code (createQuickCharge). Its public page is a short
+    // pay screen, it takes cards and wallets only, and askForTip replaces
+    // InvoiceSettings.offerTips for it.
+    quickCharge: z.object({ askForTip: z.boolean() }).nullable().default(null),
 
     // --- Payment ledger -------------------------------------------------
     // Oldest first. A payment's processor fee, method and links live on it.
@@ -366,6 +371,23 @@ export const InvoiceCreateInputSchema = InvoiceFieldsSchema.extend({
 export const InvoicePatchSchema = InvoiceFieldsSchema.partial()
   .refine(dueOnOrAfterIssue, { path: ["dueDate"], message: "Due date can't be before the issue date." })
   .refine(depositFits, { path: ["deposit"], message: DEPOSIT_FITS_MESSAGE })
+
+// A quick charge, as the Charge screen sends it. Stripe's minimum is $0.50.
+export const QuickChargeInputSchema = z.object({
+  amount: CentsAmountSchema.refine((amount) => amount >= 0.5, "The smallest card payment is $0.50."),
+  // What it's for ("Fade + beard"); the line's description.
+  description: z.string().trim().max(200).optional(),
+  // Blank = "Walk-in", and no client is saved.
+  clientName: z.string().trim().max(80).optional(),
+  askForTip: z.boolean().default(true),
+  // The user's local date — the charge is issued and due today.
+  date: DateSchema,
+  // Same retry-safety scheme as createInvoice.
+  clientMutationId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),
+})
+
+export type QuickChargeInput = z.input<typeof QuickChargeInputSchema>
+export const WALK_IN_CLIENT_NAME = "Walk-in"
 
 export const InvoiceStatusActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("send") }),

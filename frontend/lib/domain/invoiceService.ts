@@ -146,6 +146,7 @@ export function createInvoiceInBackground(workspaceId: string, input: CreateInpu
     clientName: input.clientName,
     // The server links (or creates) the client when it saves.
     clientId: input.clientId ?? null,
+    quickCharge: null,
     clientEmail: input.clientEmail || null,
     clientPhone: input.clientPhone || null,
     clientAddress: input.clientAddress || null,
