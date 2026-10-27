@@ -12,10 +12,13 @@ import {
   BOOKING_DAYS,
   BOOKING_DAY_NAMES,
   BOOKING_MAX_BLOCKS_PER_DAY,
+  BOOKING_MAX_DAYS_OFF,
   BOOKING_MAX_SERVICES,
   BOOKING_SLOT_STEPS,
   BookingSettingsSchema,
+  bookingDatesInRange,
   bookingDayHoursProblem,
+  bookingDayOffRanges,
   bookingServiceProblem,
   type BookingDay,
   type BookingDeposit,
@@ -109,6 +112,20 @@ function formatDayOff(date: string): string {
   return new Date(`${date}T12:00:00`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })
 }
 
+// "Dec 20 – 25, 2026", "Nov 28 – Dec 2, 2026", "Dec 28, 2026 – Jan 2, 2027".
+function formatDayOffRange(start: string, end: string): string {
+  if (start === end) return formatDayOff(start)
+  const [startYear, startMonth] = start.split("-")
+  const [endYear, endMonth] = end.split("-")
+  const day = (date: string, options: Intl.DateTimeFormatOptions) =>
+    new Date(`${date}T12:00:00`).toLocaleDateString("en-US", options)
+  if (startYear !== endYear) {
+    return `${day(start, { month: "short", day: "numeric", year: "numeric" })} – ${day(end, { month: "short", day: "numeric", year: "numeric" })}`
+  }
+  const endPart = startMonth === endMonth ? day(end, { day: "numeric" }) : day(end, { month: "short", day: "numeric" })
+  return `${day(start, { month: "short", day: "numeric" })} – ${endPart}, ${endYear}`
+}
+
 // Every zone the device knows; the common list on older devices.
 function deviceTimeZones(): string[] {
   try {
@@ -186,7 +203,9 @@ export function BookingSetupForm({
   const { toast } = useToast()
   const [draft, setDraft] = useState<Draft>(() => toDraft(initial))
   const [editing, setEditing] = useState<{ service: ServiceDraft; isNew: boolean } | null>(null)
-  const [dayOffText, setDayOffText] = useState("")
+  // A single day leaves "to" blank.
+  const [dayOffFrom, setDayOffFrom] = useState("")
+  const [dayOffTo, setDayOffTo] = useState("")
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const today = localToday()
@@ -210,6 +229,16 @@ export function BookingSetupForm({
   )
   const hasDayProblem = BOOKING_DAYS.some((day) => dayProblems[day])
   const upcomingDaysOff = draft.daysOff.filter((date) => date >= today)
+  const dayOffRanges = bookingDayOffRanges(upcomingDaysOff)
+  const newDaysOff = /^\d{4}-\d{2}-\d{2}$/.test(dayOffFrom) && dayOffFrom >= today
+    ? bookingDatesInRange(dayOffFrom, dayOffTo || dayOffFrom)
+    : []
+  const dayOffError =
+    dayOffFrom && dayOffTo && dayOffTo < dayOffFrom
+      ? "The last day off can't be before the first."
+      : new Set([...upcomingDaysOff, ...newDaysOff]).size > BOOKING_MAX_DAYS_OFF
+        ? "That's more than a year of days off."
+        : null
   // Listed after mount: the server's list differs from the device's.
   const [allZones, setAllZones] = useState<string[]>(COMMON_TIME_ZONES)
   useEffect(() => setAllZones(deviceTimeZones()), [])
@@ -226,10 +255,12 @@ export function BookingSetupForm({
     setEditing(null)
   }
 
-  function addDayOff() {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dayOffText) || dayOffText < today) return
-    if (!draft.daysOff.includes(dayOffText)) update({ daysOff: [...draft.daysOff, dayOffText].sort() })
-    setDayOffText("")
+  // Overlapping or back-to-back ranges join up when they're shown.
+  function addDaysOff() {
+    if (newDaysOff.length === 0 || dayOffError) return
+    update({ daysOff: [...new Set([...upcomingDaysOff, ...newDaysOff])].sort() })
+    setDayOffFrom("")
+    setDayOffTo("")
   }
 
   async function save() {
@@ -413,43 +444,61 @@ export function BookingSetupForm({
 
       <section className={cn(cardClass, "space-y-3")}>
         <h2 className="text-sm font-semibold text-muted-foreground">Days off</h2>
-        <div className="flex gap-2">
-          <input
-            type="date"
-            min={today}
-            className={cn(softInputClass, "min-w-0 flex-1")}
-            value={dayOffText}
-            aria-label="Day off"
-            onChange={(event) => setDayOffText(event.target.value)}
-          />
-          <Button
-            type="button"
-            variant="outline"
-            className="h-11 shrink-0 rounded-full border-card-border bg-card px-4 font-semibold"
-            disabled={!dayOffText || dayOffText < today}
-            onClick={addDayOff}
-          >
-            Add
-          </Button>
+        <div className="flex items-end gap-2">
+          <label className={cn(fieldLabelClass, "min-w-0 flex-1")}>
+            From
+            <input
+              type="date"
+              min={today}
+              className={cn(softInputClass, "min-w-0")}
+              value={dayOffFrom}
+              onChange={(event) => setDayOffFrom(event.target.value)}
+            />
+          </label>
+          <label className={cn(fieldLabelClass, "min-w-0 flex-1")}>
+            To
+            <input
+              type="date"
+              min={dayOffFrom || today}
+              className={cn(softInputClass, "min-w-0")}
+              value={dayOffTo}
+              onChange={(event) => setDayOffTo(event.target.value)}
+            />
+          </label>
         </div>
-        {upcomingDaysOff.length > 0 ? (
+        <Button
+          type="button"
+          variant="outline"
+          className="h-10 w-full rounded-full border-card-border bg-card font-semibold"
+          disabled={newDaysOff.length === 0 || dayOffError !== null}
+          onClick={addDaysOff}
+        >
+          Add days off
+        </Button>
+        {dayOffError ? <p className="text-sm text-destructive">{dayOffError}</p> : null}
+        {dayOffRanges.length > 0 ? (
           <ul className="flex flex-wrap gap-2">
-            {upcomingDaysOff.map((date) => (
-              <li key={date} className="flex items-center gap-1 rounded-full bg-muted py-1 pl-3 pr-1 text-sm">
-                {formatDayOff(date)}
-                <button
-                  type="button"
-                  aria-label={`Remove ${formatDayOff(date)}`}
-                  className="flex size-7 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
-                  onClick={() => update({ daysOff: draft.daysOff.filter((item) => item !== date) })}
-                >
-                  <X className="size-3.5" aria-hidden="true" />
-                </button>
-              </li>
-            ))}
+            {dayOffRanges.map((range) => {
+              const label = formatDayOffRange(range.start, range.end)
+              return (
+                <li key={range.start} className="flex items-center gap-1 rounded-full bg-muted py-1 pl-3 pr-1 text-sm">
+                  {label}
+                  <button
+                    type="button"
+                    aria-label={`Remove ${label}`}
+                    className="flex size-7 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+                    onClick={() =>
+                      update({ daysOff: draft.daysOff.filter((date) => date < range.start || date > range.end) })
+                    }
+                  >
+                    <X className="size-3.5" aria-hidden="true" />
+                  </button>
+                </li>
+              )
+            })}
           </ul>
         ) : (
-          <p className="text-xs text-muted-foreground">Holidays or vacation: no one can book these dates.</p>
+          <p className="text-xs text-muted-foreground">Holidays or vacation: no one can book these dates. For one day, leave To blank.</p>
         )}
       </section>
 

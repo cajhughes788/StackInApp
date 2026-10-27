@@ -9,7 +9,9 @@ const {
   BookingSettingsSchema,
   BookingServiceSchema,
   DEFAULT_BOOKING_WEEKLY_HOURS,
+  bookingDatesInRange,
   bookingDayHoursProblem,
+  bookingDayOffRanges,
   bookingServiceProblem,
   isValidTimeZone,
 } = require("../shared/schemas/booking.ts");
@@ -144,6 +146,37 @@ test("nothing saved yet reads as Mon–Fri 9–5, no services", () => {
   assert.equal(settings.minNoticeHours, 2);
   assert.equal(settings.maxDaysAhead, 60);
   assert.equal(settings.timeZone, "");
+});
+
+console.log("days off");
+
+test("a range includes both ends, across months and years", () => {
+  assert.deepEqual(bookingDatesInRange("2026-12-20", "2026-12-25"), [
+    "2026-12-20", "2026-12-21", "2026-12-22", "2026-12-23", "2026-12-24", "2026-12-25",
+  ]);
+  assert.deepEqual(bookingDatesInRange("2026-12-30", "2027-01-02"), ["2026-12-30", "2026-12-31", "2027-01-01", "2027-01-02"]);
+  assert.deepEqual(bookingDatesInRange("2027-02-27", "2027-03-01"), ["2027-02-27", "2027-02-28", "2027-03-01"]);
+});
+
+test("one day is a range of one; a backwards range is empty", () => {
+  assert.deepEqual(bookingDatesInRange("2026-11-26", "2026-11-26"), ["2026-11-26"]);
+  assert.deepEqual(bookingDatesInRange("2026-12-25", "2026-12-20"), []);
+});
+
+test("back-to-back dates show as one range; gaps split them", () => {
+  const dates = ["2026-12-22", "2026-11-26", "2026-12-20", "2026-12-21", "2026-12-31", "2027-01-01"];
+  assert.deepEqual(bookingDayOffRanges(dates), [
+    { start: "2026-11-26", end: "2026-11-26" },
+    { start: "2026-12-20", end: "2026-12-22" },
+    { start: "2026-12-31", end: "2027-01-01" },
+  ]);
+});
+
+test("overlapping or touching ranges join up", () => {
+  const dates = [...bookingDatesInRange("2026-12-20", "2026-12-25"), ...bookingDatesInRange("2026-12-24", "2026-12-28")];
+  assert.deepEqual(bookingDayOffRanges(dates), [{ start: "2026-12-20", end: "2026-12-28" }]);
+  const touching = [...bookingDatesInRange("2026-12-20", "2026-12-25"), ...bookingDatesInRange("2026-12-26", "2026-12-27")];
+  assert.deepEqual(bookingDayOffRanges(touching), [{ start: "2026-12-20", end: "2026-12-27" }]);
 });
 
 if (failures > 0) {

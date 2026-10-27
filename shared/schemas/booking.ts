@@ -147,6 +147,30 @@ export function bookingDayHoursProblem(blocks: BookingHoursBlock[]): string | nu
   return null
 }
 
+function shiftDate(date: string, days: number): string {
+  const day = new Date(`${date}T00:00:00Z`)
+  day.setUTCDate(day.getUTCDate() + days)
+  return day.toISOString().slice(0, 10)
+}
+
+/** Every date from `from` through `to`, both included ([] if `to` is earlier). */
+export function bookingDatesInRange(from: string, to: string): string[] {
+  const dates: string[] = []
+  for (let date = from; date <= to && dates.length <= BOOKING_MAX_DAYS_OFF; date = shiftDate(date, 1)) dates.push(date)
+  return dates
+}
+
+/** Days off as runs of back-to-back dates, e.g. Dec 20–25 instead of six dates. */
+export function bookingDayOffRanges(dates: string[]): Array<{ start: string; end: string }> {
+  const ranges: Array<{ start: string; end: string }> = []
+  for (const date of [...new Set(dates)].sort()) {
+    const last = ranges[ranges.length - 1]
+    if (last && shiftDate(last.end, 1) === date) last.end = date
+    else ranges.push({ start: date, end: date })
+  }
+  return ranges
+}
+
 export const BOOKING_DAY_NAMES: Record<BookingDay, string> = {
   sun: "Sunday",
   mon: "Monday",
