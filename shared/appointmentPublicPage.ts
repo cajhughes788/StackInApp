@@ -1,6 +1,6 @@
 import { DateTime } from "luxon"
 
-import { appointmentEndTime, formatAppointmentDate, formatBookingTime } from "./appointments"
+import { appointmentEndTime, appointmentMapLinks, formatAppointmentDate, formatBookingTime } from "./appointments"
 import { formatInvoiceMoney, formatInvoicePhone } from "./invoiceDisplay"
 import { escapeHtml, shell, telHref } from "./invoicePublicPage"
 import type { AppointmentStatus, AppointmentType } from "./schemas/appointment"
@@ -29,6 +29,21 @@ function formatHoldUntil(iso: string, timeZone: string): string {
   if (!at.isValid) return ""
   const time = formatBookingTime(at.toFormat("HH:mm"))
   return `${at.toFormat("LLL d")} at ${time}`
+}
+
+// The address as typed, then directions in whichever maps app they use.
+function renderWhere(location: string): string {
+  const address = location.trim()
+  if (!address) return ""
+  const maps = appointmentMapLinks(address)
+  return `<div style="margin-top:16px">
+      <div class="label">Where</div>
+      <div class="address" style="margin-top:4px">${escapeHtml(address)}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        <a class="btn secondary" style="padding:8px 14px;font-size:14px;text-decoration:none" href="${escapeHtml(maps.apple)}" target="_blank" rel="noopener">Apple Maps</a>
+        <a class="btn secondary" style="padding:8px 14px;font-size:14px;text-decoration:none" href="${escapeHtml(maps.google)}" target="_blank" rel="noopener">Google Maps</a>
+      </div>
+    </div>`
 }
 
 export function renderPublicAppointmentPage(
@@ -99,6 +114,7 @@ export function renderPublicAppointmentPage(
     </div>
     <p style="margin:8px 0 0">${when}</p>
     <p class="muted" style="margin:2px 0 0">For ${escapeHtml(appointment.clientName)}</p>
+    ${renderWhere(appointment.location)}
     <div class="total" style="margin-top:16px">
       <span class="label">Price</span>
       <span style="font-weight:600;font-variant-numeric:tabular-nums">${escapeHtml(formatInvoiceMoney(appointment.price))}</span>

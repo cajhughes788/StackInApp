@@ -187,15 +187,20 @@ export async function sharePdfBlob(blob: Blob, filename: string, title?: string)
 // otherwise copies the link. "unavailable" when the browser refuses the
 // clipboard too (common after an await, which ends the tap's permission) —
 // the caller then shows the link itself.
+//
+// With a message, the link goes at the end of it rather than alongside:
+// given both, iPhone's Copy keeps only the message and the link is lost.
+// Messages still shows the link's preview from inside the text.
 export async function shareLink(url: string, title: string, text?: string): Promise<"shared" | "copied" | "unavailable"> {
+  const payload = text ? { title, text: `${text}\n${url}` } : { title, url }
   try {
     if (Capacitor.isNativePlatform()) {
       const { Share } = await import("@capacitor/share")
-      await Share.share({ title, text, url, dialogTitle: title })
+      await Share.share({ ...payload, dialogTitle: title })
       return "shared"
     }
     if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
-      await navigator.share({ title, text, url })
+      await navigator.share(payload)
       return "shared"
     }
   } catch (error) {

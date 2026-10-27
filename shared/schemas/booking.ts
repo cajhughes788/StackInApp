@@ -16,6 +16,7 @@ export const BOOKING_SLOT_STEPS = [15, 30, 60] as const
 export const BOOKING_MAX_SERVICES = 50
 export const BOOKING_MAX_DAYS_OFF = 366
 export const BOOKING_MAX_BLOCKS_PER_DAY = 4
+export const BOOKING_MAX_LOCATION = 300
 
 // Used when a workspace has no time zone saved anywhere (matches payPeriods).
 export const DEFAULT_BOOKING_TIME_ZONE = "America/Los_Angeles"
@@ -95,6 +96,11 @@ const BookingSettingsFields = z.object({
   // IANA name, e.g. "America/Chicago". "" until saved: the server fills it
   // from the workspace's settings time zone when it's read.
   timeZone: z.string().max(64),
+  // Where appointments happen, as typed (may be several lines). Copied onto
+  // each new appointment and shown to the client. "" = no fixed place.
+  // Optional on input: a save from an app version without it keeps the
+  // saved one (bookingService).
+  location: z.string().trim().max(BOOKING_MAX_LOCATION).optional(),
 })
 
 function refineSettings(settings: z.infer<typeof BookingSettingsFields>, ctx: z.RefinementCtx) {
@@ -114,6 +120,7 @@ export const BookingSettingsSchema = z.object({
   maxDaysAhead: BookingSettingsFields.shape.maxDaysAhead.default(60),
   slotStepMinutes: BookingSettingsFields.shape.slotStepMinutes.default(30),
   timeZone: BookingSettingsFields.shape.timeZone.default(""),
+  location: z.string().trim().max(BOOKING_MAX_LOCATION).default(""),
   updatedAt: z.string().optional(),
 })
 

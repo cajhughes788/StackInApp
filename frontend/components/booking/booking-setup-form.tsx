@@ -5,6 +5,8 @@ import { Plus, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
+import { Textarea } from "@/components/ui/textarea"
+import { PickerInput } from "@/components/booking/picker-input"
 import { useToast } from "@/hooks/use-toast"
 import { cardClass, fieldLabelClass, localToday, softInputClass } from "@/components/invoices/invoice-ui"
 import { cn } from "@/lib/utils"
@@ -13,6 +15,7 @@ import {
   BOOKING_DAY_NAMES,
   BOOKING_MAX_BLOCKS_PER_DAY,
   BOOKING_MAX_DAYS_OFF,
+  BOOKING_MAX_LOCATION,
   BOOKING_MAX_SERVICES,
   BOOKING_SLOT_STEPS,
   BookingSettingsSchema,
@@ -361,6 +364,24 @@ export function BookingSetupForm({
       </section>
 
       <section className={cn(cardClass, "space-y-3")}>
+        <h2 className="text-sm font-semibold text-muted-foreground">Where appointments happen</h2>
+        <Textarea
+          rows={2}
+          value={draft.location}
+          onChange={(event) => update({ location: event.target.value })}
+          maxLength={BOOKING_MAX_LOCATION}
+          placeholder={"123 Main St, Suite 4\nBoise, ID 83702"}
+          aria-label="Where appointments happen"
+          autoComplete="street-address"
+          className="resize-none rounded-xl border-0 bg-muted text-[15px] text-foreground shadow-none"
+        />
+        <p className="text-xs text-muted-foreground">
+          Shown to clients with each appointment, with directions. You can change it on any appointment, like a house
+          call. Leave it blank if you don&apos;t have a fixed place.
+        </p>
+      </section>
+
+      <section className={cn(cardClass, "space-y-3")}>
         <h2 className="text-sm font-semibold text-muted-foreground">Weekly hours</h2>
         <ul className="divide-y divide-card-border">
           {BOOKING_DAYS.map((day) => {
@@ -447,20 +468,20 @@ export function BookingSetupForm({
         <div className="flex items-end gap-2">
           <label className={cn(fieldLabelClass, "min-w-0 flex-1")}>
             From
-            <input
+            <PickerInput
               type="date"
               min={today}
-              className={cn(softInputClass, "min-w-0")}
+              placeholder="Pick a date"
               value={dayOffFrom}
               onChange={(event) => setDayOffFrom(event.target.value)}
             />
           </label>
           <label className={cn(fieldLabelClass, "min-w-0 flex-1")}>
             To
-            <input
+            <PickerInput
               type="date"
               min={dayOffFrom || today}
-              className={cn(softInputClass, "min-w-0")}
+              placeholder="Optional"
               value={dayOffTo}
               onChange={(event) => setDayOffTo(event.target.value)}
             />
@@ -560,7 +581,9 @@ export function BookingSetupForm({
             })}
           </div>
           <p className="text-xs text-muted-foreground">
-            With 30 min, customers see 9:00, 9:30, 10:00… whenever the whole service fits.
+            With {draft.slotStepMinutes === 60 ? "1 hour" : `${draft.slotStepMinutes} min`}, customers see{" "}
+            {draft.slotStepMinutes === 15 ? "9:00, 9:15, 9:30" : draft.slotStepMinutes === 30 ? "9:00, 9:30, 10:00" : "9:00, 10:00, 11:00"}…
+            whenever the whole service fits.
           </p>
         </fieldset>
         <label className={fieldLabelClass}>

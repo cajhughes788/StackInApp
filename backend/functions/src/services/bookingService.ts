@@ -3,6 +3,7 @@ import { assertWorkspaceMembership } from "../lib/workspaceMembership"
 import { BadRequestError, ForbiddenError } from "../lib/httpErrors"
 import {
   BookingSettingsInputSchema,
+  BOOKING_MAX_LOCATION,
   BookingSettingsSchema,
   DEFAULT_BOOKING_TIME_ZONE,
   isValidTimeZone,
@@ -43,7 +44,15 @@ export async function readBookingSettings(workspaceId: string): Promise<BookingS
   }
   const settings = parsed.success ? parsed.data : BookingSettingsSchema.parse({})
   if (!settings.timeZone) settings.timeZone = await workspaceTimeZone(workspaceId)
+  // Never saved with an address: start from the invoice business address.
+  if (snap.data()?.location === undefined) settings.location = await invoiceBusinessAddress(workspaceId)
   return settings
+}
+
+async function invoiceBusinessAddress(workspaceId: string): Promise<string> {
+  const { readInvoiceSettings } = await import("./invoicesService.js")
+  const invoiceSettings = await readInvoiceSettings(workspaceId)
+  return invoiceSettings.businessAddress.trim().slice(0, BOOKING_MAX_LOCATION)
 }
 
 export async function getBookingSettings(workspaceId: string, uid: string): Promise<BookingSettings> {
@@ -62,9 +71,12 @@ export async function saveBookingSettings(workspaceId: string, uid: string, raw:
     throw new BadRequestError(first, formatIssues(parsed.error))
   }
   const timeZone = parsed.data.timeZone || (await workspaceTimeZone(workspaceId))
+  // An app version without the address field leaves the saved one alone.
+  const location = parsed.data.location ?? (await readBookingSettings(workspaceId)).location
   const next = BookingSettingsSchema.parse({
     ...parsed.data,
     timeZone,
+    location,
     // Kept in date order, no repeats.
     daysOff: [...new Set(parsed.data.daysOff)].sort(),
     updatedAt: new Date().toISOString(),

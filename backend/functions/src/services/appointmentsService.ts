@@ -152,6 +152,8 @@ export async function createAppointment(
           BookingSettingsSchema.parse({
             ...current,
             timeZone: current.timeZone || settings.timeZone,
+            // Not saved yet: keep the invoice-address default it was read with.
+            location: bookingSnap.data()?.location === undefined ? settings.location : current.location,
             services: [...current.services, service],
             updatedAt: nowIso,
           })
@@ -181,6 +183,7 @@ export async function createAppointment(
       holdExpiresAt: input.askToConfirm ? appointmentHoldExpiresAt(nowIso) : null,
       shareToken,
       outsideHours: bookingHoursWarning(settings, input.date, input.startTime, input.minutes) !== null,
+      location: input.location ?? settings.location,
       createdAt: nowIso,
       updatedAt: nowIso,
     })

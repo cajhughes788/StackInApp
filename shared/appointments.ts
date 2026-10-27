@@ -140,6 +140,24 @@ export function bookingHoursWarning(
   return `That's outside your ${dayName} hours (${hours}).`
 }
 
+/** An address on one line: "123 Main St, Suite 4, Boise, ID". */
+export function appointmentLocationLine(location: string): string {
+  return location
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(", ")
+}
+
+/** Directions links for an address (the client picks their maps app). */
+export function appointmentMapLinks(location: string): { apple: string; google: string } {
+  const query = encodeURIComponent(appointmentLocationLine(location))
+  return {
+    apple: `https://maps.apple.com/?q=${query}`,
+    google: `https://www.google.com/maps/search/?api=1&query=${query}`,
+  }
+}
+
 export const APPOINTMENT_STATUS_LABELS: Record<AppointmentStatus, string> = {
   requested: "Waiting on client",
   confirmed: "Confirmed",

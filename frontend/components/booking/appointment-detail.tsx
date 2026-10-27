@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Check, Mail, Phone, Share2, TriangleAlert, X } from "lucide-react"
+import { Check, Mail, MapPin, Phone, Share2, TriangleAlert, X } from "lucide-react"
 
 import {
   AppointmentStatusPill,
@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button"
 import { cardClass } from "@/components/invoices/invoice-ui"
 import { shareLink } from "@/lib/documentExport"
 import { cn } from "@/lib/utils"
-import { formatBookingTime } from "@shared/appointments"
+import { appointmentLocationLine, appointmentMapLinks, formatBookingTime } from "@shared/appointments"
 import { formatInvoiceMoney, formatInvoicePhone } from "@shared/invoiceDisplay"
 import type { AppointmentAction, AppointmentType } from "@shared/schemas/appointment"
 
@@ -49,9 +49,10 @@ export function AppointmentDetail({
         const shared = await shareLink(
           result.shareUrl,
           `${appointment.serviceName} appointment`,
-          status === "requested"
+          (status === "requested"
             ? `Please confirm your ${appointment.serviceName} appointment: ${appointmentWhen(appointment)}`
-            : `Your ${appointment.serviceName} appointment: ${appointmentWhen(appointment)}`
+            : `Your ${appointment.serviceName} appointment: ${appointmentWhen(appointment)}`) +
+            (appointment.location.trim() ? ` · ${appointmentLocationLine(appointment.location)}` : "")
         )
         setNote(shared === "copied" ? "Link copied." : shared === "unavailable" ? result.shareUrl : null)
       }
@@ -90,6 +91,18 @@ export function AppointmentDetail({
             <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
             Booked outside your usual hours.
           </p>
+        ) : null}
+        {appointment.location.trim() ? (
+          // Opens Maps (the app hands non-app links to the phone).
+          <a
+            href={appointmentMapLinks(appointment.location).apple}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-start gap-2 text-sm text-foreground hover:underline"
+          >
+            <MapPin className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <span className="whitespace-pre-line">{appointment.location.trim()}</span>
+          </a>
         ) : null}
         <dl className="space-y-1.5 border-t border-card-border pt-3 text-sm">
           <div className="flex justify-between gap-3">

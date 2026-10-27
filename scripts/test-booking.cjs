@@ -148,6 +148,18 @@ test("nothing saved yet reads as Mon–Fri 9–5, no services", () => {
   assert.equal(settings.timeZone, "");
 });
 
+console.log("address");
+
+test("the address is optional, trimmed and at most 300 characters", () => {
+  assert.equal(BookingSettingsInputSchema.safeParse(input()).success, true);
+  assert.equal(BookingSettingsInputSchema.parse(input({ location: "  12 Elm St  " })).location, "12 Elm St");
+  assert.equal(BookingSettingsInputSchema.safeParse(input({ location: "x".repeat(301) })).success, false);
+});
+
+test("nothing saved reads as no address", () => {
+  assert.equal(BookingSettingsSchema.parse({}).location, "");
+});
+
 console.log("days off");
 
 test("a range includes both ends, across months and years", () => {

@@ -7,6 +7,8 @@ const assert = require("node:assert/strict");
 const {
   appointmentEndTime,
   appointmentHoldExpiresAt,
+  appointmentLocationLine,
+  appointmentMapLinks,
   appointmentHoldsTime,
   appointmentStatus,
   appointmentTimes,
@@ -241,6 +243,33 @@ test("the time shows in the business's zone with its name", () => {
   const html = page(appointment());
   assert.match(html, /Thu, Dec 3 · 10am – 11am/);
   assert.match(html, /\(CST\)/);
+});
+
+console.log("address");
+
+test("old appointments read as no address", () => {
+  assert.equal(appointment().location, "");
+});
+
+test("an address on one line, and map links that carry it", () => {
+  assert.equal(appointmentLocationLine("123 Main St\n  Suite 4 \n\nBoise, ID"), "123 Main St, Suite 4, Boise, ID");
+  const maps = appointmentMapLinks("12 Elm St & Co\nBoise");
+  assert.equal(maps.apple, "https://maps.apple.com/?q=12%20Elm%20St%20%26%20Co%2C%20Boise");
+  assert.equal(maps.google, "https://www.google.com/maps/search/?api=1&query=12%20Elm%20St%20%26%20Co%2C%20Boise");
+});
+
+test("an appointment can have its own address, or leave it to Booking setup", () => {
+  assert.equal(AppointmentCreateInputSchema.parse(input({ location: " 9 Oak Ave " })).location, "9 Oak Ave");
+  assert.equal(AppointmentCreateInputSchema.parse(input()).location, undefined);
+});
+
+test("the client page shows Where with directions, escaped; nothing when blank", () => {
+  const html = page(appointment({ location: "12 <b>Elm</b> St\nBoise" }));
+  assert.match(html, /Where/);
+  assert.match(html, /12 &lt;b&gt;Elm&lt;\/b&gt; St/);
+  assert.match(html, /Apple Maps/);
+  assert.match(html, /Google Maps/);
+  assert.doesNotMatch(page(appointment()), /Apple Maps/);
 });
 
 if (failures > 0) {

@@ -5,13 +5,15 @@ import { TriangleAlert } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
+import { Textarea } from "@/components/ui/textarea"
+import { PickerInput } from "@/components/booking/picker-input"
 import { cardClass, fieldLabelClass, localToday, softInputClass } from "@/components/invoices/invoice-ui"
 import { cn } from "@/lib/utils"
 import { bookingHoursWarning, formatBookingTime, appointmentEndTime } from "@shared/appointments"
 import { clientKey } from "@shared/clients"
 import { formatInvoiceMoney } from "@shared/invoiceDisplay"
 import type { AppointmentCreateInput, AppointmentType } from "@shared/schemas/appointment"
-import { bookingServiceProblem, type BookingDeposit, type BookingSettings } from "@shared/schemas/booking"
+import { BOOKING_MAX_LOCATION, bookingServiceProblem, type BookingDeposit, type BookingSettings } from "@shared/schemas/booking"
 import type { ClientType } from "@shared/schemas/client"
 
 const LENGTHS = [15, 30, 45, 60, 75, 90, 120, 150, 180, 240]
@@ -77,6 +79,8 @@ export function NewAppointmentForm({
   const [date, setDate] = useState(today)
   const [startTime, setStartTime] = useState("")
   const [askToConfirm, setAskToConfirm] = useState(true)
+  // Starts from Booking setup; changing it here is for this appointment only.
+  const [location, setLocation] = useState(settings.location)
 
   const [showErrors, setShowErrors] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -165,6 +169,7 @@ export function NewAppointmentForm({
         date,
         startTime,
         askToConfirm,
+        location: location.trim(),
       })
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "Couldn't book it. Check your connection and try again.")
@@ -418,20 +423,20 @@ export function NewAppointmentForm({
         <div className="flex gap-2.5">
           <label className={cn(fieldLabelClass, "min-w-0 flex-1")}>
             Date
-            <input
+            <PickerInput
               type="date"
               min={today}
-              className={cn(softInputClass, "min-w-0")}
+              placeholder="Pick a date"
               value={date}
               onChange={(event) => setDate(event.target.value)}
             />
           </label>
           <label className={cn(fieldLabelClass, "min-w-0 flex-1")}>
             Start time
-            <input
+            <PickerInput
               type="time"
               step={300}
-              className={cn(softInputClass, "min-w-0")}
+              placeholder="Pick a time"
               value={startTime}
               onChange={(event) => setStartTime(event.target.value)}
             />
@@ -450,6 +455,21 @@ export function NewAppointmentForm({
           </p>
         ) : null}
         {fieldError(errors.when)}
+        <label className={fieldLabelClass}>
+          Location
+          <Textarea
+            rows={2}
+            value={location}
+            onChange={(event) => setLocation(event.target.value)}
+            maxLength={BOOKING_MAX_LOCATION}
+            placeholder="Address the client should come to"
+            autoComplete="off"
+            className="resize-none rounded-xl border-0 bg-muted text-[15px] text-foreground shadow-none"
+          />
+        </label>
+        {location.trim() !== settings.location.trim() && settings.location.trim() ? (
+          <p className="text-xs text-muted-foreground">For this appointment only — your usual address stays in Booking setup.</p>
+        ) : null}
       </section>
 
       <section className={cn(cardClass, "space-y-2")}>

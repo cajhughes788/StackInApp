@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import { BookingDepositSchema, bookingServiceProblem } from "./booking"
+import { BOOKING_MAX_LOCATION, BookingDepositSchema, bookingServiceProblem } from "./booking"
 
 /* --------------------------------------------------------
  * APPOINTMENTS — workspaces/{workspaceId}/appointments/{id}
@@ -58,6 +58,8 @@ export const AppointmentSchema = z.object({
   shareToken: z.string().nullable(),
   // Booked outside the weekly hours or on a day off (the owner was warned).
   outsideHours: z.boolean().default(false),
+  // Where it happens, copied in when booked (see BookingSettings.location).
+  location: z.string().default(""),
   respondedAt: IsoSchema.nullable().default(null),
   canceledAt: IsoSchema.nullable().default(null),
   completedAt: IsoSchema.nullable().default(null),
@@ -80,6 +82,8 @@ export const AppointmentCreateInputSchema = z
     startTime: TimeSchema,
     // false = booked and confirmed now; true = the client confirms by link.
     askToConfirm: z.boolean(),
+    // This appointment's address; left out, it's the Booking setup one.
+    location: z.string().trim().max(BOOKING_MAX_LOCATION).optional(),
   })
   .superRefine((input, ctx) => {
     const problem = bookingServiceProblem({ name: input.serviceName, price: input.price, deposit: input.deposit })
