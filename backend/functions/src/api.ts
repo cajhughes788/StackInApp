@@ -199,6 +199,25 @@ export const updateInvoiceStatus = withCorsAuth(
   { secrets: [SECRETS.STRIPE_SECRET_KEY, SECRETS.SENDGRID_API_KEY] }
 )
 
+// ---------------------------------------------------------------------------
+// Clients (shared/schemas/client.ts)
+// ---------------------------------------------------------------------------
+
+export const getClients = withCorsAuth(async (req, res) => {
+  const { getClientsHandler } = await import("./routes/getClients.js")
+  await getClientsHandler(req, res)
+})
+
+export const saveClient = withCorsAuth(async (req, res) => {
+  const { saveClientHandler } = await import("./routes/saveClient.js")
+  await saveClientHandler(req, res)
+})
+
+export const mergeClients = withCorsAuth(async (req, res) => {
+  const { mergeClientsHandler } = await import("./routes/mergeClients.js")
+  await mergeClientsHandler(req, res)
+})
+
 export const saveInvoiceSettings = withCorsAuth(async (req, res) => {
   const { saveInvoiceSettingsHandler } = await import("./routes/saveInvoiceSettings.js")
   await saveInvoiceSettingsHandler(req, res)

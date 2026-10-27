@@ -17,6 +17,7 @@ import {
   invoiceTipsReceived,
 } from "@shared/invoicePayments"
 import { invoiceRefundedTotal, type InvoicePayment, type InvoiceType } from "@shared/schemas/invoice"
+import { invoiceKeptAmount } from "@shared/invoiceMoney"
 
 // What happened to a paid invoice's money: the payment, any refunds, a
 // dispute, Stripe's fee, and what the user keeps (invoice detail page).
@@ -31,14 +32,8 @@ const REASON_LABELS: Record<string, string> = {
   other: "refund",
 }
 
-// Money the user still has from this invoice: what was paid (tips
-// included), less refunds and any disputed money not won back.
-export function invoiceKeptAmount(invoice: InvoiceType): number {
-  const disputed =
-    invoice.dispute && invoice.dispute.fundsWithdrawn && invoice.dispute.status !== "won" ? invoice.dispute.amount : 0
-  const received = Math.round(invoiceAmountPaid(invoice) * 100) + Math.round(invoiceTipsReceived(invoice) * 100)
-  return (received - Math.round(invoiceRefundedTotal(invoice) * 100) - Math.round(disputed * 100)) / 100
-}
+// Lives in shared/ so client totals (shared/clients.ts) use the same math.
+export { invoiceKeptAmount }
 
 // Worth its own card once there's more to it than one plain payment in full.
 export function hasMoneyHistory(invoice: InvoiceType): boolean {

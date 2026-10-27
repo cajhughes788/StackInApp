@@ -19,6 +19,9 @@ import {
   useInvoicesWorkspace,
 } from "@/components/invoices/invoice-ui"
 import { createInvoiceInBackground, currentInvoiceId, editInvoiceInBackground } from "@/lib/domain/invoiceService"
+import { useClientsStore } from "@/lib/stores/useClientsStore"
+import { buildClientKeyIndex } from "@shared/clients"
+import type { ClientType } from "@shared/schemas/client"
 import { cn } from "@/lib/utils"
 import { dueDateForTerms, formatInvoiceDate, formatInvoiceMoney, INVOICE_TERMS_LABELS } from "@shared/invoiceDisplay"
 import type { IncomeCategory } from "@shared/schemas/entry"
@@ -86,6 +89,13 @@ function InvoiceFormPage() {
   const invoiceId = useQueryParam("id")
   // "New invoice for <client>" from a client's page.
   const prefillClient = useQueryParam("client")
+  const prefillClientId = useQueryParam("clientId")
+  const clientsEntry = useClientsStore((state) => (workspaceId ? state.byWorkspaceId[workspaceId] : undefined))
+  const loadClients = useClientsStore((state) => state.load)
+  useEffect(() => {
+    if (workspaceId) void loadClients(workspaceId).catch(() => {})
+  }, [loadClients, workspaceId])
+  const savedClients = useMemo(() => (clientsEntry?.clients ?? []).filter((c) => !c.archived), [clientsEntry?.clients])
   // A new invoice keeps working by its temporary id once it has a real one.
   const existing = invoiceId ? invoices.find((invoice) => invoice.id === currentInvoiceId(invoiceId)) ?? null : null
   // One id per form, so a retried create can't make a second invoice.
@@ -96,6 +106,9 @@ function InvoiceFormPage() {
   )
 
   const [clientName, setClientName] = useState("")
+  // The saved client picked (shared/schemas/client.ts); null = the server
+  // finds one by name or makes a new one when the invoice is saved.
+  const [clientId, setClientId] = useState<string | null>(null)
   const [clientEmail, setClientEmail] = useState("")
   const [clientPhone, setClientPhone] = useState("")
   const [lines, setLines] = useState<DraftLine[]>(() => [newLine()])
@@ -119,6 +132,7 @@ function InvoiceFormPage() {
     initialized.current = true
     if (existing) {
       setClientName(existing.clientName)
+      setClientId(existing.clientId ?? null)
       setClientEmail(existing.clientEmail ?? "")
       setClientPhone(existing.clientPhone ?? "")
       setLines(
@@ -155,7 +169,14 @@ function InvoiceFormPage() {
           setDepositDueDate(depositDue > due ? due : depositDue)
         }
       }
-      if (prefillClient) {
+      const prefilled = prefillClientId ? savedClients.find((c) => c.id === prefillClientId) : undefined
+      if (prefilled) {
+        setClientName(prefilled.name)
+        setClientId(prefilled.id)
+        setClientEmail(prefilled.email ?? "")
+        setClientPhone(prefilled.phone ?? "")
+        setClientAddress(prefilled.address ?? "")
+      } else if (prefillClient) {
         // Their contact details from the latest invoice to them.
         const last = invoices.find((invoice) => clientKey(invoice.clientName) === clientKey(prefillClient))
         setClientName(last?.clientName ?? prefillClient)
@@ -164,7 +185,7 @@ function InvoiceFormPage() {
         setClientAddress(last?.clientAddress ?? "")
       }
     }
-  }, [existing, invoiceId, invoices, loadStatus, prefillClient, settings])
+  }, [existing, invoiceId, invoices, loadStatus, prefillClient, prefillClientId, savedClients, settings])
 
   // Paid and void invoices can't be edited.
   useEffect(() => {
@@ -173,14 +194,37 @@ function InvoiceFormPage() {
     }
   }, [existing, router])
 
-  const recentClients = useMemo(() => {
-    const names: string[] = []
-    for (const invoice of invoices) {
-      if (!names.includes(invoice.clientName)) names.push(invoice.clientName)
-      if (names.length === 3) break
+  // Typing: saved clients whose name contains it. Empty: the 3 most recently
+  // invoiced saved clients.
+  const clientSuggestions = useMemo(() => {
+    const q = clientKey(clientName)
+    if (q) {
+      return savedClients
+        .filter((c) => c.nameKey.includes(q) || c.aliases.some((alias) => alias.includes(q)))
+        .filter((c) => c.id !== clientId)
+        .slice(0, 5)
     }
-    return names
-  }, [invoices])
+    const recent: ClientType[] = []
+    const index = buildClientKeyIndex(savedClients)
+    for (const invoice of invoices) {
+      const id = invoice.clientId ?? index.get(clientKey(invoice.clientName))
+      const match = savedClients.find((c) => c.id === id)
+      if (match && !recent.includes(match)) recent.push(match)
+      if (recent.length === 3) break
+    }
+    return recent
+  }, [clientName, clientId, savedClients, invoices])
+  const nameMatchesSavedClient =
+    !!clientName.trim() && buildClientKeyIndex(savedClients).has(clientKey(clientName))
+
+  function pickClient(client: ClientType) {
+    setClientName(client.name)
+    setClientId(client.id)
+    // Their saved details; anything they don't have keeps what's typed.
+    if (client.email) setClientEmail(client.email)
+    if (client.phone) setClientPhone(client.phone)
+    if (client.address) setClientAddress(client.address)
+  }
 
   // Each line's amount is quantity × rate, to the cent (as the server works it out).
   const parsedLines = lines.map((line) => {
@@ -235,6 +279,7 @@ function InvoiceFormPage() {
     }
     const body = {
       clientName: clientName.trim(),
+      clientId,
       clientEmail: clientEmail.trim() || null,
       clientPhone: clientPhone.trim() || null,
       clientAddress: clientAddress.trim() || null,
@@ -319,33 +364,40 @@ function InvoiceFormPage() {
               <input
                 className={softInputClass}
                 value={clientName}
-                onChange={(event) => setClientName(event.target.value)}
+                onChange={(event) => {
+                  setClientName(event.target.value)
+                  // Renaming away from the picked client unlinks it.
+                  const picked = savedClients.find((c) => c.id === clientId)
+                  if (picked && ![picked.nameKey, ...picked.aliases].includes(clientKey(event.target.value))) {
+                    setClientId(null)
+                  }
+                }}
                 placeholder="Client or business name"
                 maxLength={80}
                 autoComplete="organization"
               />
             </label>
-            {recentClients.length > 0 && !existing ? (
+            {clientSuggestions.length > 0 && !(existing && clientId) ? (
               <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-xs text-muted-foreground">Recent:</span>
-                {recentClients.map((name) => (
+                <span className="text-xs text-muted-foreground">{clientName.trim() ? "Clients:" : "Recent:"}</span>
+                {clientSuggestions.map((client) => (
                   <button
-                    key={name}
+                    key={client.id}
                     type="button"
-                    onClick={() => {
-                      setClientName(name)
-                      // Their contact details from the latest invoice to them.
-                      const last = invoices.find((invoice) => invoice.clientName === name)
-                      if (last?.clientEmail && !clientEmail) setClientEmail(last.clientEmail)
-                      if (last?.clientPhone && !clientPhone) setClientPhone(last.clientPhone)
-                      if (last?.clientAddress && !clientAddress) setClientAddress(last.clientAddress)
-                    }}
+                    onClick={() => pickClient(client)}
                     className="h-8 rounded-full border border-card-border bg-card px-3 text-sm text-foreground hover:bg-muted"
                   >
-                    {name}
+                    {client.name}
                   </button>
                 ))}
               </div>
+            ) : null}
+            {clientName.trim() ? (
+              <p className="text-xs text-muted-foreground">
+                {clientId || nameMatchesSavedClient
+                  ? "Saved client — their details stay on file."
+                  : "New client — saved to your clients with this invoice."}
+              </p>
             ) : null}
             {showErrors && errors.client ? <p className="text-sm text-destructive">{errors.client}</p> : null}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

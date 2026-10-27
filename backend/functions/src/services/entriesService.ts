@@ -207,6 +207,10 @@ export async function createEntry(
         createdAtLocal,
         updatedAtLocal: createdAtLocal,
         clientMutationId,
+        // Who paid (a Venmo import's sender) — matched to clients (shared/clients.ts).
+        ...(typeof raw.payerName === "string" && raw.payerName.trim()
+            ? { payerName: raw.payerName.trim().slice(0, 120) }
+            : {}),
         ...(serverOnly?.refund ? { kind: "refund" as const, refund: serverOnly.refund } : {}),
     };
     const canonical: EntryType = EntrySchema.parse(entryToWrite);

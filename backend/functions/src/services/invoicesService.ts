@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto"
 import { db } from "../admin"
 import { assertWorkspaceMembership } from "../lib/workspaceMembership"
+import { resolveInvoiceClient } from "./clientsService"
 import { BadRequestError, ConflictError, NotFoundError } from "../lib/httpErrors"
 import {
   InvoiceCreateInputSchema,
@@ -168,6 +169,9 @@ export async function createInvoice(workspaceId: string, uid: string, raw: unkno
   const ref = input.clientMutationId
     ? invoicesCol(workspaceId).doc(`cmid_${input.clientMutationId}`)
     : invoicesCol(workspaceId).doc()
+  // Every invoice belongs to a saved client — found by name or made here.
+  // A retry finds the same client by name, so this stays idempotent.
+  const client = await resolveInvoiceClient(workspaceId, input)
 
   // The number is taken in the same transaction as the write, so two
   // invoices created at once can't share one, and a retry of the same
@@ -182,6 +186,7 @@ export async function createInvoice(workspaceId: string, uid: string, raw: unkno
       workspaceId,
       number: formatInvoiceNumber(lastNumber + 1),
       clientName: input.clientName,
+      clientId: client.id,
       clientEmail: input.clientEmail || null,
       clientPhone: input.clientPhone || null,
       clientAddress: input.clientAddress || null,
@@ -208,6 +213,23 @@ export async function updateInvoice(workspaceId: string, uid: string, invoiceId:
   if (!parsed.success) throw new BadRequestError("Invalid invoice changes", formatIssues(parsed.error))
   const patch = parsed.data
   const ref = invoicesCol(workspaceId).doc(invoiceId)
+  // A new name or a picked client relinks the invoice (resolved before the
+  // transaction; finding or creating a client is safe to repeat).
+  let relinkedClientId: string | undefined
+  const beforeSnap = await ref.get()
+  const editable = beforeSnap.exists && !["paid", "void", "closed"].includes(beforeSnap.data()?.status)
+  if (editable && (patch.clientId !== undefined || patch.clientName !== undefined)) {
+    const current = beforeSnap
+    const currentName = (current.data()?.clientName as string | undefined) ?? ""
+    const client = await resolveInvoiceClient(workspaceId, {
+      clientId: patch.clientId ?? null,
+      clientName: patch.clientName ?? currentName,
+      clientEmail: patch.clientEmail,
+      clientPhone: patch.clientPhone,
+      clientAddress: patch.clientAddress,
+    })
+    relinkedClientId = client.id
+  }
 
   let staleSessionId: string | null = null
   const updated = await db.runTransaction(async (txn) => {
@@ -224,6 +246,7 @@ export async function updateInvoice(workspaceId: string, uid: string, invoiceId:
     const next = {
       ...current,
       ...patch,
+      clientId: relinkedClientId ?? current.clientId,
       deposit,
       clientEmail: patch.clientEmail === undefined ? current.clientEmail : patch.clientEmail || null,
       clientPhone: patch.clientPhone === undefined ? current.clientPhone : patch.clientPhone || null,

@@ -3,11 +3,10 @@ import type { InvoiceType } from "@shared/schemas/invoice"
 
 import { invoiceKeptAmount } from "@/components/invoices/invoice-money"
 
-// Invoices only store the typed client name, so a client is every invoice
-// whose name matches ignoring case and spacing ("Caj Hughes" = "caj  hughes").
-export function clientKey(name: string): string {
-  return name.trim().replace(/\s+/g, " ").toLowerCase()
-}
+// Name matching ignores case and spacing ("Caj Hughes" = "caj  hughes").
+// Saved clients and their totals: buildClientRows in shared/clients.ts.
+import { clientKey } from "@shared/clients"
+export { clientKey }
 
 export type InvoiceClient = {
   key: string

@@ -144,6 +144,8 @@ export function createInvoiceInBackground(workspaceId: string, input: CreateInpu
     // The server numbers invoices.
     number: "…",
     clientName: input.clientName,
+    // The server links (or creates) the client when it saves.
+    clientId: input.clientId ?? null,
     clientEmail: input.clientEmail || null,
     clientPhone: input.clientPhone || null,
     clientAddress: input.clientAddress || null,

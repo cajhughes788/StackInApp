@@ -107,6 +107,9 @@ const all = z.object({
   // payment — see RefundBreakdownSchema.
   kind: z.enum(["income", "refund"]).optional(),
   refund: RefundInfoSchema.optional(),
+  // Who paid, when known (a Venmo import's sender) — counts the entry toward
+  // a client with that name (shared/clients.ts).
+  payerName: z.string().nullable().optional(),
 
   createdAtLocal: z.string().optional(),
   updatedAtLocal: z.string().optional(),

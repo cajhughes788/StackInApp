@@ -22,6 +22,7 @@ import {
   Menu,
   Receipt,
   FileText,
+  Users,
   Settings,
   UserRound,
   type LucideIcon,
@@ -73,6 +74,7 @@ export default function StackInHeader() {
     ...(activeWorkspace?.type === "independent"
       ? [
           { label: "Invoices", href: "/app/invoices", icon: FileText },
+          { label: "Clients", href: "/app/clients", icon: Users },
           { label: "Receipts", href: "/app/receipts", icon: Receipt },
         ]
       : []),

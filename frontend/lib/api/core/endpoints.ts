@@ -32,6 +32,12 @@ export const API_ENDPOINTS = {
     delete: "https://deleterecurringrule-3lc2fwdgwq-uc.a.run.app",
   },
 
+  clients: {
+    get: "https://getclients-3lc2fwdgwq-uc.a.run.app",
+    save: "https://saveclient-3lc2fwdgwq-uc.a.run.app",
+    merge: "https://mergeclients-3lc2fwdgwq-uc.a.run.app",
+  },
+
   imports: {
     batch: {
       get: "https://getimportbatches-3lc2fwdgwq-uc.a.run.app",

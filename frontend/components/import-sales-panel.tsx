@@ -737,6 +737,8 @@ export default function ImportSalesPanel({ sources, openRequest }: ImportSalesPa
         ]
           .filter(Boolean)
           .join(" | "),
+        // Who paid — counts this toward a client with that name (shared/clients.ts).
+        payerName: item.counterparty ?? null,
         independent: {
           hours: 0,
           incomeBreakdowns: [incomeBreakdown],

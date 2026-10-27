@@ -3,7 +3,7 @@
 import { Suspense, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ChevronRight, FileText, Plus, Settings2 } from "lucide-react"
+import { FileText, Plus, Settings2, Users } from "lucide-react"
 
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -14,7 +14,7 @@ import {
   useInvoicesWorkspace,
   useQueryParam,
 } from "@/components/invoices/invoice-ui"
-import { groupInvoicesByClient } from "@/components/invoices/invoice-clients"
+import ClientList from "@/components/clients/client-list"
 import { cn } from "@/lib/utils"
 import { formatInvoiceMoney } from "@shared/invoiceDisplay"
 import { invoiceBalanceDue, invoiceDueNow, invoicePaymentsReceivedIn } from "@shared/invoicePayments"
@@ -64,7 +64,7 @@ export default function InvoicesListPageRoute() {
 }
 
 function InvoicesListPage() {
-  const { ready, invoices, loadStatus } = useInvoicesWorkspace()
+  const { ready, workspaceId, invoices, loadStatus } = useInvoicesWorkspace()
   const router = useRouter()
   // ?filter=overdue opens straight on that filter (the Needs you row).
   const filterParam = useQueryParam("filter")
@@ -99,7 +99,6 @@ function InvoicesListPage() {
   }, [invoices, today])
 
   const visible = invoices.filter((invoice) => matchesFilter(invoice, filter, today))
-  const clients = useMemo(() => groupInvoicesByClient(invoices, today), [invoices, today])
 
   return (
     <InvoicesPage
@@ -107,6 +106,14 @@ function InvoicesListPage() {
       loadingLabel="Loading invoices..."
       title="Invoices"
       action={
+        <>
+        <Link
+          href="/app/clients"
+          aria-label="Clients"
+          className="flex size-11 shrink-0 items-center justify-center rounded-full text-foreground hover:bg-muted"
+        >
+          <Users className="size-5" aria-hidden="true" />
+        </Link>
         <Link
           href="/app/invoices/settings"
           aria-label="Invoice settings"
@@ -114,6 +121,7 @@ function InvoicesListPage() {
         >
           <Settings2 className="size-5" aria-hidden="true" />
         </Link>
+        </>
       }
     >
       {loadStatus === "loading" && invoices.length === 0 ? (
@@ -221,41 +229,9 @@ function InvoicesListPage() {
                 </ul>
               )}
             </>
-          ) : (
-            <ul className="overflow-hidden rounded-[18px] border border-card-border bg-card">
-              {clients.map((client) => (
-                <li key={client.key} className="border-b border-border last:border-0">
-                  <Link
-                    href={`/app/invoices/client?name=${encodeURIComponent(client.name)}`}
-                    className="flex items-center gap-3 px-4 py-3.5 hover:bg-muted/50"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate font-semibold text-foreground">{client.name}</div>
-                      <div className="truncate text-sm text-muted-foreground">
-                        {client.invoices.length} invoice{client.invoices.length === 1 ? "" : "s"}
-                      </div>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <div className="font-semibold tabular-nums text-foreground">
-                        {formatInvoiceMoney(client.earned)}{" "}
-                        <span className="text-xs font-medium text-muted-foreground">earned</span>
-                      </div>
-                      {client.overdue > 0 ? (
-                        <div className="text-xs font-semibold text-red-700 dark:text-red-400">
-                          {formatInvoiceMoney(client.overdue)} overdue
-                        </div>
-                      ) : client.open > 0 ? (
-                        <div className="text-xs text-muted-foreground">{formatInvoiceMoney(client.open)} open</div>
-                      ) : (
-                        <div className="text-xs text-muted-foreground">Nothing open</div>
-                      )}
-                    </div>
-                    <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
+          ) : workspaceId ? (
+            <ClientList workspaceId={workspaceId} invoices={invoices} today={today} />
+          ) : null}
         </>
       )}
 

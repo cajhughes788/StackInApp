@@ -160,6 +160,9 @@ export const InvoiceSchema = z
     // Per-workspace sequence, zero-padded ("0012").
     number: z.string(),
     clientName: z.string().min(1),
+    // The saved client (shared/schemas/client.ts). The name and contact
+    // fields below stay as printed on this invoice.
+    clientId: z.string().nullable().default(null),
     clientEmail: z.string().nullable().default(null),
     // For "Text it" (a pre-filled Messages draft). Stored as typed.
     clientPhone: z.string().nullable().default(null),
@@ -315,6 +318,9 @@ export const InvoiceDepositInputSchema = z.object({
 
 const InvoiceFieldsSchema = z.object({
   clientName: z.string().trim().min(1).max(80),
+  // Picked from saved clients; without it the server finds or creates the
+  // client by name.
+  clientId: z.string().trim().min(1).max(128).nullable().optional(),
   clientEmail: z.union([z.string().trim().email().max(254), z.literal("")]).nullable().optional(),
   clientPhone: z.string().trim().max(40).nullable().optional(),
   clientAddress: z.string().trim().max(300).nullable().optional(),
