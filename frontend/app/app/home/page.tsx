@@ -1,6 +1,6 @@
 // /app/home/page.tsx
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AppLoader from "@/components/app-loader";
 import StackInHeader from "@/components/stackin-header";
@@ -27,7 +27,8 @@ import { getCalendarMonthBucketAt, getCalendarMonthBucketFromDate, getCurrentCal
 import { useSelectedPeriod } from "@/lib/stores/usePeriodSelectionStore";
 import { selectExpenseMonth, useExpenseFocusStore } from "@/lib/stores/useExpenseFocusStore";
 import ExpenseForm from "@/components/expense-form";
-import VenmoImportPanel from "@/components/venmo-import-panel";
+import ImportSalesPanel from "@/components/import-sales-panel";
+import { availableImportSources } from "@shared/importVisibility";
 import { useReviewRequestNonce } from "@/lib/push/deepLinkStore";
 import {
     useExpensesData,
@@ -59,7 +60,15 @@ export default function HomePage() {
     const selectedPeriod = useSelectedPeriod(activeWorkspaceId);
     const settings = useSettingsData(activeWorkspaceId);
     const settingsState = useSettingsRenderState(activeWorkspaceId);
-    const showVenmoImportPanel = settings?.independent?.enableVenmo === true;
+    const importSources = supportsExpenses && settings
+        ? availableImportSources(settings.independent)
+        : [];
+    const importSourcesKey = importSources.join(",");
+    // Keep the array stable between renders so the panel's effects don't refire.
+    const stableImportSources = useMemo(() => importSources, [importSourcesKey]);
+    const showImportSalesPanel = stableImportSources.length > 0;
+    // Bumped by "Import a CSV" under Payment streams to open the panel.
+    const [importOpenRequest, setImportOpenRequest] = useState(0);
     const settingsStatus = settingsState.status;
     const settingsLoading = activeWorkspaceId != null
         ? settingsStatus === "idle" || settingsStatus === "loading"
@@ -313,12 +322,12 @@ export default function HomePage() {
             </button>))}
         </div>
 
-        {mode === "income" ? <IncomeStreamsOverview /> : <ExpenseCategoriesOverview />}
+        {mode === "income" ? <IncomeStreamsOverview onImportCsv={showImportSalesPanel ? () => setImportOpenRequest((n) => n + 1) : undefined}/> : <ExpenseCategoriesOverview />}
 
         <div className="order-2 space-y-5">
           <TaxEstimateCard />
           <NeedsYouPanel />
-          {showVenmoImportPanel ? <VenmoImportPanel /> : null}
+          {showImportSalesPanel ? <ImportSalesPanel sources={stableImportSources} openRequest={importOpenRequest}/> : null}
         </div>
 
         <div className="order-4" data-tour="entry-form">

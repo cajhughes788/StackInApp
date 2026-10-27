@@ -32,6 +32,7 @@ import {
   SUPPORTED_IMPORT_SOURCES,
   type SupportedImportSource,
 } from "@/lib/imports/csvImportParsers"
+import type { CsvImportSource } from "@shared/importVisibility"
 import {
   categoryLabels,
   draftSum,
@@ -65,9 +66,22 @@ const EMPTY_ENTRIES: EntryType[] = []
 const EMPTY_EXPENSES: ComparableExpense[] = []
 const EMPTY_BATCHES: ImportBatch[] = []
 const EMPTY_ITEMS: ImportItem[] = []
-const VISIBLE_IMPORT_SOURCES = SUPPORTED_IMPORT_SOURCES.filter(
-  (option) => option.source === "venmo_csv"
-)
+const IMPORT_SOURCE_NAMES: Record<CsvImportSource, string> = {
+  venmo_csv: "Venmo",
+  square_csv: "Square",
+  stripe_csv: "Stripe",
+}
+
+// "Bring in a Venmo, Square or Stripe CSV"
+function describeImportSources(sources: CsvImportSource[]): string {
+  const names = sources.map((source) => IMPORT_SOURCE_NAMES[source])
+  const list =
+    names.length <= 1
+      ? names.join("")
+      : `${names.slice(0, -1).join(", ")} or ${names[names.length - 1]}`
+  const article = /^[aeiou]/i.test(list) ? "an" : "a"
+  return `Bring in ${article} ${list} CSV`
+}
 
 function statusVariant(
   status: ImportItem["status"]
@@ -130,7 +144,14 @@ function createInitialIncomeBreakdown(item: ImportItem): BreakdownDraft {
   }
 }
 
-export default function VenmoImportPanel() {
+type ImportSalesPanelProps = {
+  // Sources this person can import, in display order (availableImportSources).
+  sources: CsvImportSource[]
+  // Bumped by the "Import a CSV" link: open the panel and scroll to it.
+  openRequest?: number
+}
+
+export default function ImportSalesPanel({ sources, openRequest }: ImportSalesPanelProps) {
   const workspaceState = useWorkspaceStore((state) => state.state)
   const activeWorkspace =
     workspaceState.status === "ready" ? workspaceState.activeWorkspace : null
@@ -180,7 +201,7 @@ export default function VenmoImportPanel() {
 
   const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null)
   const [selectedSource, setSelectedSource] =
-    useState<SupportedImportSource>("venmo_csv")
+    useState<SupportedImportSource>(sources[0] ?? "venmo_csv")
   const [uploading, setUploading] = useState(false)
   const [workingItemId, setWorkingItemId] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
@@ -196,6 +217,36 @@ export default function VenmoImportPanel() {
     null
   )
   const [expanded, setExpanded] = useState(false)
+  const panelRef = useRef<HTMLDivElement | null>(null)
+  const visibleImportSources = useMemo(
+    () =>
+      sources
+        .map((source) => SUPPORTED_IMPORT_SOURCES.find((option) => option.source === source))
+        .filter((option): option is (typeof SUPPORTED_IMPORT_SOURCES)[number] => option != null),
+    [sources]
+  )
+  // Keep the picker on a source this person can still use.
+  useEffect(() => {
+    if (sources.length > 0 && !sources.includes(selectedSource as CsvImportSource)) {
+      setSelectedSource(sources[0])
+    }
+  }, [sources, selectedSource])
+  // Open first, then scroll once the expanded panel has laid out — scrolling
+  // while it grows lets the browser's scroll anchoring stop short.
+  const pendingScrollRef = useRef(false)
+  useEffect(() => {
+    if (!openRequest) return
+    pendingScrollRef.current = true
+    setExpanded(true)
+  }, [openRequest])
+  useEffect(() => {
+    if (!expanded || !pendingScrollRef.current) return
+    pendingScrollRef.current = false
+    const frame = requestAnimationFrame(() => {
+      panelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [expanded, openRequest])
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const stateSummaryRef = useRef<string | null>(null)
 
@@ -773,18 +824,24 @@ export default function VenmoImportPanel() {
   }
 
   return (
-    <div className="rounded-xl border border-border/80 px-5 py-4">
+    <div
+      ref={panelRef}
+      id="import-sales"
+      className="rounded-xl border border-border/80 px-5 py-4"
+      // Clear the fixed app header when the "Import a CSV" link scrolls here.
+      style={{ scrollMarginTop: "calc(var(--stackin-header-total-height, 56px) + 12px)" }}
+    >
       <button
         type="button"
         className="text-left text-base font-semibold text-emerald-600 transition hover:text-emerald-500 dark:text-emerald-300 dark:hover:text-emerald-200"
         onClick={() => setExpanded((current) => !current)}
       >
-        Import Transactions
+        Import sales
       </button>
       {expanded ? (
       <div className="mt-3 space-y-4">
         <p className="text-sm text-muted-foreground">
-          Upload CSVs to review business income and expenses before saving them.
+          {describeImportSources(sources)}. You review everything before it&apos;s saved.
         </p>
         <div className="flex flex-wrap items-center gap-3">
           <input
@@ -804,7 +861,7 @@ export default function VenmoImportPanel() {
               <SelectValue placeholder="Choose import source" />
             </SelectTrigger>
             <SelectContent>
-              {VISIBLE_IMPORT_SOURCES.map((option) => (
+              {visibleImportSources.map((option) => (
                 <SelectItem key={option.source} value={option.source}>
                   {option.label}
                 </SelectItem>

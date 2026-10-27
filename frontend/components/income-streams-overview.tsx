@@ -366,7 +366,12 @@ function StreamRow({ stream, ctx }: { stream: IncomeStream; ctx: StreamEditConte
   )
 }
 
-export default function IncomeStreamsOverview() {
+type IncomeStreamsOverviewProps = {
+  // When set, shows an "Import a CSV" link under Payment streams.
+  onImportCsv?: () => void
+}
+
+export default function IncomeStreamsOverview({ onImportCsv }: IncomeStreamsOverviewProps = {}) {
   const workspaceState = useWorkspaceStore((s) => s.state)
   const activeWorkspace = workspaceState.status === "ready" ? workspaceState.activeWorkspace : null
   const activeWorkspaceId = workspaceState.status === "ready" ? workspaceState.activeWorkspaceId : null
@@ -602,6 +607,15 @@ export default function IncomeStreamsOverview() {
             ))}
           </ul>
         )}
+        {onImportCsv ? (
+          <button
+            type="button"
+            onClick={onImportCsv}
+            className="mt-2 px-1 text-xs font-medium text-primary"
+          >
+            Import a CSV
+          </button>
+        ) : null}
       </section>
     </>
   )
