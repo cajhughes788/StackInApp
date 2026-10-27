@@ -33,6 +33,11 @@ export const API_ENDPOINTS = {
     delete: "https://deleterecurringrule-3lc2fwdgwq-uc.a.run.app",
   },
 
+  booking: {
+    getSettings: "https://getbookingsettings-3lc2fwdgwq-uc.a.run.app",
+    saveSettings: "https://savebookingsettings-3lc2fwdgwq-uc.a.run.app",
+  },
+
   clients: {
     get: "https://getclients-3lc2fwdgwq-uc.a.run.app",
     save: "https://saveclient-3lc2fwdgwq-uc.a.run.app",

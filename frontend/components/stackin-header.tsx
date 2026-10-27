@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import {
   BookOpen,
+  CalendarClock,
   ChartNoAxesColumnIncreasing,
   Compass,
   House,
@@ -75,6 +76,7 @@ export default function StackInHeader() {
       ? [
           { label: "Invoices", href: "/app/invoices", icon: FileText },
           { label: "Clients", href: "/app/clients", icon: Users },
+          { label: "Booking", href: "/app/booking", icon: CalendarClock },
           { label: "Receipts", href: "/app/receipts", icon: Receipt },
         ]
       : []),

@@ -229,6 +229,16 @@ export const saveInvoiceSettings = withCorsAuth(async (req, res) => {
   await saveInvoiceSettingsHandler(req, res)
 })
 
+export const getBookingSettings = withCorsAuth(async (req, res) => {
+  const { getBookingSettingsHandler } = await import("./routes/getBookingSettings.js")
+  await getBookingSettingsHandler(req, res)
+})
+
+export const saveBookingSettings = withCorsAuth(async (req, res) => {
+  const { saveBookingSettingsHandler } = await import("./routes/saveBookingSettings.js")
+  await saveBookingSettingsHandler(req, res)
+})
+
 export const updatePaymentAccount = withCorsAuth(
   async (req, res) => {
     const { updatePaymentAccountHandler } = await import("./routes/updatePaymentAccount.js")

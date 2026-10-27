@@ -42,6 +42,8 @@ export {
   deleteInvoice,
   updateInvoiceStatus,
   saveInvoiceSettings,
+  getBookingSettings,
+  saveBookingSettings,
   getClients,
   saveClient,
   mergeClients,
