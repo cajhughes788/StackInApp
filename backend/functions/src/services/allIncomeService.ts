@@ -9,6 +9,7 @@ import { EntrySchema, type EntryType } from "@shared/schemas/entry";
 import { listActiveWorkspaces, type ActiveWorkspace } from "../lib/userWorkspaces";
 import {
     buildAllIncomeSummary,
+    countMonthActivity,
     monthDateRange,
     previousMonthKey,
     sumIndependentUnreportedCash,
@@ -41,21 +42,22 @@ async function loadWorkspaceMonth(
     if (workspace.type === "w2") {
         const entries = await loadMonthEntries(workspace.id, month);
         const { incomeGauge } = computeIncomeGaugeForEntries(entries, { includeUnreportedInUI: includeUnreported });
-        return { ...base, income: incomeGauge, expenses: null };
+        return { ...base, income: incomeGauge, expenses: null, activityCount: countMonthActivity(entries, []) };
     }
 
     // Returns the saved statement when it's fresh and rebuilds it when it's
     // missing or marked stale, so a failed sync never shows a wrong number.
-    const [statement, unreportedCash] = await Promise.all([
+    const [statement, entries] = await Promise.all([
         generateProfitLossStatement(workspace.id, uid, { periodType: "month", periodKey: month }),
-        includeUnreported
-            ? loadMonthEntries(workspace.id, month).then(sumIndependentUnreportedCash)
-            : Promise.resolve(0),
+        loadMonthEntries(workspace.id, month),
     ]);
+    const unreportedCash = includeUnreported ? sumIndependentUnreportedCash(entries) : 0;
+    const expenseAmounts = statement.expenses.byCategory.flatMap((category) => category.items.map((item) => item.amount));
     return {
         ...base,
         income: statement.income.total + unreportedCash,
         expenses: statement.expenses.total,
+        activityCount: countMonthActivity(entries, expenseAmounts),
     };
 }
 

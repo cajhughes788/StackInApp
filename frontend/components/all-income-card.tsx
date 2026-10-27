@@ -12,14 +12,25 @@ import { formatCurrency } from "@/lib/helpers"
 import { useEntriesData } from "@/lib/stores/useEntriesStore"
 import { useExpensesData } from "@/lib/stores/useExpensesStore"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
-import { nextMonthKey, previousMonthKey } from "@shared/allIncome"
+import { useSelectedPeriod } from "@/lib/stores/usePeriodSelectionStore"
+import { useSettingsData, useSettingsStore } from "@/lib/stores/useSettingsStore"
+import { selectExpenseMonth } from "@/lib/stores/useExpenseFocusStore"
+import { nextMonthKey, previousMonthKey, workspacesWithActivity } from "@shared/allIncome"
+import { getCalendarMonthBucketAt, getCalendarMonthBucketFromDate } from "@shared/payPeriods"
 
 // Home's "All income": this month's income across every workspace, for
 // people with more than one job or business. Shown only with 2+ active
 // workspaces. Each row switches to that workspace. The figures come from
 // getAllIncomeSummary (see shared/allIncome.ts for how each is counted).
+//
+// On a self-employed workspace the month is linked both ways with the
+// workspace's own month picker: moving either moves the other, and a row
+// opens that workspace on the same month. W-2 workspaces use pay periods,
+// so on one of those this card keeps its own month. Only workspaces with
+// money recorded that month are listed. The list starts collapsed.
 
-const OPEN_STORAGE_KEY = "all-income-card-open"
+// v2: the list now starts collapsed, so earlier "open" choices are reset.
+const OPEN_STORAGE_KEY = "all-income-card-open-v2"
 
 function currentMonthKey(): string {
   const now = new Date()
@@ -41,9 +52,9 @@ function monthName(month: string, withYear: boolean): string {
 
 function readOpenPreference(): boolean {
   try {
-    return window.localStorage.getItem(OPEN_STORAGE_KEY) !== "closed"
+    return window.localStorage.getItem(OPEN_STORAGE_KEY) === "open"
   } catch {
-    return true
+    return false
   }
 }
 
@@ -69,9 +80,44 @@ export default function AllIncomeCard({ className = "" }: { className?: string }
   const enabled = activeWorkspaces.length >= 2
 
   const thisMonth = currentMonthKey()
-  const [month, setMonth] = useState(thisMonth)
-  const [open, setOpen] = useState(true)
+  const activeWorkspace = activeWorkspaces.find((w) => w.id === activeWorkspaceId) ?? null
+  const activeSettings = useSettingsData(activeWorkspaceId)
+  const selectedPeriod = useSelectedPeriod(activeWorkspaceId)
+  // The month the page below shows, when it's a self-employed workspace
+  // (null = not linked: W-2, or settings not loaded yet).
+  const linkedMonth = useMemo(() => {
+    if (activeWorkspace?.type !== "independent" || !activeSettings) return null
+    return selectedPeriod
+      ? getCalendarMonthBucketFromDate(selectedPeriod.start, activeSettings)
+      : getCalendarMonthBucketAt(activeSettings)
+  }, [activeWorkspace?.type, activeSettings, selectedPeriod])
+
+  const [month, setMonth] = useState(() => linkedMonth ?? thisMonth)
+  // The page's month changed (its own picker, or a workspace switch): follow it.
+  useEffect(() => {
+    if (linkedMonth) setMonth(linkedMonth)
+  }, [linkedMonth, activeWorkspaceId])
+  const [open, setOpen] = useState(false)
   useEffect(() => setOpen(readOpenPreference()), [])
+
+  // This card's arrows: move the page below too (if that workspace has the
+  // month — before it existed, the page stays on its first month).
+  function goToMonth(target: string) {
+    setMonth(target)
+    if (activeWorkspace?.type === "independent" && activeSettings && activeWorkspaceId) {
+      selectExpenseMonth(activeWorkspaceId, "independent", activeWorkspace.createdAt ?? null, activeSettings, target)
+    }
+  }
+
+  // A row: open that workspace on this card's month (self-employed only).
+  function openWorkspace(workspaceId: string) {
+    const target = activeWorkspaces.find((w) => w.id === workspaceId)
+    const targetSettings = useSettingsStore.getState().byWorkspaceId[workspaceId]?.data ?? null
+    if (target?.type === "independent" && targetSettings) {
+      selectExpenseMonth(workspaceId, "independent", target.createdAt ?? null, targetSettings, month)
+    }
+    void switchWorkspace(workspaceId)
+  }
 
   const earliestMonth = useMemo(() => {
     const created = activeWorkspaces.map((w) => w.createdAt).filter((ms) => Number.isFinite(ms) && ms > 0)
@@ -114,6 +160,10 @@ export default function AllIncomeCard({ className = "" }: { className?: string }
     else changeLine = `Same as ${previousName}`
   }
 
+  const rows = workspacesWithActivity(summary.workspaces)
+  const countLabel =
+    rows.length === 0 ? "No activity" : `${rows.length} workspace${rows.length === 1 ? "" : "s"}`
+
   function toggleOpen() {
     setOpen((current) => {
       writeOpenPreference(!current)
@@ -130,7 +180,7 @@ export default function AllIncomeCard({ className = "" }: { className?: string }
         <div className="flex items-center gap-1">
           <button
             type="button"
-            onClick={() => setMonth(previousMonthKey(month))}
+            onClick={() => goToMonth(previousMonthKey(month))}
             disabled={!canGoBack}
             aria-label="Previous month"
             className="rounded-full p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent"
@@ -142,7 +192,7 @@ export default function AllIncomeCard({ className = "" }: { className?: string }
           </span>
           <button
             type="button"
-            onClick={() => setMonth(nextMonthKey(month))}
+            onClick={() => goToMonth(nextMonthKey(month))}
             disabled={!canGoForward}
             aria-label="Next month"
             className="rounded-full p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent"
@@ -172,20 +222,25 @@ export default function AllIncomeCard({ className = "" }: { className?: string }
           ) : null}
         </span>
         <span className="flex shrink-0 items-center gap-1 pb-1 text-sm font-medium text-primary">
-          {summary.workspaces.length} workspaces
+          {countLabel}
           <ChevronDown className={`size-4 transition-transform ${open ? "rotate-180" : ""}`} aria-hidden="true" />
         </span>
       </button>
 
       <Expand open={open} id={panelId} className="mt-4">
+        {rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No income or expenses recorded in {monthName(month, !sameYear)}.
+          </p>
+        ) : null}
         <ul className="divide-y divide-border/70">
-          {summary.workspaces.map((row) => {
+          {rows.map((row) => {
             const isActive = row.workspaceId === activeWorkspaceId
             return (
               <li key={row.workspaceId}>
                 <button
                   type="button"
-                  onClick={() => void switchWorkspace(row.workspaceId)}
+                  onClick={() => openWorkspace(row.workspaceId)}
                   disabled={isActive}
                   className="flex w-full items-center gap-3 py-2.5 text-left disabled:cursor-default"
                 >

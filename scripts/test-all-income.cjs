@@ -110,6 +110,29 @@ test("W-2 month income matches the Home total math", () => {
   assert.equal(computeIncomeGaugeForEntries(entries, { includeUnreportedInUI: true }).incomeGauge, 295.5);
 });
 
+test("activity: $0 entries and expenses don't count", () => {
+  const { countMonthActivity } = require("../shared/allIncome.ts");
+  assert.equal(countMonthActivity([], []), 0);
+  assert.equal(countMonthActivity([{ totals: { dayTotal: 0 } }], [0]), 0);
+  assert.equal(countMonthActivity([{ totals: { dayTotal: 35 } }, { totals: { dayTotal: 0 } }], [12.5, 0]), 2);
+  // Older entries without totals still count from their income lines.
+  assert.equal(countMonthActivity([{ independent: { incomeBreakdowns: [{ services: 40 }] } }], []), 1);
+  // W-2 pay.
+  assert.equal(countMonthActivity([{ totals: { taxableTotal: 180 } }], []), 1);
+  // A refund (negative) is activity too.
+  assert.equal(countMonthActivity([{ totals: { dayTotal: -20 } }], []), 1);
+});
+
+test("only workspaces with activity are listed; unknown counts still show", () => {
+  const { workspacesWithActivity } = require("../shared/allIncome.ts");
+  const rows = [
+    { workspaceId: "a", activityCount: 3 },
+    { workspaceId: "b", activityCount: 0 },
+    { workspaceId: "c" },
+  ];
+  assert.deepEqual(workspacesWithActivity(rows).map((r) => r.workspaceId), ["a", "c"]);
+});
+
 if (failures > 0) {
   console.error(`\n${failures} test(s) failed`);
   process.exit(1);

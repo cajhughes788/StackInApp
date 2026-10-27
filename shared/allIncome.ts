@@ -58,6 +58,10 @@ export type AllIncomeWorkspaceMonth = {
   income: number
   // Self-employed only; W-2 workspaces don't track expenses.
   expenses: number | null
+  // Entries and expenses with money on them this month ($0 ones don't
+  // count). The card only lists workspaces with activity. Optional: older
+  // servers didn't send it, and a missing count shows the row.
+  activityCount?: number
 }
 
 export type AllIncomeWorkspaceRow = AllIncomeWorkspaceMonth & {
@@ -107,6 +111,27 @@ export function buildAllIncomeSummary(input: {
     change: round2(total - previousTotal),
     workspaces,
   }
+}
+
+// How many of a month's entries and expenses have money on them — a $0
+// entry is not activity.
+export function countMonthActivity(
+  entries: Array<{ totals?: { dayTotal?: number; taxableTotal?: number } | null; independent?: { incomeBreakdowns?: Array<Record<string, unknown>> } | null }>,
+  expenseAmounts: number[]
+): number {
+  const hasMoney = (value: unknown) => Math.abs(Number(value ?? 0)) >= 0.005
+  const entryCount = entries.filter((entry) => {
+    if (hasMoney(entry.totals?.dayTotal) || hasMoney(entry.totals?.taxableTotal)) return true
+    return (entry.independent?.incomeBreakdowns ?? []).some((line) =>
+      ["services", "tips", "products", "other"].some((key) => hasMoney(line[key]))
+    )
+  }).length
+  return entryCount + expenseAmounts.filter(hasMoney).length
+}
+
+/** Rows to list: workspaces with activity that month (all, if unknown). */
+export function workspacesWithActivity<T extends Pick<AllIncomeWorkspaceMonth, "activityCount">>(rows: T[]): T[] {
+  return rows.filter((row) => row.activityCount === undefined || row.activityCount > 0)
 }
 
 function round2(value: number): number {
