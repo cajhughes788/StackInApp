@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useId, useState } from "react"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { AlertCircle, ChevronDown, Landmark } from "lucide-react"
 
 import Expand from "@/components/expand"
@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { formatCurrency } from "@/lib/helpers"
 import { useTaxEstimateStore } from "@/lib/stores/useTaxEstimateStore"
+import { useEntriesData, useEntriesRenderState } from "@/lib/stores/useEntriesStore"
+import { useExpensesData, useExpensesRenderState } from "@/lib/stores/useExpensesStore"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import type { FederalEstimate, TipsDeductionStatus } from "@shared/estimatedTax/calculate"
 import { findTippedOccupation } from "@shared/estimatedTax/tippedOccupations"
@@ -114,6 +116,48 @@ export default function TaxEstimateCard({ className = "" }: { className?: string
   useEffect(() => {
     if (ownerUid) void load(ownerUid)
   }, [ownerUid, load])
+
+  // Refetch when this workspace's records change (like the All income card),
+  // so a new entry or expense shows in the estimate at once instead of after
+  // the store's 5-minute refresh. Waits until new records have saved and for
+  // a short quiet spell, so the server's P&L is up to date and a burst of
+  // changes is one request.
+  const activeWorkspaceId = workspaceState.status === "ready" ? workspaceState.activeWorkspaceId : null
+  const entries = useEntriesData(activeWorkspaceId)
+  const expenses = useExpensesData(activeWorkspaceId)
+  const entriesState = useEntriesRenderState(activeWorkspaceId)
+  const expensesState = useExpensesRenderState(activeWorkspaceId)
+  // Still arriving (device cache, then the server): not a change by the user.
+  const recordsLoading =
+    entriesState.isHydrating || entriesState.isRevalidating || expensesState.isHydrating || expensesState.isRevalidating
+  const records = useMemo(() => {
+    const unsaved =
+      entries.some((e) => !!e.syncState || String(e.id ?? "").startsWith("tmp-")) ||
+      // An expense not yet saved has only a temporary tempId, no id.
+      expenses.some((e) => !e.id || String(e.id).startsWith("tmp-"))
+    const entryTotal = entries.reduce((sum, e) => sum + Number(e.totals?.dayTotal ?? 0), 0)
+    const expenseTotal = expenses.reduce((sum, e) => sum + Number(e.amount ?? 0), 0)
+    return {
+      unsaved,
+      key: `${entries.length}:${entryTotal.toFixed(2)}:${expenses.length}:${expenseTotal.toFixed(2)}`,
+    }
+  }, [entries, expenses])
+  const baseline = useRef<{ workspaceId: string | null; key: string } | null>(null)
+  useEffect(() => {
+    if (!ownerUid || records.unsaved || recordsLoading) return
+    const previous = baseline.current
+    // First look at a workspace sets the baseline; the initial load covers it.
+    if (!previous || previous.workspaceId !== activeWorkspaceId) {
+      baseline.current = { workspaceId: activeWorkspaceId, key: records.key }
+      return
+    }
+    if (previous.key === records.key) return
+    const timer = setTimeout(() => {
+      baseline.current = { workspaceId: activeWorkspaceId, key: records.key }
+      void load(ownerUid, { force: true })
+    }, 1500)
+    return () => clearTimeout(timer)
+  }, [ownerUid, activeWorkspaceId, records, recordsLoading, load])
 
   const hasW2Income =
     workspaceState.status === "ready" && workspaceState.workspaces.some((w) => w.type === "w2" && w.status !== "archived")
