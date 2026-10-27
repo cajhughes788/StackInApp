@@ -246,6 +246,8 @@ async function reconcileOptimisticEntry(workspaceId: string, settings: SettingsT
             notes: parsed.notes ?? "",
             w2: parsed.w2,
             independent: parsed.independent,
+            // Who paid (a Venmo import's sender) — matched to clients.
+            ...(parsed.payerName ? { payerName: parsed.payerName } : {}),
             createdAtLocal: optimistic.createdAtLocal,
             updatedAtLocal: optimistic.updatedAtLocal,
             clientMutationId,
@@ -492,6 +494,7 @@ export async function createEntry(workspaceId: string, rawInput: any, options: {
         independent: parsed.workspace === "independent"
             ? { ...parsed.independent }
             : undefined,
+        ...(parsed.payerName ? { payerName: parsed.payerName } : {}),
         totals,
     };
 
@@ -536,6 +539,7 @@ export async function createEntry(workspaceId: string, rawInput: any, options: {
                     notes: parsed.notes ?? "",
                     w2: parsed.w2,
                     independent: parsed.independent,
+                    ...(parsed.payerName ? { payerName: parsed.payerName } : {}),
                     createdAtLocal,
                     updatedAtLocal,
                     clientMutationId,
