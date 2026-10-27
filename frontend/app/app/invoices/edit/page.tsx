@@ -370,6 +370,11 @@ function InvoiceFormPage() {
                   const picked = savedClients.find((c) => c.id === clientId)
                   if (picked && ![picked.nameKey, ...picked.aliases].includes(clientKey(event.target.value))) {
                     setClientId(null)
+                    // Their details came with the pick, so they go with it
+                    // (anything typed over them stays).
+                    if (picked.email && clientEmail === picked.email) setClientEmail("")
+                    if (picked.phone && clientPhone === picked.phone) setClientPhone("")
+                    if (picked.address && clientAddress === picked.address) setClientAddress("")
                   }
                 }}
                 placeholder="Client or business name"
