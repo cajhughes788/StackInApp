@@ -18,7 +18,6 @@ import {
   withBackendProfileStep,
   type BackendProfileTrace,
 } from "../lib/profileTrace"
-import { settingsCache, SETTINGS_TTL_MS } from "./settingsCache"
 
 const noopTrace: BackendProfileTrace = {
   traceId: "settings-save-no-trace",
@@ -214,29 +213,9 @@ export async function getSettings(
 ): Promise<SettingsDocumentSnapshot> {
   await assertWorkspaceMembership(workspaceId, uid)
 
-  const cached = settingsCache[workspaceId]
-  if (cached && Date.now() - cached.ts <= SETTINGS_TTL_MS) {
-    return {
-      settings: cached.data,
-      meta: cached.meta ?? null,
-    }
-  }
-
-  const snapshot = await readSettingsSnapshot(workspaceId)
-  if (!snapshot.settings || !snapshot.meta) {
-    return {
-      settings: snapshot.settings,
-      meta: snapshot.meta,
-    }
-  }
-
-  settingsCache[workspaceId] = {
-    data: snapshot.settings,
-    meta: snapshot.meta,
-    ts: Date.now(),
-  }
-
-  return snapshot
+  // Always read Firestore. Each Cloud Function runs on its own instances, so
+  // an in-memory copy can't see saves made elsewhere and goes stale.
+  return readSettingsSnapshot(workspaceId)
 }
 
 export async function patchSettings(
@@ -328,12 +307,6 @@ export async function patchSettings(
 
   if (!committed.settings || !committed.meta) {
     throw new Error("[patchSettings] Transaction committed without settings snapshot")
-  }
-
-  settingsCache[workspaceId] = {
-    data: committed.settings,
-    meta: committed.meta,
-    ts: Date.now(),
   }
 
   return committed

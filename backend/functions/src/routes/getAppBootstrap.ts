@@ -7,7 +7,6 @@ import type { WorkspaceDoc, WorkspaceMembership, WorkspaceSummary } from "@share
 import { SettingsDocSchema, type SettingsType } from "@shared/schemas/settings"
 import { db } from "../admin"
 import { createBackendProfileTrace, withBackendProfileStep } from "../lib/profileTrace"
-import { settingsCache, SETTINGS_TTL_MS } from "../services/settingsCache"
 import {
   BadRequestError,
   ForbiddenError,
@@ -64,13 +63,9 @@ export async function getAppBootstrapHandler(
     const membershipRef = db.doc(`users/${uid}/memberships/${workspaceId}`)
     const workspaceRef = db.doc(`workspaces/${workspaceId}`)
     const subscriptionRef = db.doc(`users/${uid}/subscription/current`)
-    const cachedSettingsEntry = settingsCache[workspaceId]
-    const canUseCachedSettings =
-      cachedSettingsEntry &&
-      Date.now() - cachedSettingsEntry.ts <= SETTINGS_TTL_MS
-
-    // All four reads run in parallel. The settings read is skipped only when
-    // the in-process cache is warm — same behaviour as before.
+    // All four reads run in parallel. Settings are always read from
+    // Firestore: an in-memory copy here can't see saves made by the separate
+    // saveSettings function, so it served stale settings after a change.
     const [membershipSnap, workspaceSnap, subscriptionSnap, settingsSnap] =
       await withBackendProfileStep(
         trace,
@@ -80,19 +75,15 @@ export async function getAppBootstrapHandler(
             membershipRef.get(),
             workspaceRef.get(),
             subscriptionRef.get(),
-            canUseCachedSettings
-              ? Promise.resolve(null)
-              : db.doc(`workspaces/${workspaceId}/settings/current`).get(),
+            db.doc(`workspaces/${workspaceId}/settings/current`).get(),
           ]),
         { uid, workspaceId }
       )
 
     // Check whether the workspace doc carries a fresh embedded settings
     // snapshot (written atomically on every settings save). Used as a
-    // fallback when the settings doc is empty (new workspace, migration) and
-    // to prime the in-process cache immediately on cold function instances so
-    // the next request within 5 min hits the cache instead of Firestore.
-    const EMBEDDED_SETTINGS_TTL_MS = SETTINGS_TTL_MS * 2 // 10 min
+    // fallback when the settings doc is empty (new workspace, migration).
+    const EMBEDDED_SETTINGS_TTL_MS = 10 * 60 * 1000
     const workspaceRaw = workspaceSnap.data() as Record<string, unknown>
     const embedded = workspaceRaw?.settingsSnapshot as
       | { data: unknown; version: number; at: number }
@@ -128,12 +119,8 @@ export async function getAppBootstrapHandler(
     let settings: SettingsType | null = null
     let settingsMeta: import("@shared/contracts/settingsSync").SettingsDocumentMeta | null = null
 
-    if (canUseCachedSettings && cachedSettingsEntry) {
-      // 1. In-process cache hit — warm function instance, no Firestore read needed.
-      settings = cachedSettingsEntry.data
-      settingsMeta = cachedSettingsEntry.meta ?? null
-    } else if (settingsSnap?.exists) {
-      // 2. Settings subcollection read (all cold-start cases).
+    if (settingsSnap.exists) {
+      // 1. Settings subcollection read — the source of truth.
       const loadedSettings = await withBackendProfileStep(
         trace,
         "startup.settings_snapshot_parse",
@@ -154,28 +141,17 @@ export async function getAppBootstrapHandler(
       if (parsedSettings.success) {
         settings = parsedSettings.data
         settingsMeta = parsedMeta
-        settingsCache[workspaceId] = {
-          data: parsedSettings.data,
-          meta: parsedMeta ?? { version: 0, updatedAt: new Date(0).toISOString() },
-          ts: Date.now(),
-        }
       }
     } else if (embeddedIsFresh && embedded) {
-      // 3. Workspace doc embedded snapshot — fallback when the settings
+      // 2. Workspace doc embedded snapshot — fallback when the settings
       //    subcollection doc doesn't exist yet (new workspace before first
-      //    settings save, or migration gap). Also primes the in-process cache
-      //    so the next request within 5 min is a guaranteed cache hit.
+      //    settings save, or migration gap).
       const parsedEmbedded = SettingsDocSchema.safeParse(embedded.data)
       if (parsedEmbedded.success) {
         settings = parsedEmbedded.data
         settingsMeta = {
           version: embedded.version,
           updatedAt: new Date(embedded.at).toISOString(),
-        }
-        settingsCache[workspaceId] = {
-          data: parsedEmbedded.data,
-          meta: settingsMeta,
-          ts: Date.now(),
         }
       }
     }

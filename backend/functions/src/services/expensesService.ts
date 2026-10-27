@@ -10,7 +10,6 @@ import {
 } from "@shared/expenseCategories";
 import { deleteReceiptAssetCascade } from "./receiptAssetsService";
 import { syncProfitLossForFinancialDates } from "./profitLossService";
-import { settingsCache } from "./settingsCache";
 
 const VALID_DATE_RE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 const ExpenseArraySchema = z.array(ExpenseSchema);
@@ -52,10 +51,7 @@ function validateExpenseDate(date: unknown): void {
 }
 
 async function getWorkspaceSettings(workspaceId: string): Promise<SettingsType | null> {
-    const cachedSettings = settingsCache[workspaceId]?.data;
-    if (cachedSettings) {
-        return cachedSettings;
-    }
+    // Always from Firestore — see settingsService.getSettings.
     const snap = await db.doc(`workspaces/${workspaceId}/settings/current`).get();
     if (!snap.exists) {
         return null;
@@ -64,10 +60,6 @@ async function getWorkspaceSettings(workspaceId: string): Promise<SettingsType |
     if (!parsed.success) {
         return null;
     }
-    settingsCache[workspaceId] = {
-        data: parsed.data,
-        ts: Date.now(),
-    };
     return parsed.data;
 }
 export async function normalizeExpenseAccount(workspaceId: string, raw: any, options: {

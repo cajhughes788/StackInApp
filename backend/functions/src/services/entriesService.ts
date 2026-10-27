@@ -7,7 +7,6 @@ import { InvoiceSchema } from "@shared/schemas/invoice";
 import { getCurrentEntryPeriod, getCurrentPayPeriod } from "@shared/payPeriods";
 import { computeEntry } from "@shared/computeEntry";
 import { SettingsDocSchema, SettingsType } from "@shared/schemas/settings";
-import { settingsCache, SETTINGS_TTL_MS } from "./settingsCache";
 import { ForbiddenError, NotFoundError, BadRequestError, ConflictError } from "../lib/httpErrors";
 import type { BackendProfileTrace } from "../lib/profileTrace";
 import { withBackendProfileStep } from "../lib/profileTrace";
@@ -79,16 +78,9 @@ export async function listEntries(workspaceId: string, uid: string, opts?: {
     let settings: SettingsType | null = null;
     if (requiresSettingsForPeriodResolution) {
         // Load settings only when the client did not provide an exact period.
-        let settingsData: any = settingsCache[workspaceId]?.data;
-        const isExpired = !settingsCache[workspaceId] ||
-            Date.now() - settingsCache[workspaceId].ts > SETTINGS_TTL_MS;
-        if (!settingsData || isExpired) {
-            const snap = await db.doc(`workspaces/${workspaceId}/settings/current`).get();
-            settingsData = snap.exists ? snap.data() : null;
-            if (settingsData) {
-                settingsCache[workspaceId] = { data: settingsData, ts: Date.now() };
-            }
-        }
+        // Always from Firestore — see settingsService.getSettings.
+        const snap = await db.doc(`workspaces/${workspaceId}/settings/current`).get();
+        const settingsData: any = snap.exists ? snap.data() : null;
         const parsedSettings = settingsData ? SettingsDocSchema.safeParse(settingsData) : null;
         settings = parsedSettings?.success ? parsedSettings.data : null;
     }
@@ -180,18 +172,10 @@ export async function createEntry(
     const independent = !isW2 ? (raw.independent ?? {}) : undefined;
     const nowIso = new Date().toISOString();
     // ----------------------------
-    // 2. LOAD SETTINGS (cache-first)
+    // 2. LOAD SETTINGS (always current — a cached copy could predate a save)
     // ----------------------------
-    let settingsData: any = settingsCache[workspaceId]?.data;
-    const expired = !settingsCache[workspaceId] ||
-        Date.now() - settingsCache[workspaceId].ts > SETTINGS_TTL_MS;
-    if (!settingsData || expired) {
-        const snap = await withBackendProfileStep(activeTrace, "entry_create.settings_fetch", () => db.doc(`workspaces/${workspaceId}/settings/current`).get(), { workspaceId });
-        settingsData = snap.exists ? snap.data() : null;
-        if (settingsData) {
-            settingsCache[workspaceId] = { data: settingsData, ts: Date.now() };
-        }
-    }
+    const settingsFetch = await withBackendProfileStep(activeTrace, "entry_create.settings_fetch", () => db.doc(`workspaces/${workspaceId}/settings/current`).get(), { workspaceId });
+    const settingsData: any = settingsFetch.exists ? settingsFetch.data() : null;
     const parsedSettings = settingsData ? SettingsDocSchema.safeParse(settingsData) : null;
     if (!parsedSettings?.success) {
         throw new BadRequestError("Cannot create entry without valid settings");
@@ -317,18 +301,10 @@ export async function updateEntry(workspaceId: string, uid: string, entryId: str
             },
         };
         // ---------------------------
-        // 3. Load settings (cache-first)
+        // 3. Load settings (always current — a cached copy could predate a save)
         // ---------------------------
-        let settingsData: any = settingsCache[workspaceId]?.data;
-        const expired = !settingsCache[workspaceId] ||
-            Date.now() - settingsCache[workspaceId].ts > SETTINGS_TTL_MS;
-        if (!settingsData || expired) {
-            const settingsSnap = await db.doc(`workspaces/${workspaceId}/settings/current`).get();
-            settingsData = settingsSnap.exists ? settingsSnap.data() : null;
-            if (settingsData) {
-                settingsCache[workspaceId] = { data: settingsData, ts: Date.now() };
-            }
-        }
+        const settingsSnap = await db.doc(`workspaces/${workspaceId}/settings/current`).get();
+        const settingsData: any = settingsSnap.exists ? settingsSnap.data() : null;
         const parsedSettings = settingsData
             ? SettingsDocSchema.safeParse(settingsData)
             : null;
