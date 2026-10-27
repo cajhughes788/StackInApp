@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Check, Share2 } from "lucide-react"
+import { Check, Clock, Share2 } from "lucide-react"
 import QRCode from "qrcode"
 
 import { Button } from "@/components/ui/button"
@@ -28,12 +28,24 @@ type Stage =
   | { kind: "form" }
   | { kind: "showing"; invoiceId: string; url: string; qr: string; amount: number }
   | { kind: "paid"; invoice: InvoiceType }
+  | { kind: "payLater"; invoiceId: string; url: string; amount: number }
+  | { kind: "converted"; invoice: InvoiceType; emailedTo: string | null; url: string }
   | { kind: "canceled" }
 
 function newMutationId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID().replace(/-/g, "")
     : `${Date.now()}${Math.random().toString(36).slice(2)}`
+}
+
+function addDays(date: string, days: number): string {
+  const day = new Date(`${date}T12:00:00`)
+  day.setDate(day.getDate() + days)
+  return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`
+}
+
+function shortDate(date: string): string {
+  return new Date(`${date}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" })
 }
 
 function parseAmount(text: string): number | null {
@@ -66,12 +78,18 @@ function ChargePage() {
   const [error, setError] = useState<string | null>(null)
   const [shareNote, setShareNote] = useState<string | null>(null)
   const mutationId = useRef(newMutationId())
+  // "They'll pay later": who owes it and when.
+  const [laterEmail, setLaterEmail] = useState("")
+  const [laterPhone, setLaterPhone] = useState("")
+  const [laterDue, setLaterDue] = useState(() => addDays(localToday(), 7))
+  const [laterSendEmail, setLaterSendEmail] = useState(true)
 
   const canTakePayments = !!paymentAccount?.chargesEnabled && !!paymentAccount.acceptOnline
   const amount = parseAmount(amountText)
 
   // While the QR code is up, check for the payment every few seconds.
-  const showingId = stage.kind === "showing" ? stage.invoiceId : null
+  // (Also while filling in "pay later" — they might pay after all.)
+  const showingId = stage.kind === "showing" || stage.kind === "payLater" ? stage.invoiceId : null
   useEffect(() => {
     if (!showingId || !workspaceId) return
     const timer = setInterval(() => void load(workspaceId, { force: true }).catch(() => {}), POLL_MS)
@@ -126,6 +144,48 @@ function ChargePage() {
     }
   }
 
+  // Turns the unpaid charge into a regular invoice (same number and link),
+  // then emails it if asked.
+  async function convertToInvoice() {
+    if (!workspaceId || stage.kind !== "payLater") return
+    const name = clientName.trim()
+    const email = laterEmail.trim()
+    if (!name) {
+      setError("Who's paying later? Add their name.")
+      return
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setError("That email doesn't look right.")
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      let { invoice } = await updateInvoiceStatus(workspaceId, stage.invoiceId, {
+        action: "convert_to_invoice",
+        clientName: name,
+        clientEmail: email || null,
+        clientPhone: laterPhone.trim() || null,
+        dueDate: laterDue,
+      })
+      let emailedTo: string | null = null
+      if (email && laterSendEmail) {
+        try {
+          invoice = (await updateInvoiceStatus(workspaceId, stage.invoiceId, { action: "email", to: email })).invoice
+          emailedTo = email
+        } catch {
+          setError("Saved as an invoice, but the email didn't send. Send it from the invoice's page.")
+        }
+      }
+      void load(workspaceId, { force: true }).catch(() => {})
+      setStage({ kind: "converted", invoice, emailedTo, url: stage.url })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't save it as an invoice.")
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function shareInstead() {
     if (stage.kind !== "showing") return
     const result = await shareLink(stage.url, "Pay here", `Pay ${formatInvoiceMoney(stage.amount)}`)
@@ -138,6 +198,10 @@ function ChargePage() {
     setDescription("")
     setClientName("")
     setAskForTip(true)
+    setLaterEmail("")
+    setLaterPhone("")
+    setLaterDue(addDays(localToday(), 7))
+    setLaterSendEmail(true)
     setError(null)
     setShareNote(null)
     setStage({ kind: "form" })
@@ -230,6 +294,19 @@ function ChargePage() {
           </section>
           {error ? <p className="px-1 text-sm text-destructive">{error}</p> : null}
           {shareNote ? <p className="break-all px-1 text-sm text-muted-foreground">{shareNote}</p> : null}
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
+            onClick={() => {
+              setError(null)
+              setLaterSendEmail(true)
+              setStage({ kind: "payLater", invoiceId: stage.invoiceId, url: stage.url, amount: stage.amount })
+            }}
+          >
+            <Clock className="size-4" aria-hidden="true" />
+            They&apos;ll pay later
+          </Button>
           <div className="grid grid-cols-2 gap-2">
             <Button type="button" variant="outline" onClick={() => void shareInstead()}>
               <Share2 className="size-4" aria-hidden="true" />
@@ -237,6 +314,120 @@ function ChargePage() {
             </Button>
             <Button type="button" variant="outline" onClick={() => void cancelCharge()} disabled={busy}>
               {busy ? "Canceling…" : "Cancel charge"}
+            </Button>
+          </div>
+        </div>
+      ) : stage.kind === "payLater" ? (
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void convertToInvoice()
+          }}
+        >
+          <section className={cn(cardClass, "space-y-1")}>
+            <div className="font-semibold text-foreground">Pay {formatInvoiceMoney(stage.amount)} later</div>
+            <p className="text-sm text-muted-foreground">
+              This becomes a regular invoice with the same link. They can pay it any time, and 521 reminds them by email
+              if it&apos;s late.
+            </p>
+          </section>
+          <section className={cn(cardClass, "space-y-3")}>
+            <input
+              aria-label="Their name"
+              placeholder="Their name"
+              value={clientName}
+              onChange={(e) => setClientName(e.target.value)}
+              maxLength={80}
+              className={inputClass}
+              autoFocus
+            />
+            <input
+              aria-label="Email (for the invoice and reminders)"
+              placeholder="Email (for the invoice and reminders)"
+              type="email"
+              inputMode="email"
+              value={laterEmail}
+              onChange={(e) => setLaterEmail(e.target.value)}
+              maxLength={254}
+              className={inputClass}
+            />
+            <input
+              aria-label="Phone (optional)"
+              placeholder="Phone (optional)"
+              type="tel"
+              value={laterPhone}
+              onChange={(e) => setLaterPhone(e.target.value)}
+              maxLength={40}
+              className={inputClass}
+            />
+            <label className="flex items-center justify-between gap-3 text-sm text-foreground">
+              Due
+              <input
+                type="date"
+                aria-label="Due date"
+                value={laterDue}
+                min={localToday()}
+                onChange={(e) => setLaterDue(e.target.value || addDays(localToday(), 7))}
+                className="rounded-lg border border-card-border bg-background px-2 py-1.5 text-sm text-foreground"
+              />
+            </label>
+            {laterEmail.trim() ? (
+              <label className="flex items-center justify-between gap-3 text-sm text-foreground">
+                Email them the invoice now
+                <Switch checked={laterSendEmail} onCheckedChange={setLaterSendEmail} />
+              </label>
+            ) : null}
+          </section>
+          {error ? <p className="px-1 text-sm text-destructive">{error}</p> : null}
+          <Button type="submit" className="h-[52px] w-full rounded-full text-base" disabled={busy || !clientName.trim()}>
+            {busy ? "Saving…" : "Save as invoice"}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            className="w-full"
+            onClick={() => {
+              setError(null)
+              void QRCode.toDataURL(stage.url, { errorCorrectionLevel: "M", margin: 1, width: 640 }).then((qr) =>
+                setStage({ kind: "showing", invoiceId: stage.invoiceId, url: stage.url, qr, amount: stage.amount })
+              )
+            }}
+          >
+            Back to the QR code
+          </Button>
+        </form>
+      ) : stage.kind === "converted" ? (
+        <div className="space-y-4">
+          <section className={cn(cardClass, "flex flex-col items-center gap-2 py-6 text-center")}>
+            <div className="text-lg font-semibold text-foreground">
+              Invoice #{stage.invoice.number} {stage.emailedTo ? "sent" : "saved"}
+            </div>
+            <div className="text-sm text-muted-foreground">
+              {stage.invoice.clientName} owes {formatInvoiceMoney(stage.invoice.total)}, due {shortDate(stage.invoice.dueDate)}
+              {stage.emailedTo ? ` · emailed to ${stage.emailedTo}` : ""}
+            </div>
+          </section>
+          {error ? <p className="px-1 text-sm text-destructive">{error}</p> : null}
+          {!stage.emailedTo ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              onClick={() =>
+                void shareLink(stage.url, `Invoice #${stage.invoice.number}`, `Pay ${formatInvoiceMoney(stage.invoice.total)}`)
+              }
+            >
+              <Share2 className="size-4" aria-hidden="true" />
+              Text or share the link
+            </Button>
+          ) : null}
+          <div className="grid grid-cols-2 gap-2">
+            <Button type="button" variant="outline" onClick={() => router.push(`/app/invoices/view?id=${encodeURIComponent(stage.invoice.id)}`)}>
+              View invoice
+            </Button>
+            <Button type="button" onClick={() => router.push("/app/home")}>
+              Done
             </Button>
           </div>
         </div>

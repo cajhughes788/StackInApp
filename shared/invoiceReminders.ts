@@ -40,6 +40,7 @@ const MANUAL_EMAIL_QUIET_MS = 2 * 86_400_000
 type ReminderInvoice = Pick<
   InvoiceType,
   | "status"
+  | "quickCharge"
   | "total"
   | "payments"
   | "deposit"
@@ -63,6 +64,9 @@ function addDays(date: string, days: number): string {
 // or shared (the client has seen it), something owed, no payment clearing,
 // no chargeback being decided, and not stopped by the user.
 export function invoiceRemindersApply(invoice: ReminderInvoice): boolean {
+  // A quick charge is paid at the counter or not at all; one the customer
+  // will pay later is turned into a regular invoice first (convert_to_invoice).
+  if (invoice.quickCharge) return false
   if (invoice.status !== "sent" || !invoice.clientEmail || !invoice.sharedAt) return false
   if (invoice.remindersPaused || invoice.pendingPayment) return false
   if (invoice.dispute?.status === "open" || invoice.dispute?.status === "inquiry") return false

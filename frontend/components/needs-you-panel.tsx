@@ -91,6 +91,9 @@ export default function NeedsYouPanel() {
     () =>
       (invoices ?? []).filter(
         (invoice) =>
+          // An unpaid quick charge isn't owed money to chase: it was paid
+          // another way or abandoned ("pay later" makes it a real invoice).
+          !invoice.quickCharge &&
           invoice.status === "sent" &&
           invoice.dueDate < today &&
           !invoice.pendingPayment &&

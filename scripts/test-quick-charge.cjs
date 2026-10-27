@@ -130,6 +130,65 @@ test("a walk-in quick charge belongs to no client; a named one does", () => {
   assert.deepEqual(rows.map((r) => [r.name, r.invoices.length]), [["Jane Doe", 1]]);
 });
 
+console.log("pay later");
+
+const { invoiceRemindersApply } = require("../shared/invoiceReminders.ts");
+const { payLaterBlocker, quickChargeAsInvoice } = require("../shared/quickCharge.ts");
+const { InvoiceStatusActionSchema } = require("../shared/schemas/invoice.ts");
+
+const details = {
+  clientName: "Jane Doe",
+  clientId: "c1",
+  clientEmail: "jane@example.com",
+  clientPhone: null,
+  dueDate: "2026-11-03",
+  defaultNote: "Venmo @freshcuts",
+  defaultPolicies: "48 hours' notice",
+  nowIso: "2026-10-27T18:00:00Z",
+};
+
+test("an unpaid quick charge never gets reminders, even with an email and overdue", () => {
+  const charge = quickCharge({ clientEmail: "jane@example.com", sharedAt: "2026-10-20T00:00:00Z", dueDate: "2026-10-20", issueDate: "2026-10-20" });
+  assert.equal(invoiceRemindersApply(charge), false);
+});
+
+test("turned into an invoice: same number, link and line; who, when, note and policies filled", () => {
+  const charge = quickCharge({ openCheckout: { sessionId: "cs_1", purpose: "full", amountCents: 4500, tipCents: 0 } });
+  const invoice = InvoiceSchema.parse(quickChargeAsInvoice(charge, details));
+  assert.equal(invoice.quickCharge, null);
+  assert.equal(invoice.number, charge.number);
+  assert.equal(invoice.shareToken, charge.shareToken);
+  assert.deepEqual(invoice.lines, charge.lines);
+  assert.equal(invoice.clientName, "Jane Doe");
+  assert.equal(invoice.clientId, "c1");
+  assert.equal(invoice.clientEmail, "jane@example.com");
+  assert.equal(invoice.dueDate, "2026-11-03");
+  assert.equal(invoice.note, "Venmo @freshcuts");
+  assert.equal(invoice.policies, "48 hours' notice");
+  assert.equal(invoice.openCheckout, null);
+});
+
+test("once it's an invoice, reminders apply when it's late", () => {
+  const invoice = InvoiceSchema.parse(
+    quickChargeAsInvoice(quickCharge({ sharedAt: "2026-10-27T17:00:00Z" }), { ...details, dueDate: "2026-10-27" })
+  );
+  assert.equal(invoiceRemindersApply(invoice), true);
+});
+
+test("only an unpaid charge, due today or later, can be turned into an invoice", () => {
+  assert.equal(payLaterBlocker(quickCharge(), "2026-11-03"), null);
+  assert.match(payLaterBlocker(quickCharge(), "2026-10-26"), /before today/);
+  assert.match(payLaterBlocker(quickCharge({ status: "void" }), "2026-11-03"), /unpaid/);
+});
+
+test("the pay-later request needs a name and a real date", () => {
+  const ok = InvoiceStatusActionSchema.safeParse({ action: "convert_to_invoice", clientName: "Jane", dueDate: "2026-11-03" });
+  assert.equal(ok.success, true);
+  assert.equal(InvoiceStatusActionSchema.safeParse({ action: "convert_to_invoice", clientName: " ", dueDate: "2026-11-03" }).success, false);
+  assert.equal(InvoiceStatusActionSchema.safeParse({ action: "convert_to_invoice", clientName: "Jane", dueDate: "Nov 3" }).success, false);
+  assert.equal(InvoiceStatusActionSchema.safeParse({ action: "convert_to_invoice", clientName: "Jane", clientEmail: "nope", dueDate: "2026-11-03" }).success, false);
+});
+
 if (failures > 0) {
   console.error(`\n${failures} failing`);
   process.exit(1);

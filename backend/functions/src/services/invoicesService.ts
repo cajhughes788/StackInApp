@@ -32,6 +32,7 @@ import {
   type RefundPaymentCandidate,
 } from "@shared/invoiceMatching"
 import { publicInvoiceUrl } from "@shared/invoiceDisplay"
+import { payLaterBlocker, quickChargeAsInvoice } from "@shared/quickCharge"
 import { invoiceDepositOutstanding, invoicePaymentPurposeFor } from "@shared/invoicePayments"
 
 export function invoicesCol(workspaceId: string) {
@@ -342,6 +343,9 @@ export async function updateInvoiceStatus(
   if (action.action === "set_reminders") {
     return setRemindersPaused(ref, action.paused)
   }
+  if (action.action === "convert_to_invoice") {
+    return convertQuickChargeToInvoice(workspaceId, ref, action)
+  }
   if (action.action === "email") {
     const { emailInvoice } = await import("./invoiceEmailService.js")
     return emailInvoice(workspaceId, ref, { to: action.to, message: action.message })
@@ -454,6 +458,49 @@ async function waiveDeposit(workspaceId: string, ref: FirebaseFirestore.Document
       openCheckout: null,
       updatedAt: nowIso,
     })
+    txn.set(ref, next)
+    return next
+  })
+  if (staleSessionId) await expireCheckoutSession(workspaceId, staleSessionId)
+  return { invoice }
+}
+
+// "They'll pay later" on the Charge screen. Keeps the number and the link
+// (the customer may already have it); drops the quick-charge marker so it's
+// a regular invoice from here on — full invoice page, the workspace's tip
+// setting and bank transfer, reminders, overdue tracking.
+async function convertQuickChargeToInvoice(
+  workspaceId: string,
+  ref: FirebaseFirestore.DocumentReference,
+  action: Extract<InvoiceStatusAction, { action: "convert_to_invoice" }>
+): Promise<{ invoice: InvoiceType }> {
+  const settings = await readInvoiceSettings(workspaceId)
+  const client = await resolveInvoiceClient(workspaceId, {
+    clientName: action.clientName,
+    clientEmail: action.clientEmail,
+    clientPhone: action.clientPhone,
+  })
+  let staleSessionId: string | null = null
+  const invoice = await db.runTransaction(async (txn) => {
+    const snap = await txn.get(ref)
+    if (!snap.exists) throw new NotFoundError("Invoice not found")
+    const current = InvoiceSchema.parse(snap.data())
+    if (!current.quickCharge) return current // already an invoice (a retry)
+    const blocker = payLaterBlocker(current, action.dueDate)
+    if (blocker) throw new ConflictError(blocker)
+    staleSessionId = current.openCheckout?.sessionId ?? null
+    const next = InvoiceSchema.parse(
+      quickChargeAsInvoice(current, {
+        clientName: action.clientName,
+        clientId: client.id,
+        clientEmail: action.clientEmail || client.email || null,
+        clientPhone: action.clientPhone || client.phone || null,
+        dueDate: action.dueDate,
+        defaultNote: settings.defaultNote,
+        defaultPolicies: settings.defaultPolicies,
+        nowIso: new Date().toISOString(),
+      })
+    )
     txn.set(ref, next)
     return next
   })

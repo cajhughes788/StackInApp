@@ -87,7 +87,8 @@ function InvoicesListPage() {
     let paidThisMonth = 0
     let paidCount = 0
     for (const invoice of invoices) {
-      if (invoice.status === "sent") {
+      // Unpaid quick charges aren't money being waited on (see Needs you).
+      if (invoice.status === "sent" && !invoice.quickCharge) {
         waiting += invoiceBalanceDue(invoice)
         // What's late: an overdue deposit, or the rest once it's past due.
         const dueNow = invoiceDueNow(invoice)

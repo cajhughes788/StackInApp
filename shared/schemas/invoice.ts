@@ -391,6 +391,16 @@ export const WALK_IN_CLIENT_NAME = "Walk-in"
 
 export const InvoiceStatusActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("send") }),
+  // "They'll pay later": an unpaid quick charge becomes a regular invoice —
+  // same number and link — with who owes it, a due date, the usual note and
+  // policies, and reminders like any invoice.
+  z.object({
+    action: z.literal("convert_to_invoice"),
+    clientName: z.string().trim().min(1).max(80),
+    clientEmail: z.union([z.string().trim().email().max(254), z.literal("")]).nullable().optional(),
+    clientPhone: z.string().trim().max(40).nullable().optional(),
+    dueDate: DateSchema,
+  }),
   z.object({ action: z.literal("void") }),
   // Returns the public link (creating it the first time). Sharing a draft
   // sends it — the client is about to see it.
