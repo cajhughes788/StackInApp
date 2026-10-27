@@ -113,6 +113,16 @@ export const ImportBankCashoutOverlapSchema = z.object({
   deposits: z.array(z.object({ date: z.string(), amount: z.number() })),
 })
 
+// What payer memory (shared/schemas/payerMemory.ts) did or knows for an app
+// statement payment, set when it's imported. applied = the user's "always"
+// choice was used (always_personal → imported already sorted as personal;
+// always_business → business category pre-filled).
+export const ImportPayerMemorySchema = z.object({
+  applied: z.enum(["always_personal", "always_business"]).nullable().default(null),
+  lastOutcome: z.enum(["business", "personal"]).nullable().default(null),
+  incomeCategory: IncomeCategorySchema.nullable().default(null),
+})
+
 export const ImportBatchSchema = ImportBatchInputSchema.extend({
   bankCashoutOverlap: ImportBankCashoutOverlapSchema.optional(),
   id: z.string(),
@@ -141,6 +151,8 @@ export const ImportItemSchema = ImportItemInputSchema.extend({
   }),
   committedEntryId: z.string().optional(),
   committedExpenseId: z.string().optional(),
+  payerKey: z.string().nullable().optional(),
+  payerMemory: ImportPayerMemorySchema.nullable().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   version: z.number().int().positive(),
@@ -165,6 +177,10 @@ export const ImportItemPatchSchema = z
     committedEntryId: z.string().optional(),
     committedExpenseId: z.string().optional(),
     duplicateSignals: ReceiptDuplicateSignalsSchema.optional(),
+    payerMemory: ImportPayerMemorySchema.nullable().optional(),
+    // Not stored on the item: true on a one-by-one business/personal
+    // decision so it's remembered for this payer. Bulk actions leave it off.
+    rememberPayer: z.boolean().optional(),
   })
   .strict()
 
@@ -178,3 +194,4 @@ export type CreateImportBatchInput = z.infer<typeof CreateImportBatchSchema>
 export type ImportBatch = z.infer<typeof ImportBatchSchema>
 export type ImportItem = z.infer<typeof ImportItemSchema>
 export type ImportItemPatch = z.infer<typeof ImportItemPatchSchema>
+export type ImportPayerMemory = z.infer<typeof ImportPayerMemorySchema>

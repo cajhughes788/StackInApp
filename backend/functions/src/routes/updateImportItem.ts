@@ -47,14 +47,14 @@ export async function updateImportItemHandler(
       return
     }
 
-    const { batch, item } = await importsSvc.updateImportItem(
+    const { batch, item, payerSuggestion } = await importsSvc.updateImportItem(
       parsedQuery.data.workspaceId,
       uid,
       parsedQuery.data.batchId,
       parsedQuery.data.itemId,
       req.body
     )
-    res.status(200).json({ ok: true, batch, item })
+    res.status(200).json({ ok: true, batch, item, payerSuggestion })
   } catch (err: any) {
     sendHttpError(res, err, "updateImportItem")
   }

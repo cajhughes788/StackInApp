@@ -12,10 +12,14 @@ export type CreateImportBatchResponse = {
   items: ImportItem[]
 }
 
+export type PayerSuggestion = { payerKey: string; displayName: string }
+
 export type UpdateImportItemResponse = {
   ok: boolean
   batch: ImportBatch
   item: ImportItem
+  // Offer "Always treat <displayName> as personal?" (once per payer).
+  payerSuggestion: PayerSuggestion | null
 }
 
 type ImportBatchesResponse = {
@@ -124,5 +128,6 @@ export async function updateImportItem(
     ok: true,
     batch: (res as any).batch,
     item: (res as any).item,
+    payerSuggestion: (res as any).payerSuggestion ?? null,
   }
 }

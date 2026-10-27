@@ -23,13 +23,33 @@ import {
 import { useToast } from "@/hooks/use-toast"
 import {
   getPlaidMerchantMemory,
+  resetAppPayerMemory,
   resetPlaidIncomeMemory,
   resetPlaidMerchantMemory,
+  updateAppPayerMemory,
   updatePlaidIncomeMemory,
   updatePlaidMerchantMemory,
+  type AppPayerMemory,
   type PlaidIncomeMemory,
   type PlaidMerchantMemory,
 } from "@/lib/api/plaidApi"
+import { categoryLabels } from "@/lib/incomeBreakdown"
+
+// "Venmo · Last: business · Services · 3 business, 1 personal"
+function appPayerSummary(payer: AppPayerMemory): string {
+  const source = payer.source === "cash_app_csv" ? "Cash App" : "Venmo"
+  const last =
+    payer.lastOutcome === "business"
+      ? `Last: business${payer.incomeCategory ? ` · ${categoryLabels[payer.incomeCategory]}` : ""}`
+      : "Last: personal"
+  const counts = [
+    payer.businessCount > 0 ? `${payer.businessCount} business` : null,
+    payer.personalCount > 0 ? `${payer.personalCount} personal` : null,
+  ]
+    .filter(Boolean)
+    .join(", ")
+  return [source, last, counts].filter(Boolean).join(" · ")
+}
 
 function modeLabel(mode: PlaidMerchantMemory["mode"]): string {
   switch (mode) {
@@ -46,6 +66,7 @@ export default function PlaidMerchantMemoryPanel({ workspaceId }: { workspaceId:
   const { toast } = useToast()
   const [merchants, setMerchants] = useState<PlaidMerchantMemory[]>([])
   const [payers, setPayers] = useState<PlaidIncomeMemory[]>([])
+  const [appPayers, setAppPayers] = useState<AppPayerMemory[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [forgetTarget, setForgetTarget] = useState<PlaidMerchantMemory | null>(null)
   const [pendingKey, setPendingKey] = useState<string | null>(null)
@@ -56,6 +77,7 @@ export default function PlaidMerchantMemoryPanel({ workspaceId }: { workspaceId:
       const learned = await getPlaidMerchantMemory(workspaceId)
       setMerchants(learned.merchants)
       setPayers(learned.payers)
+      setAppPayers(learned.appPayers)
     } catch {
       toast({ title: "Couldn't load learned merchants", variant: "destructive" })
     } finally {
@@ -106,6 +128,34 @@ export default function PlaidMerchantMemoryPanel({ workspaceId }: { workspaceId:
     }
   }
 
+  async function handleAppPayerModeChange(payer: AppPayerMemory, mode: AppPayerMemory["mode"]) {
+    const previous = appPayers
+    setPendingKey(`app:${payer.payerKey}`)
+    setAppPayers((prev) => prev.map((p) => (p.payerKey === payer.payerKey ? { ...p, mode } : p)))
+    try {
+      await updateAppPayerMemory(workspaceId, payer.payerKey, { mode })
+    } catch {
+      setAppPayers(previous)
+      toast({ title: "Couldn't update this person", variant: "destructive" })
+    } finally {
+      setPendingKey(null)
+    }
+  }
+
+  async function handleForgetAppPayer(payer: AppPayerMemory) {
+    const previous = appPayers
+    setPendingKey(`app:${payer.payerKey}`)
+    setAppPayers((prev) => prev.filter((p) => p.payerKey !== payer.payerKey))
+    try {
+      await resetAppPayerMemory(workspaceId, payer.payerKey)
+    } catch {
+      setAppPayers(previous)
+      toast({ title: "Couldn't forget this person", variant: "destructive" })
+    } finally {
+      setPendingKey(null)
+    }
+  }
+
   async function handleModeChange(merchant: PlaidMerchantMemory, mode: "ask_every_time" | "always_personal") {
     const previous = merchants
     setPendingKey(merchant.merchantKey)
@@ -150,7 +200,7 @@ export default function PlaidMerchantMemoryPanel({ workspaceId }: { workspaceId:
         </p>
       </div>
 
-      {!isLoading && mutedMerchants.length === 0 && mutedPayers.length === 0 ? (
+      {!isLoading && mutedMerchants.length === 0 && mutedPayers.length === 0 && appPayers.length === 0 ? (
         <p className="text-sm text-muted-foreground rounded-lg border border-dashed border-muted px-3 py-6 text-center">
           Nothing here yet — merchants show up once you tell 521 to stop asking about them.
         </p>
@@ -243,6 +293,58 @@ export default function PlaidMerchantMemoryPanel({ workspaceId }: { workspaceId:
                       className="text-muted-foreground hover:text-destructive"
                       disabled={isBusy}
                       onClick={() => void handleForgetPayer(payer)}
+                    >
+                      Forget
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      ) : null}
+
+      {appPayers.length > 0 ? (
+        <div id="people-who-pay-you" className="space-y-2 pt-2">
+          <div>
+            <h4 className="font-medium text-sm">People who pay you</h4>
+            <p className="text-xs text-muted-foreground">
+              From your Venmo statement imports. &quot;Always personal&quot; sorts their payments as personal when you
+              import; &quot;Always business&quot; fills in their usual category for you to save. Changes only affect
+              future imports.
+            </p>
+          </div>
+          {appPayers.map((payer) => {
+            const isBusy = pendingKey === `app:${payer.payerKey}`
+            return (
+              <div key={payer.payerKey} className="rounded-lg border border-muted px-3 py-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium truncate">{payer.displayName}</div>
+                    <div className="text-xs text-muted-foreground">{appPayerSummary(payer)}</div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Select
+                      value={payer.mode}
+                      disabled={isBusy}
+                      onValueChange={(value) => void handleAppPayerModeChange(payer, value as AppPayerMemory["mode"])}
+                    >
+                      <SelectTrigger className="h-8 w-[190px] text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ask_every_time">Ask every time</SelectItem>
+                        <SelectItem value="always_personal">Always personal</SelectItem>
+                        <SelectItem value="always_business">Always business</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="text-muted-foreground hover:text-destructive"
+                      disabled={isBusy}
+                      onClick={() => void handleForgetAppPayer(payer)}
                     >
                       Forget
                     </Button>

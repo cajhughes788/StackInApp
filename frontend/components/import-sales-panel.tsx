@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
+import Link from "next/link"
 import { Check, Upload, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -53,6 +54,9 @@ import {
 } from "@/lib/imports/reviewUtils"
 import { debugError, debugLog, debugRender } from "@/lib/debugLoop"
 import type { ImportBatch, ImportItem } from "@shared/schemas/import"
+import { normalizeAppPayerKey } from "@shared/plaidClassification"
+import { updateAppPayerMemory } from "@/lib/api/plaidApi"
+import type { PayerSuggestion } from "@/lib/api/importsApi"
 import type { EntryType, IncomeCategory, PaymentMethod } from "@shared/schemas/entry"
 
 type ComparableExpense = {
@@ -137,11 +141,33 @@ function createInitialIncomeBreakdown(item: ImportItem): BreakdownDraft {
     return emptyBreakdownDraft()
   }
 
+  // An "always business" payer starts on their usual category.
+  const remembered = item.payerMemory?.applied === "always_business"
+    ? item.payerMemory.incomeCategory
+    : null
+  const category =
+    remembered && config.categories.includes(remembered) ? remembered : config.defaultCategory
+
   return {
     ...emptyBreakdownDraft(),
-    selected: [config.defaultCategory],
-    [config.defaultCategory]: amount.toFixed(2),
+    selected: [category],
+    [category]: amount.toFixed(2),
   }
+}
+
+// What payer memory tells us about this payment, as a short chip — or null.
+function payerHintLabel(item: ImportItem): string | null {
+  const memory = item.payerMemory
+  if (!memory || item.kind === "expense") return null
+  const category = memory.incomeCategory ? ` · ${categoryLabels[memory.incomeCategory]}` : ""
+  if (memory.applied === "always_business") return `Usually business${category}`
+  if (memory.lastOutcome === "business") return `Last time: business${category}`
+  if (memory.lastOutcome === "personal") return "Last time: personal"
+  return null
+}
+
+function isSortedAsPersonal(item: ImportItem): boolean {
+  return item.status === "rejected" && item.payerMemory?.applied === "always_personal"
 }
 
 type ImportSalesPanelProps = {
@@ -217,6 +243,10 @@ export default function ImportSalesPanel({ sources, openRequest }: ImportSalesPa
     null
   )
   const [expanded, setExpanded] = useState(false)
+  // "Always treat <name> as personal?" — offered once per payer, after their
+  // second one-by-one personal decision (shared/payerMemory.ts).
+  const [payerPrompt, setPayerPrompt] = useState<PayerSuggestion | null>(null)
+  const [showSortedPersonal, setShowSortedPersonal] = useState(false)
   const panelRef = useRef<HTMLDivElement | null>(null)
   const visibleImportSources = useMemo(
     () =>
@@ -342,6 +372,7 @@ export default function ImportSalesPanel({ sources, openRequest }: ImportSalesPa
     (item) => item.status === "pending" || item.status === "needs_review"
   )
   const pendingIncomeItems = pendingItems.filter((item) => item.kind !== "expense")
+  const sortedPersonalItems = selectedItems.filter(isSortedAsPersonal)
   const pendingExpenseItems = pendingItems.filter((item) => item.kind === "expense")
   const renderSummary = [
     `workspace=${activeWorkspaceId ?? "none"}`,
@@ -454,7 +485,14 @@ export default function ImportSalesPanel({ sources, openRequest }: ImportSalesPa
       const batch = await createBatch(activeWorkspaceId, payload)
       setExpanded(true)
       setSelectedBatchId(batch.id)
-      setMessage(`Imported ${payload.items.length} transactions for review.`)
+      const createdItems =
+        useImportsStore.getState().byWorkspaceId[activeWorkspaceId]?.itemsByBatchId?.[batch.id] ?? []
+      const sortedCount = createdItems.filter(isSortedAsPersonal).length
+      setMessage(
+        sortedCount > 0
+          ? `Imported ${payload.items.length} transactions for review. ${sortedCount} from people you always treat as personal ${sortedCount === 1 ? "was" : "were"} sorted as personal.`
+          : `Imported ${payload.items.length} transactions for review.`
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to import this CSV.")
     } finally {
@@ -469,7 +507,7 @@ export default function ImportSalesPanel({ sources, openRequest }: ImportSalesPa
     setError(null)
     setMessage(null)
     try {
-      await updateItem(activeWorkspaceId, selectedBatchId, item.id, {
+      const suggestion = await updateItem(activeWorkspaceId, selectedBatchId, item.id, {
         status: "rejected",
         userDecision: {
           isBusiness: false,
@@ -479,7 +517,10 @@ export default function ImportSalesPanel({ sources, openRequest }: ImportSalesPa
           missingFields: [],
           readyToCommit: false,
         },
+        // Remember this payer (one-by-one only; "Mark all personal" doesn't).
+        rememberPayer: true,
       })
+      if (suggestion) setPayerPrompt(suggestion)
       setMessage("Transaction marked as personal.")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update import item.")
@@ -510,6 +551,65 @@ export default function ImportSalesPanel({ sources, openRequest }: ImportSalesPa
       setMessage(`Marked ${pendingItems.length} pending transactions as personal.`)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update pending items.")
+    } finally {
+      setWorkingItemId(null)
+    }
+  }
+
+  // "Yes" to "Always treat X as personal?": remember it, and sort this
+  // statement's other pending payments from them the same way.
+  async function acceptAlwaysPersonal(prompt: PayerSuggestion) {
+    if (!activeWorkspaceId) return
+    setPayerPrompt(null)
+    setWorkingItemId("payer-prompt")
+    setError(null)
+    try {
+      await updateAppPayerMemory(activeWorkspaceId, prompt.payerKey, { mode: "always_personal" })
+      const samePayer = selectedBatchId
+        ? pendingIncomeItems.filter(
+            (item) =>
+              (item.payerKey ?? normalizeAppPayerKey(item.source, item.counterparty)) === prompt.payerKey
+          )
+        : []
+      for (const item of samePayer) {
+        await updateItem(activeWorkspaceId, selectedBatchId as string, item.id, {
+          status: "rejected",
+          userDecision: { isBusiness: false, finalKind: "income" },
+          completion: { missingFields: [], readyToCommit: false },
+          notes: "Sorted as personal (you asked us to)",
+          payerMemory: { applied: "always_personal", lastOutcome: "personal", incomeCategory: null },
+        })
+      }
+      setMessage(
+        samePayer.length > 0
+          ? `${prompt.displayName} will be sorted as personal from now on. Sorted ${samePayer.length} more in this statement.`
+          : `${prompt.displayName} will be sorted as personal from now on.`
+      )
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't save that choice.")
+    } finally {
+      setWorkingItemId(null)
+    }
+  }
+
+  // Undo an automatic "sorted as personal": back to review. The payer's
+  // "always personal" setting stays until changed in People who pay you.
+  async function undoSortedPersonal(item: ImportItem) {
+    if (!activeWorkspaceId || !selectedBatchId) return
+    setWorkingItemId(item.id)
+    setError(null)
+    setMessage(null)
+    try {
+      await updateItem(activeWorkspaceId, selectedBatchId, item.id, {
+        status: "pending",
+        userDecision: { isBusiness: null, finalKind: null },
+        completion: { missingFields: [], readyToCommit: false },
+        notes: "",
+        payerMemory: { applied: null, lastOutcome: "personal", incomeCategory: null },
+      })
+      setMessage("Moved back for review.")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to undo.")
     } finally {
       setWorkingItemId(null)
     }
@@ -658,6 +758,7 @@ export default function ImportSalesPanel({ sources, openRequest }: ImportSalesPa
           readyToCommit: true,
         },
         committedEntryId: entry.id,
+        rememberPayer: true,
       })
 
       setIncomeBreakdownsByItemId((current) => {
@@ -886,6 +987,24 @@ export default function ImportSalesPanel({ sources, openRequest }: ImportSalesPa
 
         {message ? <p className="text-sm text-emerald-700 dark:text-emerald-400">{message}</p> : null}
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
+        {payerPrompt ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 px-3 py-2 text-sm">
+            <span className="flex-1 min-w-[12rem]">
+              Always treat <span className="font-medium">{payerPrompt.displayName}</span> as personal?
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => void acceptAlwaysPersonal(payerPrompt)}
+              disabled={workingItemId === "payer-prompt"}
+            >
+              Yes
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => setPayerPrompt(null)}>
+              Not now
+            </Button>
+          </div>
+        ) : null}
 
         {selectedBatch?.bankCashoutOverlap && selectedBatch.bankCashoutOverlap.count > 0 ? (
           // Bank Venmo cash-outs already confirmed as income in this
@@ -1031,6 +1150,9 @@ export default function ImportSalesPanel({ sources, openRequest }: ImportSalesPa
                             {formatSourceLabel(item.source as SupportedImportSource)}
                           </Badge>
                           <Badge variant="outline">{item.kind}</Badge>
+                          {payerHintLabel(item) ? (
+                            <Badge variant="secondary">{payerHintLabel(item)}</Badge>
+                          ) : null}
                         </div>
                         <p className="text-sm text-muted-foreground">
                           {formatOccurredAt(item.occurredAt)}
@@ -1218,6 +1340,52 @@ export default function ImportSalesPanel({ sources, openRequest }: ImportSalesPa
                 )})}
               </div>
             )}
+
+            {sortedPersonalItems.length > 0 ? (
+              <div className="rounded-lg border border-dashed p-3 text-sm">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between gap-2 text-left font-medium"
+                  aria-expanded={showSortedPersonal}
+                  onClick={() => setShowSortedPersonal((current) => !current)}
+                >
+                  <span>Sorted as personal ({sortedPersonalItems.length})</span>
+                  <span className="text-xs font-normal text-muted-foreground">
+                    {showSortedPersonal ? "Hide" : "Show"}
+                  </span>
+                </button>
+                {showSortedPersonal ? (
+                  <div className="mt-3 space-y-2">
+                    <p className="text-xs text-muted-foreground">
+                      From people you always treat as personal. Change that in{" "}
+                      <Link href="/app/learned-merchants#people-who-pay-you" className="text-primary underline-offset-2 hover:underline">
+                        People who pay you
+                      </Link>
+                      .
+                    </p>
+                    {sortedPersonalItems.map((item) => (
+                      <div key={item.id} className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate">{item.counterparty || item.description || "Imported payment"}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {formatOccurredAt(item.occurredAt)} · {formatCurrency(item.amount ?? 0)}
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void undoSortedPersonal(item)}
+                          disabled={workingItemId === item.id}
+                        >
+                          Undo
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         )}
       </div>

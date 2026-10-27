@@ -9,6 +9,7 @@ import {
   getImportBatches as getImportBatchesAPI,
   getImportItems as getImportItemsAPI,
   updateImportItem as updateImportItemAPI,
+  type PayerSuggestion,
 } from "@/lib/api/importsApi"
 import type { ApiProfileContext } from "@/lib/api/core/client"
 import { debugError, debugLog } from "@/lib/debugLoop"
@@ -50,7 +51,7 @@ type ImportsStoreState = {
     batchId: string,
     itemId: string,
     patch: any
-  ) => Promise<void>
+  ) => Promise<PayerSuggestion | null>
   clear: (workspaceId?: WorkspaceId) => void
 }
 
@@ -287,6 +288,7 @@ export const useImportsStore = create<ImportsStoreState>((set, get) => ({
   async updateItem(workspaceId, batchId, itemId, patch) {
     const response = await updateImportItemAPI(workspaceId, batchId, itemId, patch)
     get().applyItemUpdate(workspaceId, response.batch, response.item)
+    return response.payerSuggestion
   },
 
   clear(workspaceId) {

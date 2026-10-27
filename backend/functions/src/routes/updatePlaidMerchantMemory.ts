@@ -1,15 +1,23 @@
 import type { Request, Response } from "express"
 import { z } from "zod"
 import { updateIncomeMemory, updateMerchantMemory } from "../services/plaidService"
+import { updatePayerMemory } from "../services/payerMemoryService"
 import { IncomeCategorySchema } from "@shared/schemas/entry"
+import { PayerMemoryModeSchema } from "@shared/schemas/payerMemory"
 import { BadRequestError, UnauthorizedError, sendHttpError } from "../lib/httpErrors"
 
 const QuerySchema = z.object({
   workspaceId: z.string().min(1),
   merchantKey: z.string().min(1),
   // "income" manages a payer in plaidIncomeMemory instead (merchantKey is
-  // then the payer key) — see PlaidIncomeMemorySchema.
-  kind: z.enum(["expense", "income"]).default("expense"),
+  // then the payer key) — see PlaidIncomeMemorySchema. "app_payer" manages
+  // a person in payerMemory (app statement imports) — see PayerMemorySchema.
+  kind: z.enum(["expense", "income", "app_payer"]).default("expense"),
+})
+
+const AppPayerBodySchema = z.object({
+  mode: PayerMemoryModeSchema.optional(),
+  incomeCategory: IncomeCategorySchema.nullable().optional(),
 })
 
 const IncomeBodySchema = z.object({
@@ -47,6 +55,16 @@ export async function updatePlaidMerchantMemoryHandler(req: Request, res: Respon
       return
     }
     const { workspaceId, merchantKey, kind } = parsedQuery.data
+    if (kind === "app_payer") {
+      const parsedAppPayerBody = AppPayerBodySchema.safeParse(req.body)
+      if (!parsedAppPayerBody.success) {
+        sendHttpError(res, new BadRequestError("Invalid payload", parsedAppPayerBody.error.format()), "updatePlaidMerchantMemory")
+        return
+      }
+      const payer = await updatePayerMemory(workspaceId, uid, merchantKey, parsedAppPayerBody.data)
+      res.status(200).json({ ok: true, payer })
+      return
+    }
     if (kind === "income") {
       const parsedIncomeBody = IncomeBodySchema.safeParse(req.body)
       if (!parsedIncomeBody.success) {

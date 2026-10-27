@@ -3,6 +3,7 @@ import { API_ENDPOINTS } from "@/lib/api/core/endpoints"
 import type { RecurringCadence } from "@shared/schemas/recurringRule"
 import type { IncomeCategory, PaymentMethod } from "@shared/schemas/entry"
 import type { PlaidInvoiceMatch } from "@shared/schemas/plaidPendingTransaction"
+import type { PayerMemoryMode, PayerMemoryType } from "@shared/schemas/payerMemory"
 
 export type PlaidLinkedAccount = {
   accountId: string
@@ -234,12 +235,40 @@ export type PlaidIncomeMemory = {
   updatedAt: string
 }
 
+/** People who pay through app statement imports — see shared/schemas/payerMemory.ts. */
+export type AppPayerMemory = PayerMemoryType
+
 export async function getPlaidMerchantMemory(
   workspaceId: string
-): Promise<{ merchants: PlaidMerchantMemory[]; payers: PlaidIncomeMemory[] }> {
+): Promise<{ merchants: PlaidMerchantMemory[]; payers: PlaidIncomeMemory[]; appPayers: AppPayerMemory[] }> {
   const url = `${API_ENDPOINTS.plaid.merchantMemory}?workspaceId=${encodeURIComponent(workspaceId)}`
-  const res = await apiFetch<{ merchants: PlaidMerchantMemory[]; payers?: PlaidIncomeMemory[] }>(url, { method: "GET" })
-  return { merchants: res.merchants ?? [], payers: res.payers ?? [] }
+  const res = await apiFetch<{
+    merchants: PlaidMerchantMemory[]
+    payers?: PlaidIncomeMemory[]
+    appPayers?: AppPayerMemory[]
+  }>(url, { method: "GET" })
+  return { merchants: res.merchants ?? [], payers: res.payers ?? [], appPayers: res.appPayers ?? [] }
+}
+
+export async function updateAppPayerMemory(
+  workspaceId: string,
+  payerKey: string,
+  patch: { mode?: PayerMemoryMode; incomeCategory?: IncomeCategory | null }
+): Promise<AppPayerMemory> {
+  const res = await tryWrite<{ payer: AppPayerMemory }>(
+    `${API_ENDPOINTS.plaid.updateMerchantMemory}?workspaceId=${encodeURIComponent(workspaceId)}&merchantKey=${encodeURIComponent(payerKey)}&kind=app_payer`,
+    "POST",
+    patch
+  )
+  return res.payer
+}
+
+export async function resetAppPayerMemory(workspaceId: string, payerKey: string): Promise<void> {
+  await tryWrite(
+    `${API_ENDPOINTS.plaid.resetMerchantMemory}?workspaceId=${encodeURIComponent(workspaceId)}&merchantKey=${encodeURIComponent(payerKey)}&kind=app_payer`,
+    "DELETE",
+    {}
+  )
 }
 
 export async function updatePlaidIncomeMemory(

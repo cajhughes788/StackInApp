@@ -468,3 +468,38 @@ export function detectRecurringCadence(sortedDatesAscending: string[]): Recurrin
   if (gapDays >= 26 && gapDays <= 33) return { freq: "monthly" }
   return null
 }
+
+// Payer key for people who pay through an app statement (Venmo today, Cash
+// App later) — the doc id in workspaces/{id}/payerMemory (see
+// shared/schemas/payerMemory.ts). Prefixed by source so a "Jane Doe" on
+// Venmo and one on Cash App stay separate. Lowercased, emoji and "@" removed,
+// spaces collapsed, so "Jane  Doe 💇", "@Jane Doe" and "jane doe" match.
+// null when there's no usable name.
+const APP_PAYER_SOURCE_PREFIX = {
+  venmo_csv: "venmo",
+  cash_app_csv: "cash_app",
+} as const
+
+export type AppPayerSource = keyof typeof APP_PAYER_SOURCE_PREFIX
+
+export function isAppPayerSource(source: string | null | undefined): source is AppPayerSource {
+  return source != null && Object.prototype.hasOwnProperty.call(APP_PAYER_SOURCE_PREFIX, source)
+}
+
+export function normalizeAppPayerKey(
+  source: string | null | undefined,
+  counterparty: string | null | undefined
+): string | null {
+  if (!isAppPayerSource(source) || !counterparty) return null
+  const name = counterparty
+    .normalize("NFKC")
+    .replace(/[\p{Extended_Pictographic}\u{1F3FB}-\u{1F3FF}\u{FE0F}\u{200D}]/gu, "")
+    .replace(/@/g, "")
+    // Firestore doc ids can't contain "/".
+    .replace(/\//g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase()
+  if (!/\p{L}|\p{N}/u.test(name)) return null
+  return `${APP_PAYER_SOURCE_PREFIX[source]}:${name}`
+}

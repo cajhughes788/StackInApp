@@ -2,6 +2,9 @@ import { z } from "zod"
 
 import { db } from "../admin"
 import { reconcileVenmoCashoutsWithImport } from "./plaidService"
+import { readPayerMemories, recordPayerDecision } from "./payerMemoryService"
+import { isAppPayerSource, normalizeAppPayerKey } from "@shared/plaidClassification"
+import { payerMemoryEffect } from "@shared/payerMemory"
 import {
   BadRequestError,
   ForbiddenError,
@@ -126,12 +129,64 @@ function normalizeImportItem(
     },
     notes: raw.notes ?? "",
     duplicateSignals: raw.duplicateSignals,
+    // Who paid, for payer memory — app statement income only.
+    payerKey: raw.kind !== "expense" ? normalizeAppPayerKey(raw.source, raw.counterparty) : null,
     createdAt: nowIso,
     updatedAt: nowIso,
     version: 1,
   })
 
   return parsed
+}
+
+// Applies what the user told us about each payer (shared/payerMemory.ts):
+// "always personal" payments arrive already sorted as personal, "always
+// business" ones arrive with the remembered category, and anyone else gets a
+// hint of last time's choice. Never marks anything business by itself.
+// Best-effort: if memory can't be read the import goes ahead as before.
+async function applyPayerMemoryToItems(
+  workspaceId: string,
+  items: ImportItem[]
+): Promise<ImportItem[]> {
+  const keys = items
+    .filter((item) => item.status === "pending" && item.payerKey)
+    .map((item) => item.payerKey as string)
+  if (keys.length === 0) return items
+  let memories: Awaited<ReturnType<typeof readPayerMemories>>
+  try {
+    memories = await readPayerMemories(workspaceId, keys)
+  } catch (error) {
+    console.error("importsService.applyPayerMemoryToItems: read failed", error)
+    return items
+  }
+  return items.map((item) => {
+    if (item.status !== "pending" || !item.payerKey) return item
+    const effect = payerMemoryEffect(memories.get(item.payerKey) ?? null)
+    if (effect.action === "sort_personal") {
+      return {
+        ...item,
+        status: "rejected",
+        userDecision: { isBusiness: false, finalKind: "income" },
+        completion: { missingFields: [], readyToCommit: false },
+        notes: "Sorted as personal (you asked us to)",
+        payerMemory: { applied: "always_personal", lastOutcome: "personal", incomeCategory: null },
+      }
+    }
+    if (effect.action === "prefill_business") {
+      return {
+        ...item,
+        suggestedIncomeCategory: effect.incomeCategory ?? item.suggestedIncomeCategory ?? null,
+        payerMemory: { applied: "always_business", lastOutcome: "business", incomeCategory: effect.incomeCategory },
+      }
+    }
+    if (effect.action === "hint") {
+      return {
+        ...item,
+        payerMemory: { applied: null, lastOutcome: effect.lastOutcome, incomeCategory: effect.incomeCategory },
+      }
+    }
+    return item
+  })
 }
 
 async function recomputeAndPersistBatch(
@@ -174,8 +229,11 @@ export async function createImportBatch(
 
   const nowIso = new Date().toISOString()
   const batchRef = db.collection(`workspaces/${workspaceId}/importBatches`).doc()
-  const items = parsed.data.items.map((item) =>
-    normalizeImportItem(workspaceId, batchRef.id, batchRef.collection("items").doc().id, item, nowIso)
+  const items = await applyPayerMemoryToItems(
+    workspaceId,
+    parsed.data.items.map((item) =>
+      normalizeImportItem(workspaceId, batchRef.id, batchRef.collection("items").doc().id, item, nowIso)
+    )
   )
   const summary = summarizeBatch(items)
 
@@ -275,13 +333,19 @@ export async function updateImportItem(
   batchId: string,
   itemId: string,
   patch: unknown
-): Promise<{ batch: ImportBatch; item: ImportItem }> {
+): Promise<{
+  batch: ImportBatch
+  item: ImportItem
+  // Set once per payer: offer "Always treat <displayName> as personal?".
+  payerSuggestion: { payerKey: string; displayName: string } | null
+}> {
   await assertWorkspaceMembership(workspaceId, uid)
 
   const parsedPatch = ImportItemPatchSchema.safeParse(patch)
   if (!parsedPatch.success) {
     throw new BadRequestError("Invalid import item patch", parsedPatch.error.format())
   }
+  const { rememberPayer, ...itemPatch } = parsedPatch.data
 
   const itemRef = db.doc(
     `workspaces/${workspaceId}/importBatches/${batchId}/items/${itemId}`
@@ -295,14 +359,14 @@ export async function updateImportItem(
   const nowIso = new Date().toISOString()
   const next = ImportItemSchema.parse({
     ...existing,
-    ...parsedPatch.data,
+    ...itemPatch,
     userDecision: {
       ...existing.userDecision,
-      ...(parsedPatch.data.userDecision ?? {}),
+      ...(itemPatch.userDecision ?? {}),
     },
     completion: {
       ...existing.completion,
-      ...(parsedPatch.data.completion ?? {}),
+      ...(itemPatch.completion ?? {}),
     },
     updatedAt: nowIso,
     version: (existing.version ?? 1) + 1,
@@ -311,5 +375,40 @@ export async function updateImportItem(
   await itemRef.set(stripUndefinedDeep(next))
   const batch = await recomputeAndPersistBatch(workspaceId, batchId)
 
-  return { batch, item: next }
+  const payerSuggestion = rememberPayer
+    ? await rememberPayerDecision(workspaceId, existing, next)
+    : null
+
+  return { batch, item: next, payerSuggestion }
+}
+
+// A one-by-one business/personal decision on an app statement payment
+// updates that payer's memory. Best-effort: the item itself is already saved.
+async function rememberPayerDecision(
+  workspaceId: string,
+  before: ImportItem,
+  after: ImportItem
+): Promise<{ payerKey: string; displayName: string } | null> {
+  const isBusiness = after.userDecision.isBusiness
+  if (after.kind === "expense" || isBusiness === null) return null
+  if (before.userDecision.isBusiness === isBusiness) return null
+  if (!isAppPayerSource(after.source)) return null
+  const payerKey = after.payerKey ?? normalizeAppPayerKey(after.source, after.counterparty)
+  if (!payerKey || !after.counterparty) return null
+  try {
+    const displayName = after.counterparty.trim()
+    const { suggestAlwaysPersonal } = await recordPayerDecision({
+      workspaceId,
+      payerKey,
+      displayName,
+      source: after.source,
+      outcome: isBusiness ? "business" : "personal",
+      incomeCategory: isBusiness ? after.suggestedIncomeCategory ?? null : null,
+      nowIso: new Date().toISOString(),
+    })
+    return suggestAlwaysPersonal ? { payerKey, displayName } : null
+  } catch (error) {
+    console.error("importsService.rememberPayerDecision failed", error)
+    return null
+  }
 }
