@@ -239,6 +239,21 @@ export const saveBookingSettings = withCorsAuth(async (req, res) => {
   await saveBookingSettingsHandler(req, res)
 })
 
+export const getAppointments = withCorsAuth(async (req, res) => {
+  const { getAppointmentsHandler } = await import("./routes/getAppointments.js")
+  await getAppointmentsHandler(req, res)
+})
+
+export const createAppointment = withCorsAuth(async (req, res) => {
+  const { createAppointmentHandler } = await import("./routes/createAppointment.js")
+  await createAppointmentHandler(req, res)
+})
+
+export const updateAppointment = withCorsAuth(async (req, res) => {
+  const { updateAppointmentHandler } = await import("./routes/updateAppointment.js")
+  await updateAppointmentHandler(req, res)
+})
+
 export const updatePaymentAccount = withCorsAuth(
   async (req, res) => {
     const { updatePaymentAccountHandler } = await import("./routes/updatePaymentAccount.js")
@@ -263,6 +278,13 @@ export const stripeConnectWebhook = onRequest(
 export const publicInvoice = onRequest({ secrets: [SECRETS.STRIPE_SECRET_KEY] }, async (req, res) => {
   const { publicInvoiceHandler } = await import("./routes/publicInvoice.js")
   await publicInvoiceHandler(req as any, res as any)
+})
+
+// Public, unauthenticated: the client's appointment page and its Confirm /
+// Can't make it answer (firebase.json rewrites /b/** here).
+export const publicAppointment = onRequest(async (req, res) => {
+  const { publicAppointmentHandler } = await import("./routes/publicAppointment.js")
+  await publicAppointmentHandler(req as any, res as any)
 })
 
 // ---------------------------------------------------------------------------

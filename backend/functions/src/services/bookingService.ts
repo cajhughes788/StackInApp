@@ -14,7 +14,7 @@ import {
 // Services and hours. Only independent (self-employed) workspaces book.
 // ---------------------------------------------------------------------------
 
-function bookingSettingsDoc(workspaceId: string) {
+export function bookingSettingsDoc(workspaceId: string) {
   return db.collection("workspaces").doc(workspaceId).collection("settings").doc("booking")
 }
 
@@ -22,7 +22,7 @@ function formatIssues(error: { issues: Array<{ path: PropertyKey[]; message: str
   return error.issues.map((issue) => ({ path: issue.path.map(String).join("."), message: issue.message }))
 }
 
-async function assertIndependentWorkspace(workspaceId: string): Promise<void> {
+export async function assertIndependentWorkspace(workspaceId: string): Promise<void> {
   const snap = await db.doc(`workspaces/${workspaceId}`).get()
   if (snap.data()?.type !== "independent") throw new ForbiddenError("Booking is only for self-employed workspaces.")
 }

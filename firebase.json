@@ -106,6 +106,8 @@
 
       // Shared invoice links (publicInvoice renders the page server-side).
       { "source": "/i/**", "function": "publicInvoice" },
+      // Appointment links (publicAppointment renders the client's confirm page).
+      { "source": "/b/**", "function": "publicAppointment" },
 
       { "source": "**", "destination": "/index.html" }
     ]

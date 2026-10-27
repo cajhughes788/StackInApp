@@ -38,6 +38,12 @@ export const API_ENDPOINTS = {
     saveSettings: "https://savebookingsettings-3lc2fwdgwq-uc.a.run.app",
   },
 
+  appointments: {
+    get: "https://getappointments-3lc2fwdgwq-uc.a.run.app",
+    create: "https://createappointment-3lc2fwdgwq-uc.a.run.app",
+    update: "https://updateappointment-3lc2fwdgwq-uc.a.run.app",
+  },
+
   clients: {
     get: "https://getclients-3lc2fwdgwq-uc.a.run.app",
     save: "https://saveclient-3lc2fwdgwq-uc.a.run.app",

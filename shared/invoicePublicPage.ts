@@ -38,7 +38,7 @@ export function escapeHtml(value: string): string {
     .replace(/'/g, "&#39;")
 }
 
-function telHref(phone: string): string {
+export function telHref(phone: string): string {
   return phone.replace(/[^\d+]/g, "")
 }
 
@@ -51,7 +51,8 @@ const TONE_COLORS: Record<InvoiceDisplayStatus["tone"], { bg: string; fg: string
   closed: { bg: "#ECEBE6", fg: "#5B6166" },
 }
 
-function shell(title: string, body: string, accent: string): string {
+// Also the frame for the appointment page (shared/appointmentPublicPage.ts).
+export function shell(title: string, body: string, accent: string): string {
   return `<!doctype html>
 <html lang="en">
 <head>
