@@ -18,7 +18,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { SettingsIntroDialog } from "@/components/onboarding/setup-guide";
 import { isFirstWorkspaceOfType, useGuideStore } from "@/lib/stores/useGuideStore";
-import { getSettingsSaveStatusCopy } from "@/lib/domain/settingsSync";
+import { getSettingsSaveStatusCopy, resolveSettingsNavigationGuardMode, shouldBlockSettingsUnload } from "@/lib/domain/settingsSync";
 import { NavigationGuardMode, useNavigationGuardStore } from "@/lib/stores/useNavigationGuardStore";
 import { useSettingsSaveStore } from "@/lib/stores/useSettingsSaveStore";
 import StackInHeader from "@/components/stackin-header";
@@ -463,12 +463,7 @@ export default function SettingsPage() {
                 : saveState.status === "synced"
                     ? `Last synced ${new Date(saveState.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
                     : "";
-    const navigationGuardMode: NavigationGuardMode =
-        isInitialSettingsSetup ? "block" :
-        saveState.status === "pending" ? "background" :
-        saveState.status === "saving" ? "background" :
-        (saveState.status === "error" && saveState.preservedPatch) ? "background" :
-        "none";
+    const navigationGuardMode: NavigationGuardMode = resolveSettingsNavigationGuardMode(isInitialSettingsSetup, saveState);
     function computeSavePayload(nextFormData: SettingsFormData): {
         patch: SettingsPatchType;
         optimisticSettings: SettingsType | null;
@@ -851,12 +846,15 @@ export default function SettingsPage() {
     ]);
     useEffect(() => {
         const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-            if (!isInitialSettingsSetupRef.current) return;
             const wsId = latestWorkspaceIdRef.current;
             const state = wsId
                 ? useSettingsSaveStore.getState().getSaveState(wsId)
                 : { status: "idle" as const };
-            if (state.status === "saving" || persistPromiseRef.current !== null) {
+            if (shouldBlockSettingsUnload({
+                isInitialSetup: isInitialSettingsSetupRef.current,
+                saveState: state,
+                persistInFlight: persistPromiseRef.current !== null,
+            })) {
                 event.preventDefault();
                 event.returnValue = "";
             }

@@ -200,3 +200,37 @@ export function getSettingsSaveStatusCopy(
       return { label: "Saved", tone: "neutral" }
   }
 }
+
+// --------------------------------------------------------------
+// Leaving the settings page (used by settings/page.tsx)
+// --------------------------------------------------------------
+
+/**
+ * What the app does if you navigate away from Settings: during first-time
+ * setup it blocks; while a save is pending, in flight, or held after an
+ * error with your changes kept, it lets you go and finishes in the
+ * background; otherwise nothing.
+ */
+export function resolveSettingsNavigationGuardMode(
+  isInitialSetup: boolean,
+  saveState: import("../stores/useSettingsSaveStore").SettingsSaveState
+): import("../stores/useNavigationGuardStore").NavigationGuardMode {
+  if (isInitialSetup) return "block"
+  if (saveState.status === "pending" || saveState.status === "saving") return "background"
+  if (saveState.status === "error" && saveState.preservedPatch) return "background"
+  return "none"
+}
+
+/**
+ * Whether closing or reloading the tab asks "Leave site?": only during
+ * first-time setup while a save is still going (after setup, saves finish
+ * on their own).
+ */
+export function shouldBlockSettingsUnload(input: {
+  isInitialSetup: boolean
+  saveState: import("../stores/useSettingsSaveStore").SettingsSaveState
+  persistInFlight: boolean
+}): boolean {
+  if (!input.isInitialSetup) return false
+  return input.saveState.status === "saving" || input.persistInFlight
+}

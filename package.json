@@ -12,6 +12,7 @@
     "dev": "npm run --workspace frontend dev",
     "deploy": "npm run --workspace backend/functions deploy",
     "typecheck": "tsc --noEmit",
+    "test": "node ./scripts/run-tests.cjs",
     "test:settings-sync": "node ./scripts/test-settings-sync.cjs",
     "test:sync": "node ./scripts/test-sync.cjs",
     "test:invoice-matching": "node ./scripts/test-invoice-matching.cjs",

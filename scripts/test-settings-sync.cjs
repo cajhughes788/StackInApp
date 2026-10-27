@@ -11,17 +11,22 @@ const assert = require("node:assert/strict")
 const { ApiError } = require("../frontend/lib/api/core/errors.ts")
 const {
   classifySettingsSyncError,
-  createEmptySettingsSyncSnapshot,
   getSettingsConflictDetails,
-  getSettingsSyncStatusCopy,
-  getSettingsSyncStatusMessage,
+  getSettingsSaveStatusCopy,
   mergeSettings,
   mergeSettingsPatch,
   normalizeSettingsPatch,
-  parseSettingsSyncSnapshot,
   resolveSettingsNavigationGuardMode,
   shouldBlockSettingsUnload,
 } = require("../frontend/lib/domain/settingsSync.ts")
+
+// Save states as useSettingsSaveStore holds them.
+const IDLE = { status: "idle" }
+const SAVING = { status: "saving" }
+const SYNCED = { status: "synced", at: 1 }
+const PENDING = { status: "pending", message: null }
+const ERROR_KEPT = { status: "error", message: "x", retryable: true, preservedPatch: true }
+const ERROR_LOST = { status: "error", message: "x", retryable: false, preservedPatch: false }
 
 function testPatchMerging() {
   const merged = mergeSettingsPatch(
@@ -67,88 +72,28 @@ function testOptimisticMerge() {
 }
 
 function testNavigationModes() {
-  assert.equal(
-    resolveSettingsNavigationGuardMode({
-      isInitialSetup: true,
-      hasPendingDraft: false,
-      syncState: "synced",
-    }),
-    "block"
-  )
-
-  assert.equal(
-    resolveSettingsNavigationGuardMode({
-      isInitialSetup: false,
-      hasPendingDraft: true,
-      syncState: "synced",
-    }),
-    "background"
-  )
-
-  assert.equal(
-    resolveSettingsNavigationGuardMode({
-      isInitialSetup: false,
-      hasPendingDraft: false,
-      syncState: "retrying",
-    }),
-    "background"
-  )
-
-  assert.equal(
-    resolveSettingsNavigationGuardMode({
-      isInitialSetup: false,
-      hasPendingDraft: false,
-      syncState: "failed",
-    }),
-    "none"
-  )
+  // First-time setup always blocks leaving.
+  for (const state of [IDLE, SAVING, SYNCED, PENDING, ERROR_KEPT]) {
+    assert.equal(resolveSettingsNavigationGuardMode(true, state), "block")
+  }
+  // A save still going (or kept after an error) finishes in the background.
+  assert.equal(resolveSettingsNavigationGuardMode(false, PENDING), "background")
+  assert.equal(resolveSettingsNavigationGuardMode(false, SAVING), "background")
+  assert.equal(resolveSettingsNavigationGuardMode(false, ERROR_KEPT), "background")
+  // Nothing in flight: nothing to guard.
+  assert.equal(resolveSettingsNavigationGuardMode(false, IDLE), "none")
+  assert.equal(resolveSettingsNavigationGuardMode(false, SYNCED), "none")
+  assert.equal(resolveSettingsNavigationGuardMode(false, ERROR_LOST), "none")
 }
 
 function testWindowUnloadBlocking() {
-  assert.equal(
-    shouldBlockSettingsUnload({
-      isInitialSetup: false,
-      hasPendingDraft: true,
-      isSaving: false,
-    }),
-    false
-  )
-
-  assert.equal(
-    shouldBlockSettingsUnload({
-      isInitialSetup: false,
-      hasPendingDraft: false,
-      isSaving: true,
-    }),
-    false
-  )
-
-  assert.equal(
-    shouldBlockSettingsUnload({
-      isInitialSetup: true,
-      hasPendingDraft: true,
-      isSaving: false,
-    }),
-    true
-  )
-
-  assert.equal(
-    shouldBlockSettingsUnload({
-      isInitialSetup: true,
-      hasPendingDraft: false,
-      isSaving: true,
-    }),
-    true
-  )
-
-  assert.equal(
-    shouldBlockSettingsUnload({
-      isInitialSetup: true,
-      hasPendingDraft: false,
-      isSaving: false,
-    }),
-    false
-  )
+  // After setup, saves finish on their own — never ask "Leave site?".
+  assert.equal(shouldBlockSettingsUnload({ isInitialSetup: false, saveState: SAVING, persistInFlight: true }), false)
+  // During setup, only while a save is still going.
+  assert.equal(shouldBlockSettingsUnload({ isInitialSetup: true, saveState: SAVING, persistInFlight: false }), true)
+  assert.equal(shouldBlockSettingsUnload({ isInitialSetup: true, saveState: IDLE, persistInFlight: true }), true)
+  assert.equal(shouldBlockSettingsUnload({ isInitialSetup: true, saveState: SYNCED, persistInFlight: false }), false)
+  assert.equal(shouldBlockSettingsUnload({ isInitialSetup: true, saveState: PENDING, persistInFlight: false }), false)
 }
 
 function testErrorClassification() {
@@ -195,80 +140,11 @@ function testErrorClassification() {
 }
 
 function testStatusCopy() {
-  const base = createEmptySettingsSyncSnapshot()
-  assert.deepEqual(getSettingsSyncStatusCopy(base), {
-    label: "Synced",
-    tone: "success",
-  })
-
-  assert.deepEqual(
-    getSettingsSyncStatusCopy({
-      ...base,
-      hasPendingDraft: true,
-    }),
-    {
-      label: "Saving…",
-      tone: "saving",
-    }
-  )
-
-  assert.deepEqual(
-    getSettingsSyncStatusCopy({
-      ...base,
-      state: "offline_pending",
-    }),
-    {
-      label: "Offline",
-      tone: "neutral",
-    }
-  )
-
-  assert.equal(
-    getSettingsSyncStatusMessage({
-      ...base,
-      hasPendingDraft: true,
-    }),
-    "Your latest settings changes are syncing now."
-  )
-}
-
-function testSnapshotConflictDetailsParsing() {
-  const parsed = parseSettingsSyncSnapshot({
-    state: "failed",
-    lastSuccessfulSyncAt: null,
-    lastAttemptedSyncAt: 10,
-    lastQueuedAt: 9,
-    retryCount: 1,
-    failureKind: "conflict",
-    lastErrorMessage: "conflict",
-    pendingPatch: {
-      common: { timeZone: "America/Los_Angeles" },
-    },
-    pendingMutationId: "mutation-1",
-    remoteMeta: {
-      version: 8,
-      updatedAt: "2026-05-29T00:00:00.000Z",
-    },
-    conflictDetails: {
-      currentSettings: {
-        common: { timeZone: "America/New_York" },
-      },
-      currentMeta: {
-        version: 8,
-        updatedAt: "2026-05-29T00:00:00.000Z",
-      },
-    },
-  })
-
-  assert.deepEqual(parsed?.conflictDetails, {
-    currentSettings: {
-      common: { timeZone: "America/New_York" },
-    },
-    currentMeta: {
-      version: 8,
-      updatedAt: "2026-05-29T00:00:00.000Z",
-    },
-  })
+  assert.deepEqual(getSettingsSaveStatusCopy(SAVING), { label: "Saving…", tone: "saving" })
+  assert.deepEqual(getSettingsSaveStatusCopy(SYNCED), { label: "Saved", tone: "success" })
+  assert.deepEqual(getSettingsSaveStatusCopy(PENDING), { label: "Pending Sync", tone: "neutral" })
+  assert.deepEqual(getSettingsSaveStatusCopy(ERROR_KEPT), { label: "Needs Attention", tone: "error" })
+  assert.deepEqual(getSettingsSaveStatusCopy(IDLE), { label: "Saved", tone: "neutral" })
 }
 
 testPatchMerging()
@@ -277,6 +153,5 @@ testNavigationModes()
 testWindowUnloadBlocking()
 testErrorClassification()
 testStatusCopy()
-testSnapshotConflictDetailsParsing()
 
 console.log("settings sync regression checks passed")
