@@ -138,6 +138,28 @@ function formatDayOffRange(start: string, end: string): string {
 }
 
 // Every zone the device knows; the common list on older devices.
+// The weekly hours in a few lines, days with the same hours run together:
+// ["Mon – Fri · 9am – 5pm", "Sat · 10am – 2pm", "Closed Sun"].
+function weeklyHoursSummary(weeklyHours: Draft["weeklyHours"]): string[] {
+  const short = (day: BookingDay) => BOOKING_DAY_NAMES[day].slice(0, 3)
+  // Monday first, as people read a week.
+  const days = [...BOOKING_DAYS.slice(1), BOOKING_DAYS[0]]
+  const hoursOf = (day: BookingDay) =>
+    weeklyHours[day].map((block) => `${formatTime(block.start)} – ${formatTime(block.end)}`).join(", ")
+  const lines: string[] = []
+  for (let i = 0; i < days.length; ) {
+    const hours = hoursOf(days[i])
+    let j = i
+    while (j + 1 < days.length && hoursOf(days[j + 1]) === hours) j += 1
+    if (hours) lines.push(`${short(days[i])}${j > i ? ` – ${short(days[j])}` : ""} · ${hours}`)
+    i = j + 1
+  }
+  const closed = days.filter((day) => weeklyHours[day].length === 0)
+  if (closed.length === days.length) return ["Closed every day"]
+  if (closed.length > 0) lines.push(`Closed ${closed.map(short).join(", ")}`)
+  return lines
+}
+
 function deviceTimeZones(): string[] {
   try {
     const all = (Intl as unknown as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf?.("timeZone")
@@ -229,6 +251,9 @@ export function BookingSetupForm({
   const [reopening, setReopening] = useState<string | null>(null)
   const [showDaysOff, setShowDaysOff] = useState(false)
   const [saving, setSaving] = useState(false)
+  // Weekly hours fold into a summary once they've been saved; open for a
+  // first setup, and again after each Save.
+  const [hoursOpen, setHoursOpen] = useState(!initial.updatedAt)
   const [saveError, setSaveError] = useState<string | null>(null)
   const today = localToday()
 
@@ -328,6 +353,7 @@ export function BookingSetupForm({
       const result = await onSave({ ...rest, daysOff: next.daysOff.filter((date) => date >= today) })
       setDraft(toDraft(result))
       setSaved(result)
+      setHoursOpen(false)
       toast({ title: message })
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "Couldn't save. Check your connection and try again.")
@@ -437,85 +463,110 @@ export function BookingSetupForm({
       </section>
 
       <section className={cn(cardClass, "space-y-3")}>
-        <h2 className="text-sm font-semibold text-muted-foreground">Weekly hours</h2>
-        <ul className="divide-y divide-card-border">
-          {BOOKING_DAYS.map((day) => {
-            const blocks = draft.weeklyHours[day]
-            const open = blocks.length > 0
-            return (
-              <li key={day} className="space-y-2 py-2.5 first:pt-0 last:pb-0">
-                <label className="flex items-center justify-between gap-3">
-                  <span className="text-sm font-medium text-foreground">{BOOKING_DAY_NAMES[day]}</span>
-                  <span className="flex items-center gap-2.5">
-                    <span className="text-xs text-muted-foreground">{open ? "Open" : "Closed"}</span>
-                    <Switch
-                      checked={open}
-                      onCheckedChange={(checked) => setDay(day, checked ? [{ start: "09:00", end: "17:00" }] : [])}
-                      aria-label={`Open on ${BOOKING_DAY_NAMES[day]}`}
-                    />
+        <button
+          type="button"
+          aria-expanded={hoursOpen || hasDayProblem}
+          className="flex w-full items-start justify-between gap-3 text-left"
+          onClick={() => setHoursOpen((value) => !value)}
+          disabled={hasDayProblem}
+        >
+          <span className="min-w-0">
+            <span className="block text-sm font-semibold text-muted-foreground">Weekly hours</span>
+            {hoursOpen || hasDayProblem ? null : (
+              <span className="mt-1 block space-y-0.5">
+                {weeklyHoursSummary(draft.weeklyHours).map((line) => (
+                  <span key={line} className="block text-sm text-foreground">
+                    {line}
                   </span>
-                </label>
-                {blocks.map((block, index) => (
-                  <div key={index} className="flex items-center gap-2">
-                    <input
-                      type="time"
-                      step={300}
-                      className={cn(softInputClass, "h-10 min-w-0 flex-1 px-1.5 text-center text-sm tabular-nums")}
-                      value={block.start}
-                      aria-label={`${BOOKING_DAY_NAMES[day]} opens`}
-                      onChange={(event) =>
-                        event.target.value &&
-                        setDay(
-                          day,
-                          blocks.map((item, i) => (i === index ? { ...item, start: event.target.value } : item))
-                        )
-                      }
-                    />
-                    <span className="text-xs text-muted-foreground">to</span>
-                    <input
-                      type="time"
-                      step={300}
-                      className={cn(softInputClass, "h-10 min-w-0 flex-1 px-1.5 text-center text-sm tabular-nums")}
-                      value={block.end}
-                      aria-label={`${BOOKING_DAY_NAMES[day]} closes`}
-                      onChange={(event) =>
-                        event.target.value &&
-                        setDay(
-                          day,
-                          blocks.map((item, i) => (i === index ? { ...item, end: event.target.value } : item))
-                        )
-                      }
-                    />
+                ))}
+              </span>
+            )}
+          </span>
+          <ChevronDown
+            className={cn("mt-0.5 size-5 shrink-0 text-muted-foreground transition-transform", (hoursOpen || hasDayProblem) && "rotate-180")}
+            aria-hidden="true"
+          />
+        </button>
+        {hoursOpen || hasDayProblem ? (
+          <ul className="divide-y divide-card-border">
+            {BOOKING_DAYS.map((day) => {
+              const blocks = draft.weeklyHours[day]
+              const open = blocks.length > 0
+              return (
+                <li key={day} className="space-y-2 py-2.5 first:pt-0 last:pb-0">
+                  <label className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium text-foreground">{BOOKING_DAY_NAMES[day]}</span>
+                    <span className="flex items-center gap-2.5">
+                      <span className="text-xs text-muted-foreground">{open ? "Open" : "Closed"}</span>
+                      <Switch
+                        checked={open}
+                        onCheckedChange={(checked) => setDay(day, checked ? [{ start: "09:00", end: "17:00" }] : [])}
+                        aria-label={`Open on ${BOOKING_DAY_NAMES[day]}`}
+                      />
+                    </span>
+                  </label>
+                  {blocks.map((block, index) => (
+                    <div key={index} className="flex items-center gap-2">
+                      <input
+                        type="time"
+                        step={300}
+                        className={cn(softInputClass, "h-10 min-w-0 flex-1 px-1.5 text-center text-sm tabular-nums")}
+                        value={block.start}
+                        aria-label={`${BOOKING_DAY_NAMES[day]} opens`}
+                        onChange={(event) =>
+                          event.target.value &&
+                          setDay(
+                            day,
+                            blocks.map((item, i) => (i === index ? { ...item, start: event.target.value } : item))
+                          )
+                        }
+                      />
+                      <span className="text-xs text-muted-foreground">to</span>
+                      <input
+                        type="time"
+                        step={300}
+                        className={cn(softInputClass, "h-10 min-w-0 flex-1 px-1.5 text-center text-sm tabular-nums")}
+                        value={block.end}
+                        aria-label={`${BOOKING_DAY_NAMES[day]} closes`}
+                        onChange={(event) =>
+                          event.target.value &&
+                          setDay(
+                            day,
+                            blocks.map((item, i) => (i === index ? { ...item, end: event.target.value } : item))
+                          )
+                        }
+                      />
+                      <button
+                        type="button"
+                        aria-label={`Remove ${formatTime(block.start)}–${formatTime(block.end)} on ${BOOKING_DAY_NAMES[day]}`}
+                        className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                        onClick={() => setDay(day, blocks.filter((_, i) => i !== index))}
+                      >
+                        <X className="size-4" aria-hidden="true" />
+                      </button>
+                    </div>
+                  ))}
+                  {open && blocks.length < BOOKING_MAX_BLOCKS_PER_DAY ? (
                     <button
                       type="button"
-                      aria-label={`Remove ${formatTime(block.start)}–${formatTime(block.end)} on ${BOOKING_DAY_NAMES[day]}`}
-                      className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
-                      onClick={() => setDay(day, blocks.filter((_, i) => i !== index))}
+                      className="text-sm font-medium text-primary"
+                      onClick={() => {
+                        const last = blocks[blocks.length - 1]
+                        const start = last && last.end < "22:00" ? last.end : "18:00"
+                        const startHour = Number(start.slice(0, 2))
+                        const end = `${String(Math.min(startHour + 2, 23)).padStart(2, "0")}:${start.slice(3)}`
+                        setDay(day, [...blocks, { start, end }])
+                      }}
                     >
-                      <X className="size-4" aria-hidden="true" />
+                      + Add hours
                     </button>
-                  </div>
-                ))}
-                {open && blocks.length < BOOKING_MAX_BLOCKS_PER_DAY ? (
-                  <button
-                    type="button"
-                    className="text-sm font-medium text-primary"
-                    onClick={() => {
-                      const last = blocks[blocks.length - 1]
-                      const start = last && last.end < "22:00" ? last.end : "18:00"
-                      const startHour = Number(start.slice(0, 2))
-                      const end = `${String(Math.min(startHour + 2, 23)).padStart(2, "0")}:${start.slice(3)}`
-                      setDay(day, [...blocks, { start, end }])
-                    }}
-                  >
-                    + Add hours
-                  </button>
-                ) : null}
-                {dayProblems[day] ? <p className="text-sm text-destructive">{dayProblems[day]}</p> : null}
-              </li>
-            )
-          })}
-        </ul>
+                  ) : null}
+                  {dayProblems[day] ? <p className="text-sm text-destructive">{dayProblems[day]}</p> : null}
+                </li>
+              )
+            })}
+          </ul>
+        ) : null}
       </section>
 
       <section className={cn(cardClass, "space-y-3")}>
