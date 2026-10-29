@@ -40,6 +40,9 @@ export function OnlineBookingSection({
   // What's typed; it becomes the link only on "Change link".
   const [text, setText] = useState(slug)
   const [confirmingChange, setConfirmingChange] = useState(false)
+  // Turning a live page off asks first: a stray tap would quietly stop new
+  // bookings until noticed. Turning it on doesn't.
+  const [confirmingOff, setConfirmingOff] = useState(false)
   useEffect(() => {
     setText(slug)
     setConfirmingChange(false)
@@ -88,12 +91,41 @@ export function OnlineBookingSection({
         </span>
         <Switch
           checked={enabled}
-          onCheckedChange={(checked) =>
+          onCheckedChange={(checked) => {
+            if (!checked && savedEnabled) {
+              setConfirmingOff(true)
+              return
+            }
+            setConfirmingOff(false)
             onChange({ onlineBookingEnabled: checked, ...(checked && !slug ? { bookingSlug: bookingSlugFrom(businessName) } : {}) })
-          }
+          }}
           aria-label="Take bookings online"
         />
       </label>
+      {confirmingOff ? (
+        <div className="space-y-2 rounded-[14px] bg-muted p-3">
+          <p className="text-sm font-medium text-foreground">Stop taking online bookings?</p>
+          <p className="text-xs text-muted-foreground">
+            Your link will say it isn&apos;t available. Appointments already booked stay as they are.
+          </p>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="destructive"
+              className="h-10 flex-1 rounded-full"
+              onClick={() => {
+                setConfirmingOff(false)
+                onChange({ onlineBookingEnabled: false })
+              }}
+            >
+              Yes, turn off
+            </Button>
+            <Button type="button" variant="outline" className="h-10 flex-1 rounded-full" onClick={() => setConfirmingOff(false)}>
+              Keep it on
+            </Button>
+          </div>
+        </div>
+      ) : null}
       {!hasActiveService && enabled ? (
         <p className="text-sm text-destructive">Add a service customers can book first.</p>
       ) : null}
