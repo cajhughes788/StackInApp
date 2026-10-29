@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import {
   BookOpen,
+  Calculator,
   CalendarClock,
   ChartNoAxesColumnIncreasing,
   Compass,
@@ -35,6 +36,7 @@ import { useNavigationGuardStore } from "@/lib/stores/useNavigationGuardStore"
 import { useGuideStore } from "@/lib/stores/useGuideStore"
 import { useToast } from "@/hooks/use-toast"
 import { prefetchRouteData } from "@/lib/prefetch/routeData"
+import { SHOW_TAXES } from "@shared/estimatedTax/featureFlag"
 
 export default function StackInHeader() {
   const router = useRouter()
@@ -48,6 +50,7 @@ export default function StackInHeader() {
   const workspaceState = useWorkspaceStore((s) => s.state)
   const navigationGuard = useNavigationGuardStore((s) => s.guard)
   const requestHomeTour = useGuideStore((s) => s.requestHomeTour)
+  const tourMenuOpen = useGuideStore((s) => s.tourMenuOpen)
   const activeWorkspace =
     workspaceState.status === "ready" ? workspaceState.activeWorkspace : null
   const activeWorkspaceId =
@@ -77,6 +80,7 @@ export default function StackInHeader() {
           { label: "Invoices", href: "/app/invoices", icon: FileText },
           { label: "Clients", href: "/app/clients", icon: Users },
           { label: "Booking", href: "/app/booking", icon: CalendarClock },
+          ...(SHOW_TAXES ? [{ label: "Taxes", href: "/app/taxes", icon: Calculator }] : []),
           { label: "Receipts", href: "/app/receipts", icon: Receipt },
         ]
       : []),
@@ -170,7 +174,10 @@ export default function StackInHeader() {
           </div>
 
           {/* RIGHT SIDE — Menu */}
-          <DropdownMenu onOpenChange={setMenuOpen}>
+          {/* The home tour opens the menu to point at its items (see
+              components/onboarding/home-tour.tsx). While it does, the menu is
+              non-modal so the tour's own buttons stay tappable. */}
+          <DropdownMenu open={menuOpen || tourMenuOpen} onOpenChange={setMenuOpen} modal={!tourMenuOpen}>
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
@@ -185,6 +192,11 @@ export default function StackInHeader() {
               <DropdownMenuContent
                 align="end"
                 className="z-[2000] mt-2 w-60 rounded-2xl border border-card-border bg-popover p-1.5 text-popover-foreground shadow-lg"
+                data-tour="menu-list"
+                updatePositionStrategy={tourMenuOpen ? "always" : "optimized"}
+                onCloseAutoFocus={(event) => {
+                  if (tourMenuOpen) event.preventDefault()
+                }}
               >
                 {([["Money", moneyItems], ["Setup", setupItems]] as const).map(([group, items], groupIndex) => (
                   <div key={group}>
@@ -196,6 +208,7 @@ export default function StackInHeader() {
                         <DropdownMenuItem
                           key={item.href}
                           aria-current={isCurrent ? "page" : undefined}
+                          data-tour={`menu-${item.href.split("/").pop()}`}
                           className={`cursor-pointer gap-3 rounded-xl px-2.5 py-2 text-sm ${
                             isCurrent ? "bg-primary/15 font-medium text-primary focus:bg-primary/15 focus:text-primary" : ""
                           }`}

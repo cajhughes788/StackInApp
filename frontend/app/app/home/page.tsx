@@ -42,9 +42,9 @@ import AllRecordsSection from "@/components/all-records-section";
 import { getActiveProfileTrace } from "@/lib/observability/profileTrace";
 import { useAppBootstrapState } from "@/contexts/app-bootstrap-context";
 import { useHomepageLayoutShiftDiagnostics } from "@/hooks/useHomepageLayoutShiftDiagnostics";
+import { useWarmClientsAndBooking } from "@/hooks/useWarmClientsAndBooking";
 import HomeTour from "@/components/onboarding/home-tour";
 import AllIncomeCard from "@/components/all-income-card";
-import TaxEstimateCard from "@/components/tax/tax-estimate-card";
 
 export default function HomePage() {
     const router = useRouter();
@@ -127,6 +127,11 @@ export default function HomePage() {
     const didHydrateKeyRef = useRef<string | null>(null);
     const didMarkUsefulRenderRef = useRef(false);
     useHomepageLayoutShiftDiagnostics();
+    // Clients and Booking only exist in independent workspaces.
+    useWarmClientsAndBooking(
+        supportsExpenses ? activeWorkspaceId : null,
+        entriesState.status === "ready" && !entriesState.isRevalidating
+    );
 
     // Kick off settings load as soon as workspace is known — runs in parallel
     // with bootstrap so settings are ready from cache before bootstrap settles.
@@ -327,7 +332,7 @@ export default function HomePage() {
         {mode === "income" ? <IncomeStreamsOverview onImportCsv={showImportSalesPanel ? () => setImportOpenRequest((n) => n + 1) : undefined}/> : <ExpenseCategoriesOverview />}
 
         <div className="order-2 space-y-5">
-          {supportsExpenses ? (<Link href="/app/charge" className="flex items-center gap-3 rounded-[22px] border border-card-border bg-card px-5 py-4 hover:bg-muted/50">
+          {supportsExpenses ? (<Link href="/app/charge" className="flex items-center gap-3 rounded-[22px] border border-card-border bg-card px-5 py-4 hover:bg-muted/50" data-tour="charge">
               <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
                 <QrCode className="size-5" aria-hidden="true"/>
               </span>
@@ -337,7 +342,6 @@ export default function HomePage() {
               </span>
               <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true"/>
             </Link>) : null}
-          <TaxEstimateCard />
           <NeedsYouPanel />
           {showImportSalesPanel ? <ImportSalesPanel sources={stableImportSources} openRequest={importOpenRequest}/> : null}
         </div>

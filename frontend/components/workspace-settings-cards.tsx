@@ -49,7 +49,6 @@ export function WorkspaceNameCard() {
   const activeWorkspace =
     workspaceState.status === "ready" ? workspaceState.activeWorkspace : null
   const [workspaceName, setWorkspaceName] = useState("")
-  const [isSavingWorkspaceName, setIsSavingWorkspaceName] = useState(false)
   const [workspaceNameError, setWorkspaceNameError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -69,20 +68,20 @@ export function WorkspaceNameCard() {
       return
     }
 
+    // Shown at once; saved in the background. A failure puts the old name back.
+    const workspaceId = activeWorkspace.id
+    const previousName = activeWorkspace.name
+    updateWorkspace(workspaceId, { name: nextName })
     try {
-      setIsSavingWorkspaceName(true)
-      const res = await updateWorkspaceAPI(activeWorkspace.id, { name: nextName })
-      updateWorkspace(activeWorkspace.id, {
-        name: res.workspace?.name ?? nextName,
-      })
+      const res = await updateWorkspaceAPI(workspaceId, { name: nextName })
+      if (res.workspace?.name) updateWorkspace(workspaceId, { name: res.workspace.name })
     } catch (err: any) {
+      updateWorkspace(workspaceId, { name: previousName })
       toast({
         title: "Unable to update workspace",
         description: err?.message || "Please try again.",
         variant: "destructive",
       })
-    } finally {
-      setIsSavingWorkspaceName(false)
     }
   }
 
@@ -111,10 +110,9 @@ export function WorkspaceNameCard() {
         <Button
           variant="outline"
           onClick={handleWorkspaceRename}
-          disabled={isSavingWorkspaceName}
           className="w-full rounded-xl"
         >
-          {isSavingWorkspaceName ? "Saving..." : "Save workspace name"}
+          Save workspace name
         </Button>
       </CardContent>
     </Card>

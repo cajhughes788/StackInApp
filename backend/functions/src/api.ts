@@ -244,15 +244,26 @@ export const getAppointments = withCorsAuth(async (req, res) => {
   await getAppointmentsHandler(req, res)
 })
 
-export const createAppointment = withCorsAuth(async (req, res) => {
-  const { createAppointmentHandler } = await import("./routes/createAppointment.js")
-  await createAppointmentHandler(req, res)
-})
+// SendGrid: booking emails the client their link.
+export const createAppointment = withCorsAuth(
+  async (req, res) => {
+    const { createAppointmentHandler } = await import("./routes/createAppointment.js")
+    await createAppointmentHandler(req, res)
+  },
+  true,
+  { secrets: [SECRETS.SENDGRID_API_KEY] }
+)
 
-export const updateAppointment = withCorsAuth(async (req, res) => {
-  const { updateAppointmentHandler } = await import("./routes/updateAppointment.js")
-  await updateAppointmentHandler(req, res)
-})
+// Stripe key: canceling refunds a deposit paid by card. SendGrid: canceling
+// and Resend email the client.
+export const updateAppointment = withCorsAuth(
+  async (req, res) => {
+    const { updateAppointmentHandler } = await import("./routes/updateAppointment.js")
+    await updateAppointmentHandler(req, res)
+  },
+  true,
+  { secrets: [SECRETS.STRIPE_SECRET_KEY, SECRETS.SENDGRID_API_KEY] }
+)
 
 export const updatePaymentAccount = withCorsAuth(
   async (req, res) => {
@@ -265,7 +276,7 @@ export const updatePaymentAccount = withCorsAuth(
 
 // Bare onRequest like stripeWebhook: signature checks need the raw body.
 export const stripeConnectWebhook = onRequest(
-  { secrets: [SECRETS.STRIPE_SECRET_KEY, SECRETS.STRIPE_CONNECT_WEBHOOK_SECRET] },
+  { secrets: [SECRETS.STRIPE_SECRET_KEY, SECRETS.STRIPE_CONNECT_WEBHOOK_SECRET, SECRETS.SENDGRID_API_KEY] },
   async (req, res) => {
     const { stripeConnectWebhookHandler } = await import("./routes/stripeConnectWebhook.js")
     await stripeConnectWebhookHandler(req as any, res as any)
@@ -282,9 +293,34 @@ export const publicInvoice = onRequest({ secrets: [SECRETS.STRIPE_SECRET_KEY] },
 
 // Public, unauthenticated: the client's appointment page and its Confirm /
 // Can't make it answer (firebase.json rewrites /b/** here).
-export const publicAppointment = onRequest(async (req, res) => {
+// Stripe key: the client pays a deposit, or cancels and gets it back.
+export const publicAppointment = onRequest({ secrets: [SECRETS.STRIPE_SECRET_KEY] }, async (req, res) => {
   const { publicAppointmentHandler } = await import("./routes/publicAppointment.js")
   await publicAppointmentHandler(req as any, res as any)
+})
+
+// The public booking page (step 4). Stripe key: a deposit is paid when booking.
+// The owner's calendar sync link (Booking setup → Calendar sync).
+export const calendarFeedLink = withCorsAuth(async (req, res) => {
+  const { calendarFeedLinkHandler } = await import("./routes/calendarFeed.js")
+  await calendarFeedLinkHandler(req, res)
+})
+
+// The owner's busy calendars (Booking setup → Calendar sync → Block busy times).
+export const busyCalendars = withCorsAuth(async (req, res) => {
+  const { busyCalendarsHandler } = await import("./routes/busyCalendars.js")
+  await busyCalendarsHandler(req, res)
+})
+
+// Public, unauthenticated: /cal/{token}.ics, read by calendar apps.
+export const calendarFeed = onRequest(async (req, res) => {
+  const { calendarFeedHandler } = await import("./routes/calendarFeed.js")
+  await calendarFeedHandler(req as any, res as any)
+})
+
+export const publicBooking = onRequest({ secrets: [SECRETS.STRIPE_SECRET_KEY, SECRETS.SENDGRID_API_KEY] }, async (req, res) => {
+  const { publicBookingHandler } = await import("./routes/publicBooking.js")
+  await publicBookingHandler(req as any, res as any)
 })
 
 // ---------------------------------------------------------------------------

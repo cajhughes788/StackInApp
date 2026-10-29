@@ -36,7 +36,32 @@ export type NativeGeofenceStatus = {
     backgroundGranted?: boolean;
     notificationGranted?: boolean;
     monitoredCount: number;
+    // iPhone only (older builds and Android leave these out).
+    locationStatus?: "notDetermined" | "whenInUse" | "always" | "denied";
+    // iOS asks "Change to Always Allow?" once per install; true once used.
+    alwaysPromptShown?: boolean;
+    notificationStatus?: "notDetermined" | "granted" | "denied";
 };
+type PermissionResult = {
+    granted: boolean;
+    backgroundGranted?: boolean;
+    notificationGranted?: boolean;
+};
+// Location reminders need Always location plus notifications.
+export function isLocationReminderReady(status: PermissionResult): boolean {
+    return !!(status.granted && status.backgroundGranted && status.notificationGranted);
+}
+// Whether the iPhone would still show a permission question. Once it won't,
+// the only way to turn location reminders on is the Settings app.
+export function canAskForLocationReminders(status: NativeGeofenceStatus): boolean {
+    if (status.locationStatus === undefined)
+        return true;
+    if (status.locationStatus === "notDetermined")
+        return true;
+    if (status.locationStatus === "whenInUse" && !status.alwaysPromptShown)
+        return true;
+    return status.locationStatus === "always" && status.notificationStatus === "notDetermined";
+}
 type NativeGeofencePlugin = {
     requestPermissions(): Promise<{
         granted: boolean;
@@ -75,7 +100,7 @@ export class NativeGeofence {
     static isNativeAvailable() {
         return typeof window !== "undefined" && Capacitor.isNativePlatform();
     }
-    static async requestPermissions() {
+    static async requestPermissions(): Promise<PermissionResult> {
         if (!this.isNativeAvailable()) {
             return {
                 granted: false,
@@ -84,11 +109,19 @@ export class NativeGeofence {
             };
         }
         const status = await this.getStatus();
-        if (status.granted && status.backgroundGranted && status.notificationGranted) {
+        if (isLocationReminderReady(status)) {
             return {
                 granted: true,
                 backgroundGranted: true,
                 notificationGranted: true,
+            };
+        }
+        // No iPhone question would follow, so don't show the guide either.
+        if (!canAskForLocationReminders(status)) {
+            return {
+                granted: status.granted,
+                backgroundGranted: status.backgroundGranted ?? false,
+                notificationGranted: status.notificationGranted ?? false,
             };
         }
         const shouldContinue = await ensureNativePermissionGuide();

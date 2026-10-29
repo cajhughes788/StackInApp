@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
+import { toast } from "@/hooks/use-toast";
 import {
     ChevronDown,
     ChevronRight,
@@ -472,15 +473,29 @@ export default function EarningsPage({ periodId }: { periodId?: string }) {
             source: "optimistic",
             localUpdatedAt: Date.now(),
         });
-        const saved = await settingsService.save(activeWorkspaceId, { w2: { hoursGoal: nextGoal } });
-        if (saved.source === "backend" && saved.data) {
-            updateSettingsStore(activeWorkspaceId, saved.data, {
-                source: "backend",
-                remoteMeta: saved.remoteMeta,
-                lastSuccessfulSyncAt: saved.lastSuccessfulSyncAt,
-                localUpdatedAt: saved.localUpdatedAt,
+        // Shown at once; saved in the background. A failure puts the goal back.
+        const workspaceId = activeWorkspaceId;
+        const previous = settings;
+        void settingsService
+            .save(workspaceId, { w2: { hoursGoal: nextGoal } })
+            .then((saved) => {
+            if (saved.source === "backend" && saved.data) {
+                updateSettingsStore(workspaceId, saved.data, {
+                    source: "backend",
+                    remoteMeta: saved.remoteMeta,
+                    lastSuccessfulSyncAt: saved.lastSuccessfulSyncAt,
+                    localUpdatedAt: saved.localUpdatedAt,
+                });
+            }
+        })
+            .catch((error: unknown) => {
+            updateSettingsStore(workspaceId, previous, { source: "optimistic", localUpdatedAt: Date.now() });
+            toast({
+                title: nextGoal ? "Couldn't save your goal" : "Couldn't clear your goal",
+                description: error instanceof Error && error.message ? error.message : "Check your connection and try again.",
+                variant: "destructive",
             });
-        }
+        });
     }
     const selected = useMemo(() => {
         if (!resolvedPeriodId) {

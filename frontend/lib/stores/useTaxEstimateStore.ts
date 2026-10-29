@@ -3,8 +3,8 @@ import { create } from "zustand"
 import { getTaxEstimate } from "@/lib/api/taxEstimateApi"
 import type { TaxEstimateResponse } from "@shared/estimatedTax/response"
 
-// The self-employed tax estimate (getTaxEstimate), shared by Home's Taxes
-// card and the income card's "safe to spend" line so they make one
+// The self-employed tax estimate (getTaxEstimate), shared by the Taxes page
+// and Home's income card "safe to spend" line so they make one
 // request. Per signed-in user; refetched after five minutes or on demand
 // (after the person changes their answers, or records change).
 

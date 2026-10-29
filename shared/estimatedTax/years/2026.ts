@@ -42,12 +42,14 @@ export const ESTIMATED_TAX_2026: EstimatedTaxYear = {
   },
 
   // Section 199A (QBI). Thresholds: Rev. Proc. 2025-32. Above the
-  // threshold the deduction depends on W-2 wages paid, property and the
-  // kind of business — not supported (see calculate.ts). The $400 minimum
-  // is §199A(i), added by the One Big Beautiful Bill Act from 2026.
+  // threshold the deduction is limited by W-2 wages paid and business
+  // property, phased in over $75,000 ($150,000 joint) — widened from
+  // $50,000/$100,000 by the One Big Beautiful Bill Act from 2026
+  // (§199A(b)(3)(B)). The $400 minimum is §199A(i), added by the same Act.
   qbi: {
     rate: 0.2,
     threshold: { single: 201_750, headOfHousehold: 201_750, marriedJoint: 403_500, marriedSeparate: 201_775 },
+    phaseInRange: { single: 75_000, headOfHousehold: 75_000, marriedJoint: 150_000, marriedSeparate: 75_000 },
     minimumDeduction: 400,
     minimumDeductionQbiFloor: 1_000,
   },

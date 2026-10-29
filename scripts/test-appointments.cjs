@@ -217,7 +217,15 @@ test("save as a new service is off unless asked", () => {
 console.log("client's page");
 
 const page = (a, options = {}) =>
-  renderPublicAppointmentPage(a, InvoiceSettingsSchema.parse({ businessName: "Fresh <Cuts>" }), { respondPath: "/b/tok/respond", ...options });
+  renderPublicAppointmentPage(a, InvoiceSettingsSchema.parse({ businessName: "Fresh <Cuts>" }), {
+    respondPath: "/b/tok/respond",
+    payPath: "/b/tok/pay",
+    pagePath: "/b/tok",
+    invoice: null,
+    depositOnline: false,
+    nowIso: NOW,
+    ...options,
+  });
 
 test("a waiting request shows Confirm and Can't make it", () => {
   const html = page(appointment({ status: "requested", holdExpiresAt: "2026-12-03T12:00:00.000Z" }));

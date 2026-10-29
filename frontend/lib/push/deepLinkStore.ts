@@ -1,4 +1,5 @@
 import { create } from "zustand"
+import { SHOW_TAXES } from "@shared/estimatedTax/featureFlag"
 
 // Where a notification tap should take the user, held in app state instead
 // of being expressed as a URL.
@@ -22,7 +23,7 @@ export type DeepLinkRequest = {
   // Null for older notifications that predate workspaceId in the payload —
   // those stay in the current workspace.
   workspaceId: string | null
-  route: "/app/home" | "/app/banks" | `/app/invoices${string}`
+  route: "/app/home" | "/app/banks" | "/app/taxes" | `/app/invoices${string}` | `/app/booking${string}`
   review: DeepLinkReviewTab | null
 }
 
@@ -77,6 +78,11 @@ export function deepLinkRequestFromPushData(data: Record<string, unknown> | unde
   if (deepLink.startsWith("stackin://plaid/pending/")) {
     return { workspaceId, route: "/app/home", review: "expenses" }
   }
+  if (deepLink.startsWith("stackin://home/taxes")) {
+    // Quarterly tax reminder (sendTaxRemindersDaily.ts). Under home/ so
+    // older app builds still open Home.
+    return { workspaceId, route: SHOW_TAXES ? "/app/taxes" : "/app/home", review: null }
+  }
   if (deepLink.startsWith("stackin://home")) {
     // Weekly summary (sendWeeklyDigest.ts).
     return { workspaceId, route: "/app/home", review: null }
@@ -89,6 +95,25 @@ export function deepLinkRequestFromPushData(data: Record<string, unknown> | unde
       route: invoiceId ? `/app/invoices/view?id=${encodeURIComponent(invoiceId)}` : "/app/invoices",
       review: null,
     }
+  }
+  if (deepLink.startsWith("stackin://appointments/")) {
+    // A customer booked on the public booking page (publicBookingService.ts),
+    // or ?then=remind: a client with no email for their reminder
+    // (appointmentRemindersService.ts) — the share sheet opens.
+    const rest = deepLink.slice("stackin://appointments/".length)
+    const appointmentId = rest.split(/[/?#]/)[0]
+    const remind = /[?&]then=remind\b/.test(rest)
+    return {
+      workspaceId,
+      route: appointmentId
+        ? `/app/booking/view?id=${encodeURIComponent(appointmentId)}${remind ? "&then=remind" : ""}`
+        : "/app/booking",
+      review: null,
+    }
+  }
+  if (deepLink.startsWith("stackin://booking/setup")) {
+    // A busy calendar's link stopped working (busyCalendarsService.ts).
+    return { workspaceId, route: "/app/booking/setup#busy-calendars", review: null }
   }
   if (deepLink.startsWith("stackin://plaid/reconnect")) {
     // Reconnecting a bank happens on the Bank connections page.

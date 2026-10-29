@@ -287,22 +287,46 @@ test("I: stylist, $60,000 profit incl. $12,000 tips", () => {
 test("J: phase-out and the net-income limit", () => {
   // $180,000 W-2 + $20,000 business, all tips (wait staff)
   // SE: 18,470 ; SS room 4,500 → 558.00 ; Med 535.63 ; SE 1,093.63 ; half 546.82
-  // AGI 199,453.18 ; cap 25,000 − 10% × 49,453.18 = 20,054.68
-  // Net business income 19,453.18 is the limit → deduction 19,453.18
-  // Taxable before QBI 199,453.18 − 16,100 − 19,453.18 = 163,900.00
-  // QBI 20% × 19,453.18 = 3,890.64 ; taxable 160,009.36
-  // 17,966 + 24% × 54,309.36 (13,034.25) = 31,000.25 ; total 32,093.88
+  // AGI 199,453.18 ; tips held to net business income 19,453.18
+  // Phase-out: 49,453.18 over → 49 full $1,000s × $100 = 4,900 off the
+  // deduction itself (§224(b)(2), Schedule 1-A) → 14,553.18
+  // Taxable before QBI 199,453.18 − 16,100 − 14,553.18 = 168,800.00
+  // QBI 20% × 19,453.18 = 3,890.64 ; taxable 164,909.36
+  // 17,966 + 24% × 59,209.36 (14,210.25) = 32,176.25 ; total 33,269.88
   const e = computeFederalEstimate(T2026, { filingStatus: "single", selfEmploymentProfit: 20000, w2Wages: 180000, tips: { amount: 20000, occupationCode: "102" } });
   expectLines(e, {
     selfEmploymentTax: 1093.63,
     adjustedGrossIncome: 199453.18,
-    tipsDeduction: 19453.18,
-    taxableIncomeBeforeQbi: 163900,
+    tipsDeduction: 14553.18,
+    taxableIncomeBeforeQbi: 168800,
     qbiDeduction: 3890.64,
-    taxableIncome: 160009.36,
-    incomeTax: 31000.25,
-    totalTax: 32093.88,
+    taxableIncome: 164909.36,
+    incomeTax: 32176.25,
+    totalTax: 33269.88,
   });
+});
+
+test("W-2 tips count toward the tips deduction too (the user's own screen, Oct 2026)", () => {
+  // Business profit 7,623.30 incl. 707.38 tips; W-2 pay 17,879.29, of which
+  // card tips are 13,358 of 14,762.67 so far → 16,178.62 for the year.
+  // AGI 24,964.02 − 16,100 − tips (707.38 + 16,178.62 = 16,886.00) < 0 →
+  // no income tax at all; only self-employment tax, 1,077.13.
+  const input = { filingStatus: "single", selfEmploymentProfit: 7623.3, w2Wages: 17879.29, tips: { amount: 707.38, occupationCode: "603" } };
+  const withW2Tips = computeFederalEstimate(T2026, { ...input, w2Tips: { amount: 16178.62, occupationCode: "603" } });
+  expectLines(withW2Tips, { tipsDeduction: 16886, taxableIncome: 0, incomeTax: 0, selfEmploymentTax: 1077.13, totalTax: 1077.13 });
+  // Before the fix (business tips only): the card the user saw.
+  const businessOnly = computeFederalEstimate(T2026, input);
+  expectLines(businessOnly, { tipsDeduction: 707.38, taxableIncome: 6739.69, totalTax: 1751.1 });
+});
+
+test("W-2 tips: not capped by business income, capped at $25,000 overall, out when the job doesn't qualify", () => {
+  const base = { filingStatus: "single", selfEmploymentProfit: 1000, w2Wages: 60000 };
+  const r = computeFederalEstimate(T2026, { ...base, w2Tips: { amount: 30000, occupationCode: "102" } });
+  near(r.lines.tipsDeduction, 25000, "capped at 25,000");
+  const none = computeFederalEstimate(T2026, { ...base, w2Tips: { amount: 30000, occupationCode: "none" } });
+  near(none.lines.tipsDeduction, 0, "employer says they don't qualify");
+  const mfs = computeFederalEstimate(T2026, { ...base, filingStatus: "marriedSeparate", w2Tips: { amount: 5000, occupationCode: "102" } });
+  near(mfs.lines.tipsDeduction, 0, "married filing separately");
 });
 
 test("tips deduction left out when it doesn't apply", () => {
@@ -409,8 +433,6 @@ const quarterlyBase = {
   months: busySummer,
   priorYearTax: 12000,
   priorYearAgi: 50000,
-  ytdWithholding: null,
-  withholdingAsOf: null,
   estimatedPaymentsMade: 3000,
 };
 
@@ -443,6 +465,55 @@ test("Q3 after Aug 31: Jan–Aug income × 1.5, smaller of annualized and last y
   near(r.businessTaxRate * 57000, 11345.67, "business tax rate");
 });
 
+// Hand-worked from Form 2210 Schedule AI (annualized income installment
+// method): period income × factor (4, 2.4, 1.5, 1) → tax on that → × the
+// applicable percentage (22.5%, 45%, 67.5%, 90%) → less earlier payments.
+// Both cases annualize to $60,000 of profit, single:
+//   SE 55,410 × 15.3% = 6,870.84 + 1,606.89 = 8,477.73 ; half 4,238.87
+//   AGI 55,761.13 ; − 16,100 = 39,661.13 ; QBI 11,152.23 held to 7,932.23
+//   Taxable 31,728.90 → 1,240 + 12% × 19,328.90 (2,319.47) = 3,559.47
+//   Annualized tax 3,559.47 + 8,477.73 = 12,037.20
+const fiveThousandAMonth = (through) =>
+  Array.from({ length: through }, (_, i) => ({ month: `2026-${String(i + 1).padStart(2, "0")}`, profit: 5000, w2Wages: 0 }));
+
+test("Schedule AI, Q1: Jan–Mar × 4, then 22.5%", () => {
+  // 15,000 × 4 = 60,000 → 12,037.20 × 22.5% = 2,708.37
+  const r = computeQuarterlyEstimate(T2026, {
+    ...quarterlyBase,
+    today: "2026-04-10",
+    months: fiveThousandAMonth(3),
+    priorYearTax: null,
+    priorYearAgi: null,
+    estimatedPaymentsMade: 0,
+  });
+  assert.equal(r.quarter, 1);
+  assert.equal(r.basis, "period_complete");
+  near(r.annualized.profit, 60000, "annualized profit");
+  near(r.annualized.estimate.totalTax, 12037.2, "annualized tax");
+  near(r.basedOnEarnings, 2708.37, "Q1 installment");
+  // With last year's tax of 8,000, the regular installment (25% = 2,000)
+  // is smaller, so it's the amount due (Form 2210: the lesser of the two).
+  const withPrior = computeQuarterlyEstimate(T2026, { ...quarterlyBase, today: "2026-04-10", months: fiveThousandAMonth(3), priorYearTax: 8000, estimatedPaymentsMade: 0 });
+  near(withPrior.basedOnEarnings, 2000, "lesser of annualized and regular");
+  near(withPrior.penaltyFree, 2000, "penalty-free");
+});
+
+test("Schedule AI, Q2: Jan–May × 2.4, then 45%, less what was paid", () => {
+  // 25,000 × 2.4 = 60,000 → 12,037.20 × 45% = 5,416.74 ; − 1,000 paid = 4,416.74
+  const r = computeQuarterlyEstimate(T2026, {
+    ...quarterlyBase,
+    today: "2026-06-05",
+    months: fiveThousandAMonth(5),
+    priorYearTax: null,
+    priorYearAgi: null,
+    estimatedPaymentsMade: 1000,
+  });
+  assert.equal(r.quarter, 2);
+  assert.equal(r.basis, "period_complete");
+  near(r.annualized.profit, 60000, "annualized profit");
+  near(r.basedOnEarnings, 4416.74, "Q2 installment");
+});
+
 test("range: year-so-far pace vs last-three-months pace", () => {
   // Year so far: 39,000 over 253 days × 365 = 56,264.82
   // Last three months: Jun–Aug 18,000 / 92 days × 112 days left = 21,913.04 → 60,913.04
@@ -461,13 +532,63 @@ test("before the period ends, the year-to-date pace is used", () => {
   near(r.annualized.profit, r.range.yearPace.lines.totalIncome, "pace profit");
 });
 
-test("withholding from a real pay stub counts evenly through the year", () => {
-  // 3,000 withheld through Jun 30 (day 181) → 3,000 × 365 / 181 = 6,049.72 a year
-  // By Q3: 75% → 4,537.29
-  const r = computeQuarterlyEstimate(T2026, { ...quarterlyBase, ytdWithholding: 3000, withholdingAsOf: "2026-06-30", estimatedPaymentsMade: 0 });
-  near(r.annualWithholding, 6049.72, "annual withholding");
-  near(r.withholdingCredit, 4537.29, "credit by Q3");
-  near(r.penaltyFree, 9000 - 4537.29, "penalty-free after withholding");
+test("with W-2 pay, only the business's share is due (the job's paychecks cover the rest)", () => {
+  // Same business, plus a W-2 job at 3,000/month. Q3: profit 57,000 and
+  // wages Jan–Aug 24,000 × 1.5 = 36,000 for the year.
+  const months = busySummer.map((m) => ({ ...m, w2Wages: 3000 }));
+  const r = computeQuarterlyEstimate(T2026, { ...quarterlyBase, months });
+  const both = computeFederalEstimate(T2026, { filingStatus: "single", selfEmploymentProfit: 57000, w2Wages: 36000 });
+  const jobOnly = computeFederalEstimate(T2026, { filingStatus: "single", selfEmploymentProfit: 0, w2Wages: 36000 });
+  const share = Math.round((both.totalTax - jobOnly.totalTax) * 100) / 100;
+  near(r.annualized.w2Wages, 36000, "annualized wages");
+  near(r.businessTax, share, "business share");
+  near(r.job.jobOnlyTax, jobOnly.totalTax, "job-only tax");
+  // Last year's tax covers the whole return, so it isn't used with a job.
+  assert.equal(r.penaltyFree, null);
+  near(r.basedOnEarnings, Math.round((share * 0.675 - 3000) * 100) / 100, "Q3 installment");
+  // The job pushes the business into higher brackets: its share is more
+  // than the same business would owe alone.
+  assert.ok(share > computeQuarterlyEstimate(T2026, { ...quarterlyBase, priorYearTax: null }).businessTax);
+});
+
+test("with W-2 pay and a pay stub: the whole return less withholding (Form 1040-ES)", () => {
+  // Same business and job, plus 3,000 withheld through Jun 30 (day 181):
+  //   3,000 × 365 / 181 = 6,049.72 a year; by Q3 (75%) 4,537.29 counted.
+  // Last year's tax 12,000 (AGI 50,000) → 100% → 9,000 by Q3.
+  const months = busySummer.map((m) => ({ ...m, w2Wages: 3000 }));
+  const r = computeQuarterlyEstimate(T2026, { ...quarterlyBase, months, ytdWithholding: 3000, withholdingAsOf: "2026-06-30" });
+  const both = computeFederalEstimate(T2026, { filingStatus: "single", selfEmploymentProfit: 57000, w2Wages: 36000 });
+  assert.equal(r.method, "withholding");
+  assert.equal(r.job, null);
+  near(r.withholding.annual, 6049.72, "annual withholding");
+  near(r.withholding.credit, 4537.29, "credit by Q3");
+  near(r.businessTax, both.totalTax - 6049.72, "tax left after a year of withholding");
+  // Last year's amount is back: 9,000 − 4,537.29 withheld − 3,000 paid
+  near(r.penaltyFree, 1462.71, "penalty-free");
+  const annualizedQ3 = Math.round(both.totalTax * 0.675 * 100) / 100;
+  near(r.basedOnEarnings, Math.max(0, Math.min(annualizedQ3, 9000) - 4537.29 - 3000), "Q3 installment");
+  // The range is the whole return's tax, before withholding.
+  assert.ok(r.range.high >= r.range.low && r.range.low > r.businessTax);
+});
+
+test("a pay stub is ignored without W-2 pay", () => {
+  const r = computeQuarterlyEstimate(T2026, { ...quarterlyBase, ytdWithholding: 3000, withholdingAsOf: "2026-06-30" });
+  assert.equal(r.method, "whole");
+  assert.equal(r.withholding, null);
+});
+
+test("without W-2 pay the business's share is the whole tax", () => {
+  const r = computeQuarterlyEstimate(T2026, quarterlyBase);
+  assert.equal(r.job, null);
+  assert.equal(r.businessTax, r.annualized.estimate.totalTax);
+});
+
+test("a business loss next to a W-2 job: nothing to pay", () => {
+  const months = busySummer.map((m) => ({ ...m, profit: -500, w2Wages: 4000 }));
+  const r = computeQuarterlyEstimate(T2026, { ...quarterlyBase, months, priorYearTax: null, estimatedPaymentsMade: 0 });
+  assert.equal(r.businessTax, 0);
+  assert.equal(r.belowEstimatesThreshold, true);
+  assert.equal(r.basedOnEarnings, 0);
 });
 
 test("under $1,000 owed after withholding → no estimated payments needed", () => {
@@ -511,6 +632,32 @@ test("in January after the year: the full year, factor 1", () => {
   near(r.annualized.profit, 48000, "full-year profit");
 });
 
+console.log("\nwhat the card leads with");
+const { taxHeadline, headlineAmount } = require("../shared/estimatedTax/headline.ts");
+const shown = { canShowEstimate: true, canShowSafeHarbor: true };
+const blocked = { canShowEstimate: false, canShowSafeHarbor: true };
+
+test("under $1,000 owed this year: nothing needed, whatever last year's tax was", () => {
+  const q = { belowEstimatesThreshold: true, penaltyFree: 49500, basedOnEarnings: 0 };
+  assert.deepEqual(taxHeadline(shown, q), { kind: "not_needed" });
+  assert.equal(headlineAmount(taxHeadline(shown, q)), 0); // no reminder
+});
+
+test("with shaky records, last year's penalty-free amount still leads", () => {
+  const q = { belowEstimatesThreshold: true, penaltyFree: 1500, basedOnEarnings: 0 };
+  assert.deepEqual(taxHeadline(blocked, q), { kind: "penalty_free", amount: 1500 });
+  assert.equal(headlineAmount(taxHeadline(blocked, q)), 1500);
+});
+
+test("last year's amount leads when known; this year's estimate otherwise", () => {
+  const q = { belowEstimatesThreshold: false, penaltyFree: 5625, basedOnEarnings: 5449.15 };
+  assert.deepEqual(taxHeadline(shown, q), { kind: "penalty_free", amount: 5625 });
+  const noPrior = { ...q, penaltyFree: null };
+  assert.deepEqual(taxHeadline(shown, noPrior), { kind: "set_aside", amount: 5449.15 });
+  assert.equal(taxHeadline({ canShowEstimate: false, canShowSafeHarbor: false }, noPrior), null);
+  assert.equal(taxHeadline(shown, null), null);
+});
+
 console.log("\nreminders");
 const { pickTaxReminder, buildTaxReminderMessage } = require("../shared/estimatedTax/reminders.ts");
 
@@ -536,11 +683,16 @@ const healthy = {
     businessStartDate: null,
     situation: { spouseHasIncome: false, investmentOrRentalIncome: false, itemizesDeductions: false },
     priorYearTax: 8000,
+    stateCode: "TX",
+    w2: { hasW2Workspace: false, answered: true },
+    tipsNeedOccupation: false,
+    confirmedComplete: true,
   },
   firstRecordDate: "2026-01-03",
   uncategorizedExpenseCount: 0,
   pendingBankReviewCount: 0,
   pendingImportCount: 0,
+  reversedExpenseCount: 0,
 };
 const withProfile = (patch) => ({ ...healthy, profile: { ...healthy.profile, ...patch } });
 const codes = (result) => result.issues.map((issue) => issue.code);
@@ -567,10 +719,17 @@ test("unanswered questions → needs_profile", () => {
 });
 
 test("complex situation → no estimate, safe harbor still shown", () => {
-  const r = assessTaxDataHealth(withProfile({ situation: { spouseHasIncome: false, investmentOrRentalIncome: true, itemizesDeductions: false } }));
+  const r = assessTaxDataHealth(withProfile({ situation: { spouseHasIncome: false, investmentOrRentalIncome: false, itemizesDeductions: true } }));
   assert.equal(r.status, "unsupported");
   assert.equal(r.canShowEstimate, false);
   assert.equal(r.canShowSafeHarbor, true);
+});
+
+test("other income → estimate still shown, marked rough", () => {
+  const r = assessTaxDataHealth(withProfile({ situation: { spouseHasIncome: false, investmentOrRentalIncome: true, itemizesDeductions: false } }));
+  assert.equal(r.status, "rough");
+  assert.equal(r.canShowEstimate, true);
+  assert.deepEqual(codes(r), ["other_income"]);
 });
 
 test("records starting in March look like missing income — unless the business started then", () => {
@@ -599,6 +758,27 @@ test("a few unreviewed items warn; ten or more block", () => {
   const blocked = assessTaxDataHealth({ ...healthy, pendingImportCount: 12 });
   assert.equal(blocked.status, "needs_records");
   assert.equal(blocked.canShowEstimate, false);
+});
+
+test("every answer is required: state, W-2 question, line of work, the confirm box", () => {
+  const r = assessTaxDataHealth(
+    withProfile({ stateCode: null, w2: { hasW2Workspace: true, answered: false }, tipsNeedOccupation: true, confirmedComplete: false })
+  );
+  assert.equal(r.status, "needs_profile");
+  assert.deepEqual(codes(r), ["missing_state", "w2_unanswered", "missing_occupation", "not_confirmed"]);
+  assert.match(r.issues[1].message, /recorded in 521/);
+  assert.match(assessTaxDataHealth(withProfile({ w2: { hasW2Workspace: false, answered: false } })).issues[0].message, /W-2 job/);
+  // Nothing at all is shown while answers are missing — not even last year's amount.
+  assert.equal(r.canShowSafeHarbor, false);
+  assert.equal(r.canShowEstimate, false);
+});
+
+test("expenses the bank reversed warn; ten or more block", () => {
+  const one = assessTaxDataHealth({ ...healthy, reversedExpenseCount: 1 });
+  assert.equal(one.status, "rough");
+  assert.equal(one.issues[0].message, "Check 1 expense your bank reversed for a better estimate.");
+  const many = assessTaxDataHealth({ ...healthy, reversedExpenseCount: 10 });
+  assert.equal(many.canShowEstimate, false);
 });
 
 if (failures > 0) {

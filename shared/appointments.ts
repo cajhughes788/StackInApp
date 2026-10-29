@@ -62,7 +62,7 @@ export function appointmentHoldsTime(
   nowIso: string
 ): boolean {
   const status = appointmentStatus(appointment, nowIso)
-  return status === "requested" || status === "confirmed" || status === "completed"
+  return status === "requested" || status === "confirmed" || status === "completed" || status === "no_show"
 }
 
 type TimeSpan = Pick<AppointmentType, "startAt" | "blockedUntil">
@@ -165,4 +165,5 @@ export const APPOINTMENT_STATUS_LABELS: Record<AppointmentStatus, string> = {
   canceled: "Canceled",
   completed: "Done",
   expired: "Expired — no answer",
+  no_show: "No-show",
 }

@@ -87,7 +87,7 @@ export const EXPENSE_CATEGORY_GUIDE: ExpenseCategoryGuideEntry[] = [
     simpleDefinition:
       "Tools, machines, and durable items you expect to use repeatedly over time.",
     includes:
-      "Larger or longer-lasting business tools and gear used to perform services or run operations.",
+      "Larger or longer-lasting business tools and gear used to perform services or run operations. If you also use it personally, enter only the business share (for example, 60% of a phone you use 60% for work).",
     examples: [
       "Hair dryer, shears, clippers, salon chair",
       "Massage table, hot towel cabinet, table warmer",
@@ -340,7 +340,7 @@ export const EXPENSE_CATEGORY_GUIDE: ExpenseCategoryGuideEntry[] = [
     simpleDefinition:
       "Required government or regulatory costs connected to legally operating your business.",
     includes:
-      "Business licenses, permits, professional renewals, registration fees, and business-related tax payments or filing fees.",
+      "Business licenses, permits, professional renewals, registration fees, and business taxes or filing fees. It does not include your income tax or quarterly estimated payments to the IRS or your state; record those with \"I paid\" on the Taxes page.",
     examples: [
       "Cosmetology license renewal",
       "Local business license fee",
@@ -350,7 +350,7 @@ export const EXPENSE_CATEGORY_GUIDE: ExpenseCategoryGuideEntry[] = [
     ruleOfThumb:
       "If it is a required fee to stay registered, compliant, or authorized to operate, use Taxes & Licenses.",
     shortSummary:
-      "Use for required licenses, permits, renewals, and business tax-related government fees.",
+      "Use for required licenses, permits, renewals, and business fees. Not for income tax payments.",
     cpaCategory: "Taxes and licenses",
   },
   {

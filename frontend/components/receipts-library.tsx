@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { AlertCircle, ReceiptText } from "lucide-react"
 
@@ -75,6 +76,9 @@ export default function ReceiptsLibrary() {
     workspaceState.status === "ready" ? workspaceState.activeWorkspace : null
   const activeWorkspaceId =
     workspaceState.status === "ready" ? workspaceState.activeWorkspaceId : null
+  const showInNeedsYou = useSettingsStore((state) =>
+    activeWorkspaceId ? state.byWorkspaceId[activeWorkspaceId]?.data?.independent?.missingReceiptsInNeedsYou !== false : true
+  )
 
   const storeEntry = useExpensesStore((state) =>
     activeWorkspaceId ? state.byWorkspaceId[activeWorkspaceId] : undefined
@@ -351,6 +355,11 @@ export default function ReceiptsLibrary() {
             <p className="text-sm text-muted-foreground">
               Expenses over {formatCurrency(RECEIPT_REQUIRED_THRESHOLD)} generally need a receipt for audit defense.
             </p>
+            {activeWorkspace?.type === "independent" ? (
+              <Link href="/app/settings#missing-receipts" className="mt-1 inline-block text-sm font-medium text-primary hover:underline">
+                {showInNeedsYou ? "Stop showing these in Needs you" : "Show these in Needs you again"}
+              </Link>
+            ) : null}
           </div>
           <div className="divide-y divide-border/70 rounded-[22px] bg-card border border-card-border px-4">
             {missingReceipts.map((expense) => (

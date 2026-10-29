@@ -23,6 +23,12 @@ export type TaxEstimateResponse =
       suggestedStateCode: string | null
       // Tips recorded this year so far (business income lines).
       ytdTips: number
+      // Earliest income or expense in taxYear (null = none), for the
+      // "my business started then" shortcut. Missing from older servers.
+      firstRecordDate?: string | null
+      // The person's W-2 workspaces (pay so far and scaled to the year) and
+      // their key, for the W-2 question in the answers form.
+      w2?: { workspaces: Array<{ id: string; name: string; ytdPay: number; projectedPay: number; ytdTips?: number }>; key: string }
       generatedAt: string
     }
 

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 
 import AppLoader from "@/components/app-loader"
 import { NativePermissionGuideDialog } from "@/components/mobile/NativePermissionGuideDialog"
+import { LocationRemindersOffDialog } from "@/components/mobile/LocationRemindersOffDialog"
 import { Toaster } from "@/components/ui/toaster"
 import { useGeofenceReminderEvents } from "@/hooks/useGeofenceReminderEvents"
 import { useNotificationDiagnostics } from "@/hooks/useNotificationDiagnostics"
@@ -154,6 +155,7 @@ export default function AppLayout({
       }}
     >
       <NativePermissionGuideDialog />
+      <LocationRemindersOffDialog />
       <Toaster />
       <DeepLinkHandler />
       {shouldBlock ? <AppLoader label="Loading your workspace..." /> : children}

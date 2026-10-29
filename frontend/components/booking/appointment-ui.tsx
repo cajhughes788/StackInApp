@@ -16,6 +16,7 @@ const TONE_CLASSES: Record<AppointmentStatus, string> = {
   declined: "bg-secondary text-muted-foreground",
   canceled: "bg-secondary text-muted-foreground line-through",
   expired: "bg-secondary text-muted-foreground",
+  no_show: "bg-secondary text-muted-foreground",
 }
 
 const SHORT_LABELS: Record<AppointmentStatus, string> = {
@@ -25,6 +26,7 @@ const SHORT_LABELS: Record<AppointmentStatus, string> = {
   declined: "Declined",
   canceled: "Canceled",
   expired: "Expired",
+  no_show: "No-show",
 }
 
 export function AppointmentStatusPill({ status, short }: { status: AppointmentStatus; short?: boolean }) {
@@ -45,8 +47,4 @@ export function appointmentWhen(appointment: Pick<AppointmentType, "date" | "sta
   return `${formatAppointmentDate(appointment.date, String(new Date().getFullYear()))} · ${appointmentTimeRange(appointment)}`
 }
 
-export function appointmentDepositAmount(appointment: Pick<AppointmentType, "price" | "deposit">): number {
-  if (appointment.deposit.type === "fixed") return appointment.deposit.value
-  if (appointment.deposit.type === "percent") return Math.round(appointment.price * appointment.deposit.value) / 100
-  return 0
-}
+export { appointmentDepositAmount } from "@shared/appointmentDeposits"

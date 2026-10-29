@@ -20,6 +20,9 @@ export type EstimatedTaxYear = {
   qbi: {
     rate: number
     threshold: ByFilingStatus<number>
+    // Above the threshold the wage-and-property limit phases in over this
+    // much more taxable income (§199A(b)(3)(B)).
+    phaseInRange: ByFilingStatus<number>
     minimumDeduction: number
     minimumDeductionQbiFloor: number
   }

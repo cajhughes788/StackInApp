@@ -9,7 +9,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cardClass } from "@/components/invoices/invoice-ui"
-import { createClient } from "@/lib/api/clientsApi"
+import { createClientInBackground } from "@/lib/domain/clientService"
+import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
 import { useClientsStore } from "@/lib/stores/useClientsStore"
 import { cn } from "@/lib/utils"
 import { buildClientRows, type ClientRow } from "@shared/clients"
@@ -45,7 +46,6 @@ export default function ClientList({
   const [newName, setNewName] = useState("")
   const [newPhone, setNewPhone] = useState("")
   const [newEmail, setNewEmail] = useState("")
-  const [saving, setSaving] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -75,24 +75,23 @@ export default function ClientList({
       setAddError("What's their name?")
       return
     }
-    setSaving(true)
     setAddError(null)
-    try {
-      const client = await createClient(workspaceId, {
-        name: newName.trim(),
-        phone: newPhone.trim() || null,
-        email: newEmail.trim() || null,
-      })
-      upsert(workspaceId, client)
-      router.push(`/app/invoices/client?id=${encodeURIComponent(client.id)}`)
-    } catch (err) {
-      setAddError(err instanceof Error ? err.message : "Couldn't add this client.")
-    } finally {
-      setSaving(false)
+    // Shown at once; saved in the background.
+    const result = createClientInBackground(workspaceId, {
+      name: newName.trim(),
+      phone: newPhone.trim() || null,
+      email: newEmail.trim() || null,
+    })
+    if ("error" in result) {
+      setAddError(result.error)
+      return
     }
+    router.push(`/app/invoices/client?id=${encodeURIComponent(result.client.id)}`)
   }
 
-  const loading = !entry || (entry.status === "loading" && entry.clients.length === 0)
+  // Totals add up invoices too, so a saved clients list waits for them.
+  const invoicesLoading = useInvoicesStore((state) => (state.byWorkspaceId[workspaceId]?.status ?? "loading") === "loading")
+  const loading = !entry || (entry.status === "loading" && entry.clients.length === 0) || invoicesLoading
 
   return (
     <div className="space-y-3">
@@ -120,7 +119,7 @@ export default function ClientList({
           <Input value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="Email (optional)" aria-label="Email" inputMode="email" />
           {addError ? <p className="text-sm text-destructive">{addError}</p> : null}
           <div className="flex gap-2">
-            <Button type="submit" disabled={saving}>{saving ? "Adding..." : "Add client"}</Button>
+            <Button type="submit">Add client</Button>
             <Button type="button" variant="ghost" onClick={() => setAdding(false)}>Cancel</Button>
           </div>
         </form>

@@ -13,11 +13,16 @@ import type { WorkspaceType } from "@shared/contracts/workspace"
 //
 // `homeTour` names the workspace the tour is for; the home page runs it only
 // while that workspace is active, then clears it.
+//
+// `tourMenuOpen` lets the tour open the header's menu so it can point at the
+// menu's own items (Invoices, Booking, ...); the header keeps it open while set.
 
 type GuideState = {
   homeTour: { workspaceId: string; workspaceType: WorkspaceType } | null
   requestHomeTour: (workspaceId: string, workspaceType: WorkspaceType) => void
   clearHomeTour: () => void
+  tourMenuOpen: boolean
+  setTourMenuOpen: (open: boolean) => void
 }
 
 /** True when no other workspace on the account has this one's type, i.e. the
@@ -33,4 +38,6 @@ export const useGuideStore = create<GuideState>((set) => ({
   homeTour: null,
   requestHomeTour: (workspaceId, workspaceType) => set({ homeTour: { workspaceId, workspaceType } }),
   clearHomeTour: () => set({ homeTour: null }),
+  tourMenuOpen: false,
+  setTourMenuOpen: (open) => set({ tourMenuOpen: open }),
 }))

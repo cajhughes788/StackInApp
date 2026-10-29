@@ -199,6 +199,12 @@ async function sessionTarget(stripeAccountId: string, session: Stripe.Checkout.S
 export async function handleCheckoutSessionCompleted(stripeAccountId: string, session: Stripe.Checkout.Session): Promise<void> {
   const target = await sessionTarget(stripeAccountId, session)
   if (!target) return
+  // A booking deposit: its invoice is made (and the appointment confirmed)
+  // first, or the money goes back if the time is gone.
+  if (session.metadata?.appointmentId) {
+    const { prepareAppointmentDeposit } = await import("./appointmentDepositsService.js")
+    if ((await prepareAppointmentDeposit(stripeAccountId, target.workspaceId, session)) === "skip") return
+  }
   if (session.payment_status === "paid") {
     await bookPaidSession(stripeAccountId, target.workspaceId, target.invoiceId, session)
     return
@@ -378,7 +384,13 @@ async function bookPaidSession(
       },
       {
         notes: [isBankTransfer ? "Paid by bank transfer (Stripe)" : "Paid online (Stripe)"],
-        fee: { vendor: "Stripe", description: `Stripe fee on Invoice #${session.metadata?.invoiceNumber ?? ""}`.trim() },
+        fee: {
+          vendor: "Stripe",
+          // A booking deposit's session was made before its invoice had a number.
+          description: session.metadata?.appointmentId
+            ? "Stripe fee on a booking deposit"
+            : `Stripe fee on Invoice #${session.metadata?.invoiceNumber ?? ""}`.trim(),
+        },
       }
     )
     await notifyOwnerOfPayment(workspaceId, ownerUid, invoice, payment)

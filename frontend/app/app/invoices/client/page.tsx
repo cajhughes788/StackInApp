@@ -24,7 +24,8 @@ import {
   useInvoicesWorkspace,
   useQueryParam,
 } from "@/components/invoices/invoice-ui"
-import { createClient, getClientDetail, mergeClients, updateClient } from "@/lib/api/clientsApi"
+import { getClientDetail, mergeClients } from "@/lib/api/clientsApi"
+import { createClientInBackground, updateClientInBackground } from "@/lib/domain/clientService"
 import { currentYear, useClientsStore } from "@/lib/stores/useClientsStore"
 import { cn } from "@/lib/utils"
 import { buildClientRows, clientKey } from "@shared/clients"
@@ -112,30 +113,41 @@ function InvoiceClientPage() {
     }
   }
 
-  const saveDetails = () =>
-    run("details", async () => {
-      if (!workspaceId || !client) return
-      const updated = await updateClient(workspaceId, client.id, {
+  // Shown at once and saved in the background (clientService.ts).
+  const saveDetails = () => {
+    if (!workspaceId || !client) return
+    if (!form.name.trim()) {
+      setError("What's their name?")
+      return
+    }
+    if (form.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+      setError("That email doesn't look right.")
+      return
+    }
+    setError(null)
+    updateClientInBackground(
+      workspaceId,
+      client,
+      {
         name: form.name.trim(),
         email: form.email.trim() || null,
         phone: form.phone.trim() || null,
         address: form.address.trim() || null,
-      })
-      upsert(workspaceId, updated)
-      setEditing(false)
-    })
+      },
+      "Couldn't save the details"
+    )
+    setEditing(false)
+  }
 
-  const saveNotes = () =>
-    run("notes", async () => {
-      if (!workspaceId || !client) return
-      upsert(workspaceId, await updateClient(workspaceId, client.id, { notes: notes.trim() }))
-    })
+  const saveNotes = () => {
+    if (!workspaceId || !client) return
+    updateClientInBackground(workspaceId, client, { notes: notes.trim() }, "Couldn't save the notes")
+  }
 
-  const setArchived = (archived: boolean) =>
-    run("archive", async () => {
-      if (!workspaceId || !client) return
-      upsert(workspaceId, await updateClient(workspaceId, client.id, { archived }))
-    })
+  const setArchived = (archived: boolean) => {
+    if (!workspaceId || !client) return
+    updateClientInBackground(workspaceId, client, { archived }, archived ? "Couldn't archive" : "Couldn't restore")
+  }
 
   const merge = () =>
     run("merge", async () => {
@@ -147,19 +159,21 @@ function InvoiceClientPage() {
       router.replace(`/app/invoices/client?id=${encodeURIComponent(kept.id)}`)
     })
 
-  const saveAsClient = () =>
-    run("save", async () => {
-      if (!workspaceId || !row) return
-      const latest = row.invoices[0]
-      const created = await createClient(workspaceId, {
-        name: row.name,
-        email: latest?.clientEmail ?? null,
-        phone: latest?.clientPhone ?? null,
-        address: latest?.clientAddress ?? null,
-      })
-      upsert(workspaceId, created)
-      router.replace(`/app/invoices/client?id=${encodeURIComponent(created.id)}`)
+  const saveAsClient = () => {
+    if (!workspaceId || !row) return
+    const latest = row.invoices[0]
+    const result = createClientInBackground(workspaceId, {
+      name: row.name,
+      email: latest?.clientEmail ?? null,
+      phone: latest?.clientPhone ?? null,
+      address: latest?.clientAddress ?? null,
     })
+    if ("error" in result) {
+      setError(result.error)
+      return
+    }
+    router.replace(`/app/invoices/client?id=${encodeURIComponent(result.client.id)}`)
+  }
 
   const otherClients = (entry?.clients ?? [])
     .filter((c) => c.id !== client?.id && !c.archived)
@@ -284,7 +298,7 @@ function InvoiceClientPage() {
                     <Textarea aria-label="Address" placeholder="Address" rows={2} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
                     <div className="flex gap-2">
                       <Button size="sm" onClick={saveDetails} disabled={busy !== null || !form.name.trim()}>
-                        {busy === "details" ? "Saving..." : "Save"}
+                        Save
                       </Button>
                       <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
                         Cancel
@@ -318,7 +332,7 @@ function InvoiceClientPage() {
                 />
                 {notes.trim() !== client.notes.trim() ? (
                   <Button size="sm" onClick={saveNotes} disabled={busy !== null}>
-                    {busy === "notes" ? "Saving..." : "Save notes"}
+                    Save notes
                   </Button>
                 ) : null}
               </section>

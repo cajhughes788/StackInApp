@@ -207,6 +207,9 @@ export const InvoiceSchema = z
     // pay screen, it takes cards and wallets only, and askForTip replaces
     // InvoiceSettings.offerTips for it.
     quickCharge: z.object({ askForTip: z.boolean() }).nullable().default(null),
+    // Set on the invoice behind a booked appointment (made when its deposit
+    // arrives — shared/appointmentDeposits.ts). Otherwise a regular invoice.
+    appointmentId: z.string().nullable().default(null),
 
     // --- Payment ledger -------------------------------------------------
     // Oldest first. A payment's processor fee, method and links live on it.

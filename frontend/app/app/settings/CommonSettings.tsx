@@ -34,7 +34,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { NativeGeofence } from "@/plugins/NativeGeofence"
+import {
+  canAskForLocationReminders,
+  isLocationReminderReady,
+  NativeGeofence,
+} from "@/plugins/NativeGeofence"
+import {
+  openIosAppSettings,
+  showLocationRemindersOffNotice,
+} from "@/lib/mobile/locationRemindersNotice"
 
 export default function CommonSettingsSection({
   data,
@@ -59,6 +67,9 @@ export default function CommonSettingsSection({
     null
   )
   const [showLocationSettingsDialog, setShowLocationSettingsDialog] = useState(false)
+  // iPhone: location reminders can't work and the iPhone won't ask again,
+  // so the only way back is the Settings app. Rechecked on return to 521.
+  const [locationNeedsSettings, setLocationNeedsSettings] = useState(false)
   const { toast } = useToast()
   const nativePlatform =
     typeof window !== "undefined" && Capacitor.isNativePlatform()
@@ -76,6 +87,37 @@ export default function CommonSettingsSection({
   useEffect(() => {
     setLocal(data ?? {})
   }, [data])
+
+  useEffect(() => {
+    if (nativePlatform !== "ios") return
+    let cancelled = false
+    let removeListener: (() => void) | undefined
+
+    const check = async () => {
+      const status = await NativeGeofence.getStatus().catch(() => null)
+      if (cancelled || !status) return
+      setLocationNeedsSettings(
+        !isLocationReminderReady(status) && !canAskForLocationReminders(status)
+      )
+    }
+
+    void check()
+    void (async () => {
+      try {
+        const { App } = await import("@capacitor/app")
+        const handle = await App.addListener("appStateChange", ({ isActive }) => {
+          if (isActive) void check()
+        })
+        if (cancelled) handle.remove()
+        else removeListener = () => handle.remove()
+      } catch {}
+    })()
+
+    return () => {
+      cancelled = true
+      removeListener?.()
+    }
+  }, [nativePlatform])
 
   useEffect(() => {
     if (!timeReminderExpanded || !timeReminder) return
@@ -368,18 +410,6 @@ export default function CommonSettingsSection({
     return "Please check your device settings and try again."
   }
 
-  // Navigating a WKWebView to the app-settings: URL scheme is how Capacitor
-  // iOS apps deep-link into their own page in the Settings app — iOS
-  // intercepts the navigation and hands it to UIApplication.open, no native
-  // plugin required. There's no Android equivalent available without a
-  // custom plugin, and location reminder controls are hidden on Android
-  // anyway (see showLocationReminderControls above).
-  function openIosAppSettings() {
-    if (typeof window !== "undefined") {
-      window.location.href = "app-settings:"
-    }
-  }
-
   async function requestLocationAccess() {
     try {
       setRequestingLocationAccess(true)
@@ -418,6 +448,29 @@ export default function CommonSettingsSection({
         })
 
         return granted
+      }
+
+      if (nativePlatform === "ios") {
+        const status = await NativeGeofence.getStatus()
+        if (isLocationReminderReady(status)) {
+          setLocationNeedsSettings(false)
+          return true
+        }
+        // The iPhone won't ask again: skip the guide and point to Settings.
+        if (!canAskForLocationReminders(status)) {
+          setLocationNeedsSettings(true)
+          setShowLocationSettingsDialog(true)
+          return false
+        }
+        const result = await NativeGeofence.requestPermissions()
+        if (isLocationReminderReady(result)) {
+          setLocationNeedsSettings(false)
+          return true
+        }
+        showLocationRemindersOffNotice(result)
+        const after = await NativeGeofence.getStatus().catch(() => null)
+        setLocationNeedsSettings(!!after && !canAskForLocationReminders(after))
+        return false
       }
 
       const result = await NativeGeofence.requestPermissions()
@@ -781,6 +834,21 @@ export default function CommonSettingsSection({
                   </Button>
                 </div>
 
+                {!hasEnabledLocationReminder && locationNeedsSettings ? (
+                  <p className="text-sm text-muted-foreground">
+                    For location reminders to work, set Location to{" "}
+                    <strong>Always</strong> (and allow notifications) in your
+                    iPhone Settings, then turn them on here.{" "}
+                    <button
+                      type="button"
+                      className="font-medium text-primary underline-offset-4 hover:underline"
+                      onClick={openIosAppSettings}
+                    >
+                      Open Settings
+                    </button>
+                  </p>
+                ) : null}
+
                 {locationReminderExpanded && locationReminder ? (
                   <div className="space-y-4 rounded-2xl bg-muted px-4 py-3">
                     <div className="space-y-2">
@@ -926,9 +994,9 @@ export default function CommonSettingsSection({
           <AlertDialogHeader>
             <AlertDialogTitle>Turn On &ldquo;Always&rdquo; Location Access</AlertDialogTitle>
             <AlertDialogDescription>
-              Location-based reminders need location access set to{" "}
-              <strong>Always</strong>, but 521 currently only has partial
-              or no access.
+              Location-based reminders need location set to{" "}
+              <strong>Always</strong>, and your iPhone won&rsquo;t ask again,
+              so this has to be changed in Settings.
               <br />
               <br />
               To fix this:

@@ -1,23 +1,25 @@
 "use client"
 
-import { useEffect, useId, useMemo, useRef, useState } from "react"
+import { useId, useState } from "react"
 import { AlertCircle, ChevronDown, Landmark } from "lucide-react"
 
 import Expand from "@/components/expand"
-import TaxAnswersSheet from "@/components/tax/tax-answers-sheet"
 import TaxPaymentsSheet, { IRS_PAYMENTS_URL } from "@/components/tax/tax-payments-sheet"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useToast } from "@/hooks/use-toast"
+import { saveTaxEstimateProfile } from "@/lib/api/taxEstimateApi"
 import { formatCurrency } from "@/lib/helpers"
-import { useTaxEstimateStore } from "@/lib/stores/useTaxEstimateStore"
-import { useEntriesData, useEntriesRenderState } from "@/lib/stores/useEntriesStore"
-import { useExpensesData, useExpensesRenderState } from "@/lib/stores/useExpensesStore"
-import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
+import { useTaxEstimate } from "@/components/tax/use-tax-estimate"
 import type { FederalEstimate, TipsDeductionStatus } from "@shared/estimatedTax/calculate"
+import { taxHeadline } from "@shared/estimatedTax/headline"
+import { PROFILE_CODES } from "@shared/estimatedTax/dataHealth"
 import { findTippedOccupation } from "@shared/estimatedTax/tippedOccupations"
 import { stateName, type StateTaxResult } from "@shared/estimatedTax/states"
 
-// Home's "Taxes" card for self-employed workspaces (shared/estimatedTax).
+// The Taxes page's estimate card for self-employed workspaces
+// (shared/estimatedTax). The answers form sits below it on the page;
+// onEditAnswers takes the person there.
 // Order of trust: the penalty-free amount from last year's return is a
 // rule, so it leads; the estimate from this year's records follows, as a
 // range; and when the records or answers aren't good enough the card says
@@ -49,11 +51,14 @@ function ShowTheMath({
   annualizedProfit,
   annualizedWages,
   state,
+  job,
 }: {
   estimate: FederalEstimate
   annualizedProfit: number
   annualizedWages: number
   state: StateTaxResult
+  // With W-2 pay: the job's own tax (its paychecks cover it) and the rest.
+  job: { jobOnlyTax: number; businessAdds: number } | null
 }) {
   const l = estimate.lines
   return (
@@ -70,12 +75,18 @@ function ShowTheMath({
       {l.additionalMedicareTax > 0 ? <MathRow label="Additional Medicare tax" sub="0.9% over the threshold" value={l.additionalMedicareTax} /> : null}
       <MathRow label="Adjusted gross income" sub="Income minus half of self-employment tax" value={l.adjustedGrossIncome} />
       <MathRow label="Standard deduction" value={-l.standardDeduction} />
-      {l.tipsDeduction > 0 ? <MathRow label="No tax on tips deduction" sub="Your recorded tips, up to $25,000" value={-l.tipsDeduction} /> : null}
+      {l.tipsDeduction > 0 ? <MathRow label="No tax on tips deduction" sub="Qualifying business and W-2 tips, up to $25,000" value={-l.tipsDeduction} /> : null}
       <MathRow label="Business income deduction (QBI)" sub="20% of business income, limited" value={-l.qbiDeduction} />
       <MathRow label="Taxable income" value={l.taxableIncome} />
       <MathRow label="Income tax" sub={`From the ${estimate.year} brackets (top rate ${pct(estimate.marginalRate)})`} value={l.incomeTaxBeforeCredits} />
       {l.childTaxCredit > 0 ? <MathRow label="Child tax credit" value={-l.childTaxCredit} /> : null}
-      <MathRow label="Federal tax for the year" value={estimate.totalTax} strong />
+      <MathRow label={job ? "Federal tax for the year, job and business" : "Federal tax for the year"} value={estimate.totalTax} strong />
+      {job ? (
+        <>
+          <MathRow label="Tax on your job alone" sub="Your W-2 paychecks already cover this" value={-job.jobOnlyTax} />
+          <MathRow label="Your business adds" value={job.businessAdds} strong />
+        </>
+      ) : null}
       {state.status === "included" ? (
         <MathRow
           label={`${stateName(state.stateCode)} tax for the year`}
@@ -104,66 +115,19 @@ function tipsNote(status: TipsDeductionStatus, occupationCode: string | null): s
   }
 }
 
-export default function TaxEstimateCard({ className = "" }: { className?: string }) {
-  const ownerUid = useWorkspaceStore((s) => s.ownerUid)
-  const workspaceState = useWorkspaceStore((s) => s.state)
-  const { data, status, load } = useTaxEstimateStore()
-  const [answersOpen, setAnswersOpen] = useState(false)
+export default function TaxEstimateCard({
+  className = "",
+  onEditAnswers,
+}: {
+  className?: string
+  onEditAnswers: () => void
+}) {
+  const { data, status, refresh } = useTaxEstimate()
+  const { toast } = useToast()
+  const [savingStart, setSavingStart] = useState(false)
   const [paymentsOpen, setPaymentsOpen] = useState(false)
   const [mathOpen, setMathOpen] = useState(false)
   const mathId = useId()
-
-  useEffect(() => {
-    if (ownerUid) void load(ownerUid)
-  }, [ownerUid, load])
-
-  // Refetch when this workspace's records change (like the All income card),
-  // so a new entry or expense shows in the estimate at once instead of after
-  // the store's 5-minute refresh. Waits until new records have saved and for
-  // a short quiet spell, so the server's P&L is up to date and a burst of
-  // changes is one request.
-  const activeWorkspaceId = workspaceState.status === "ready" ? workspaceState.activeWorkspaceId : null
-  const entries = useEntriesData(activeWorkspaceId)
-  const expenses = useExpensesData(activeWorkspaceId)
-  const entriesState = useEntriesRenderState(activeWorkspaceId)
-  const expensesState = useExpensesRenderState(activeWorkspaceId)
-  // Still arriving (device cache, then the server): not a change by the user.
-  const recordsLoading =
-    entriesState.isHydrating || entriesState.isRevalidating || expensesState.isHydrating || expensesState.isRevalidating
-  const records = useMemo(() => {
-    const unsaved =
-      entries.some((e) => !!e.syncState || String(e.id ?? "").startsWith("tmp-")) ||
-      // An expense not yet saved has only a temporary tempId, no id.
-      expenses.some((e) => !e.id || String(e.id).startsWith("tmp-"))
-    const entryTotal = entries.reduce((sum, e) => sum + Number(e.totals?.dayTotal ?? 0), 0)
-    const expenseTotal = expenses.reduce((sum, e) => sum + Number(e.amount ?? 0), 0)
-    return {
-      unsaved,
-      key: `${entries.length}:${entryTotal.toFixed(2)}:${expenses.length}:${expenseTotal.toFixed(2)}`,
-    }
-  }, [entries, expenses])
-  const baseline = useRef<{ workspaceId: string | null; key: string } | null>(null)
-  useEffect(() => {
-    if (!ownerUid || records.unsaved || recordsLoading) return
-    const previous = baseline.current
-    // First look at a workspace sets the baseline; the initial load covers it.
-    if (!previous || previous.workspaceId !== activeWorkspaceId) {
-      baseline.current = { workspaceId: activeWorkspaceId, key: records.key }
-      return
-    }
-    if (previous.key === records.key) return
-    const timer = setTimeout(() => {
-      baseline.current = { workspaceId: activeWorkspaceId, key: records.key }
-      void load(ownerUid, { force: true })
-    }, 1500)
-    return () => clearTimeout(timer)
-  }, [ownerUid, activeWorkspaceId, records, recordsLoading, load])
-
-  const hasW2Income =
-    workspaceState.status === "ready" && workspaceState.workspaces.some((w) => w.type === "w2" && w.status !== "archived")
-  const refresh = () => {
-    if (ownerUid) void load(ownerUid, { force: true })
-  }
 
   if (status === "error" || (data && !data.eligible)) return null
   if (!data) {
@@ -181,17 +145,20 @@ export default function TaxEstimateCard({ className = "" }: { className?: string
   const { health, quarterly, profile, taxYear } = data
   const blockers = health.issues.filter((issue) => issue.severity === "blocker")
   const warnings = health.issues.filter((issue) => issue.severity === "warning")
-  const answersSheet = (
-    <TaxAnswersSheet
-      open={answersOpen}
-      onOpenChange={setAnswersOpen}
-      profile={profile}
-      hasW2Income={hasW2Income}
-      hasTips={data.ytdTips > 0}
-      suggestedStateCode={data.suggestedStateCode}
-      onSaved={refresh}
-    />
-  )
+  // "Your records start Jun 2": one tap answers "my business started then".
+  const firstRecordDate = data.firstRecordDate ?? null
+  const markStartedAtFirstRecord = async () => {
+    if (!firstRecordDate) return
+    setSavingStart(true)
+    try {
+      await saveTaxEstimateProfile({ businessStartDate: firstRecordDate })
+      refresh()
+    } catch {
+      toast({ title: "Couldn't save that", description: "Please try again.", variant: "destructive" })
+    } finally {
+      setSavingStart(false)
+    }
+  }
   const header = (
     <div className="mb-2 flex items-center justify-between gap-3">
       <h2 className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
@@ -199,19 +166,21 @@ export default function TaxEstimateCard({ className = "" }: { className?: string
         Taxes · {taxYear}
       </h2>
       {profile.updatedAt ? (
-        <button type="button" onClick={() => setAnswersOpen(true)} className="text-sm font-medium text-primary">
+        <button type="button" onClick={onEditAnswers} className="text-sm font-medium text-primary">
           Your answers
         </button>
       ) : null}
     </div>
   )
+  // What leads the card (shared with the reminder push).
+  const lead = taxHeadline(health, quarterly)
   const stateCovered =
     quarterly?.state.annualized.status === "included" || quarterly?.state.annualized.status === "none"
   const footer = (
     <p className="mt-4 text-xs text-muted-foreground">
-      Estimate ·{" "}
+      Estimate based on your answers and records ·{" "}
       {stateCovered
-        ? quarterly?.penaltyFree != null && health.canShowSafeHarbor
+        ? lead?.kind === "penalty_free"
           ? "the penalty-free amount covers federal tax"
           : "federal and state"
         : "federal only, state tax not included"}{" "}
@@ -229,7 +198,8 @@ export default function TaxEstimateCard({ className = "" }: { className?: string
     health.canShowSafeHarbor && quarterly?.safeHarbor.priorYearTarget != null
       ? quarterly.safeHarbor.priorYearTarget
       : quarterly?.safeHarbor.annualTarget ?? null
-  const yearTarget = quarterly && targetBasis != null ? Math.max(0, targetBasis - quarterly.annualWithholding) : null
+  const yearTarget =
+    quarterly && targetBasis != null ? Math.max(0, targetBasis - (quarterly.withholding?.annual ?? 0)) : null
   const paymentsSheet = (
     <TaxPaymentsSheet
       open={paymentsOpen}
@@ -246,23 +216,31 @@ export default function TaxEstimateCard({ className = "" }: { className?: string
     return (
       <section className={`rounded-[22px] border border-card-border bg-card p-5 ${className}`}>
         {header}
-        <p className="text-lg font-semibold text-foreground">Know what to set aside for taxes</p>
+        <p className="text-lg font-semibold text-foreground">We can&apos;t estimate your taxes yet.</p>
         <p className="mt-1 text-sm text-muted-foreground">
-          Self-employed income has no tax taken out. Answer a few questions and we&apos;ll work out your quarterly payments from your records.
+          Answer every question below first. Missing or wrong answers mean a wrong estimate.
         </p>
-        <Button className="mt-4" onClick={() => setAnswersOpen(true)}>Set up (1 min)</Button>
-        {answersSheet}
+        <Button className="mt-4" onClick={onEditAnswers}>Answer the questions</Button>
       </section>
     )
   }
 
-  const showSafeHarbor = health.canShowSafeHarbor && quarterly?.penaltyFree != null
+  const showSafeHarbor = lead?.kind === "penalty_free"
   const showEstimate = health.canShowEstimate && quarterly != null
   const due = quarterly ? dueLabel(quarterly.dueDate) : null
   const showEarningsLine =
     showEstimate && quarterly && !quarterly.belowEstimatesThreshold &&
     (quarterly.penaltyFree == null || quarterly.basedOnEarnings < quarterly.penaltyFree - 0.5)
   const rangeIsOne = quarterly ? quarterly.range.high - quarterly.range.low < 50 : false
+  const job = quarterly?.job ?? null
+  const withheld = quarterly?.withholding ?? null
+  // W-2 tips counted toward the tips deduction (the job's line of work is on the list).
+  const w2TipsCounted =
+    ((data.w2?.workspaces.reduce((sum, w) => sum + (w.ytdTips ?? 0), 0) ?? 0) > 0 || (profile.unrecordedW2Tips ?? 0) > 0) &&
+    !!profile.w2OccupationCode &&
+    profile.w2OccupationCode !== "none"
+  // Answers still missing: the estimate is paused until they're given.
+  const missingAnswers = blockers.filter((issue) => PROFILE_CODES.includes(issue.code))
 
   return (
     <section className={`rounded-[22px] border border-card-border bg-card p-5 ${className}`} aria-label={`Taxes for ${taxYear}`}>
@@ -300,13 +278,21 @@ export default function TaxEstimateCard({ className = "" }: { className?: string
                 <span className="font-medium tabular-nums">{wholeDollars.format(Math.ceil(quarterly.basedOnEarnings))}</span> by {due} also covers you.
               </p>
             ) : null
+          ) : Math.ceil(quarterly.basedOnEarnings) === 0 ? (
+            <>
+              <p className="text-2xl font-semibold tracking-tight text-foreground">Nothing more to set aside by {due}</p>
+              <p className="text-sm text-muted-foreground">Your payments cover it so far.</p>
+            </>
           ) : (
             <p className="text-2xl font-semibold tracking-tight text-foreground">
               Set aside about <span className="tabular-nums">{wholeDollars.format(Math.ceil(quarterly.basedOnEarnings))}</span> by {due}
             </p>
           )}
+          <p className="text-sm font-medium text-foreground">
+            Based on your answers and the records in 521. If any income or expenses are missing, this number is wrong.
+          </p>
           <p className="text-sm text-muted-foreground">
-            You&apos;ll likely owe{" "}
+            {job ? "Your business adds about " : withheld ? "In all, job and business, you'll likely owe " : "You'll likely owe "}
             <span className="font-medium tabular-nums text-foreground">
               {rangeIsOne
                 ? wholeDollars.format(quarterly.range.high)
@@ -315,8 +301,26 @@ export default function TaxEstimateCard({ className = "" }: { className?: string
             in federal tax for {taxYear}
             {rangeIsOne ? "." : ", depending on whether the rest of the year looks like the year so far or the last three months."}
           </p>
+          {job ? (
+            <p className="text-sm text-muted-foreground">Your W-2 paychecks already cover the tax on your job pay.</p>
+          ) : null}
+          {withheld ? (
+            <p className="text-sm text-muted-foreground">
+              Your paychecks will withhold about{" "}
+              <span className="font-medium tabular-nums text-foreground">{wholeDollars.format(withheld.annual)}</span> of
+              that this year, from the pay stub you entered; we&apos;ve subtracted it.
+            </p>
+          ) : null}
+          {job || withheld ? (
+            <p className="text-sm text-muted-foreground">
+              You can also cover this by asking your employer to withhold more (a new W-4).
+            </p>
+          ) : null}
           {quarterly.belowEstimatesThreshold ? (
-            <p className="text-sm text-muted-foreground">Under $1,000 owed after withholding, the IRS doesn&apos;t require quarterly payments.</p>
+            <p className="text-sm text-muted-foreground">
+              {job ? "Your business adds under $1,000" : withheld ? "Under $1,000 is left after withholding" : "Under $1,000 owed"}, so
+              the IRS doesn&apos;t require quarterly payments.
+            </p>
           ) : null}
           {(() => {
             const state = quarterly.state.annualized
@@ -329,7 +333,7 @@ export default function TaxEstimateCard({ className = "" }: { className?: string
                   <span className="font-medium tabular-nums text-foreground">
                     {one ? wholeDollars.format(quarterly.state.high) : `${wholeDollars.format(quarterly.state.low)}–${wholeDollars.format(quarterly.state.high)}`}
                   </span>{" "}
-                  in {name} tax, paid to the state.
+                  in {name} tax{job ? " from your business" : ""}, paid to the state.
                   {state.localTaxNote ? ` ${state.localTaxNote}` : ""}
                 </p>
               )
@@ -342,27 +346,53 @@ export default function TaxEstimateCard({ className = "" }: { className?: string
             const note = tipsNote(quarterly.annualized.estimate.tipsDeductionStatus, profile.occupationCode)
             return note ? <p className="text-sm text-muted-foreground">{note}</p> : null
           })()}
+          {w2TipsCounted ? (
+            <p className="text-sm text-muted-foreground">
+              The tips deduction includes your W-2 tips. It depends on what your employer reports on your W-2 (Box 14b).
+            </p>
+          ) : null}
           {quarterly.unsupported.includes("qbi_above_threshold") ? (
             <p className="text-sm text-amber-600 dark:text-amber-400">
-              At your income the business income deduction has extra rules we don&apos;t cover, so this may be high. A tax pro can firm it up.
+              At your income the business income deduction shrinks unless your business pays employees or owns significant property. We assumed it doesn&apos;t, so if it does, this may be a little high. A tax pro can firm it up.
             </p>
           ) : null}
         </div>
       ) : null}
 
       {/* What stands between the person and a (better) number */}
+      {missingAnswers.length > 0 ? (
+        <div className={showSafeHarbor || showEstimate ? "mt-4" : ""}>
+          <p className="text-lg font-semibold text-foreground">Your estimate is paused.</p>
+          <p className="mb-2 mt-1 text-sm text-muted-foreground">
+            We need {missingAnswers.length} more {missingAnswers.length === 1 ? "answer" : "answers"} before we can estimate your taxes:
+          </p>
+        </div>
+      ) : null}
       {blockers.length > 0 || warnings.length > 0 ? (
         <ul className={`${showSafeHarbor || showEstimate ? "mt-4" : ""} space-y-2`}>
           {[...blockers, ...warnings].map((issue) => (
             <li key={issue.code} className="flex gap-2 text-sm">
               <AlertCircle className={`mt-0.5 size-4 shrink-0 ${issue.severity === "blocker" ? "text-amber-500" : "text-muted-foreground"}`} aria-hidden="true" />
-              <span className="text-foreground">{issue.message}</span>
+              <span className="min-w-0 text-foreground">
+                {issue.message}
+                {issue.code === "missing_earlier_months" && firstRecordDate ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-2 flex"
+                    onClick={markStartedAtFirstRecord}
+                    disabled={savingStart}
+                  >
+                    {savingStart ? "Saving…" : `My business started ${dueLabel(firstRecordDate)}`}
+                  </Button>
+                ) : null}
+              </span>
             </li>
           ))}
         </ul>
       ) : null}
-      {!showEstimate && blockers.some((issue) => ["missing_filing_status", "missing_children", "situation_unanswered", "missing_earlier_months"].includes(issue.code)) ? (
-        <Button variant="outline" size="sm" className="mt-3" onClick={() => setAnswersOpen(true)}>
+      {!showEstimate && blockers.some((issue) => PROFILE_CODES.includes(issue.code) || issue.code === "missing_earlier_months") ? (
+        <Button variant="outline" size="sm" className="mt-3" onClick={onEditAnswers}>
           Update answers
         </Button>
       ) : null}
@@ -385,11 +415,12 @@ export default function TaxEstimateCard({ className = "" }: { className?: string
               annualizedProfit={quarterly.annualized.profit}
               annualizedWages={quarterly.annualized.w2Wages}
               state={quarterly.state.annualized}
+              job={job}
             />
-            {quarterly.withholdingCredit > 0 || quarterly.paymentsCredit > 0 ? (
+            {(withheld?.credit ?? 0) > 0 || quarterly.paymentsCredit > 0 ? (
               <dl className="space-y-1.5 border-t border-border/70 pt-3 text-sm">
-                {quarterly.withholdingCredit > 0 ? (
-                  <MathRow label="Withholding counted by this date" sub="From your pay stub, spread evenly over the year" value={-quarterly.withholdingCredit} />
+                {withheld && withheld.credit > 0 ? (
+                  <MathRow label="Withholding counted by this date" sub="From your pay stub, spread evenly over the year" value={-withheld.credit} />
                 ) : null}
                 {quarterly.paymentsCredit > 0 ? <MathRow label="Estimated payments you've made" value={-quarterly.paymentsCredit} /> : null}
               </dl>
@@ -417,7 +448,6 @@ export default function TaxEstimateCard({ className = "" }: { className?: string
       ) : null}
 
       {footer}
-      {answersSheet}
       {paymentsSheet}
     </section>
   )

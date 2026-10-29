@@ -4,8 +4,8 @@ import { z } from "zod"
  * BOOKING SETTINGS — workspaces/{workspaceId}/settings/booking
  *
  * What customers can book (services) and when (weekly hours, days off,
- * notice, how far ahead), for one workspace. Step 1 of booking: nothing
- * reads this for customers yet. Times are wall-clock "HH:MM" in the
+ * notice, how far ahead), for one workspace. Customers read it through the
+ * public booking page (step 4, shared/onlineBooking.ts) once it's on. Times are wall-clock "HH:MM" in the
  * workspace's own time zone, so 9:00 stays 9:00 across daylight saving.
  * -------------------------------------------------------- */
 
@@ -17,6 +17,38 @@ export const BOOKING_MAX_SERVICES = 50
 export const BOOKING_MAX_DAYS_OFF = 366
 export const BOOKING_MAX_BLOCKS_PER_DAY = 4
 export const BOOKING_MAX_LOCATION = 300
+
+// How long before an appointment a client can still cancel and get their
+// deposit back. null = deposits are never refunded when the client cancels.
+export const BOOKING_REFUND_CUTOFF_OPTIONS = [24, 48, 72, 168] as const
+export const DEFAULT_BOOKING_REFUND_CUTOFF_HOURS = 24
+export const BookingRefundCutoffSchema = z.number().int().min(0).max(168).nullable()
+
+// Reminder emails to clients before a confirmed appointment
+// (shared/appointmentReminders.ts): up to two, each this many hours ahead,
+// earliest first. [] = off. Saves from before the choice was added read
+// "off" → [], "day" → [24], "day_and_hours" → [24, 2].
+export const BOOKING_REMINDER_OPTIONS = [
+  { hours: 168, label: "1 week before" },
+  { hours: 72, label: "3 days before" },
+  { hours: 48, label: "2 days before" },
+  { hours: 24, label: "1 day before" },
+  { hours: 4, label: "4 hours before" },
+  { hours: 2, label: "2 hours before" },
+  { hours: 1, label: "1 hour before" },
+] as const
+export const BOOKING_MAX_REMINDERS = 2
+export const DEFAULT_BOOKING_REMINDERS: number[] = [24]
+const REMINDER_HOURS = new Set<number>(BOOKING_REMINDER_OPTIONS.map((option) => option.hours))
+const LEGACY_REMINDERS: Record<string, number[]> = { off: [], day: [24], day_and_hours: [24, 2] }
+export const BookingRemindersSchema = z.preprocess(
+  (value) => (typeof value === "string" ? LEGACY_REMINDERS[value] ?? value : value),
+  z
+    .array(z.number().refine((hours) => REMINDER_HOURS.has(hours), "Pick a reminder time from the list."))
+    .max(BOOKING_MAX_REMINDERS, `Up to ${BOOKING_MAX_REMINDERS} reminders.`)
+    .refine((hours) => new Set(hours).size === hours.length, "Pick two different reminder times.")
+    .transform((hours) => [...hours].sort((a, b) => b - a))
+)
 
 // Used when a workspace has no time zone saved anywhere (matches payPeriods).
 export const DEFAULT_BOOKING_TIME_ZONE = "America/Los_Angeles"
@@ -101,6 +133,22 @@ const BookingSettingsFields = z.object({
   // Optional on input: a save from an app version without it keeps the
   // saved one (bookingService).
   location: z.string().trim().max(BOOKING_MAX_LOCATION).optional(),
+  // Free cancellation up to this many hours before (deposit refunded);
+  // later, the deposit is kept. Optional on input like location.
+  refundCutoffHours: BookingRefundCutoffSchema.optional(),
+  // The public booking page: on or off, and its link name
+  // (app.the521app.com/book/{slug}, unique across 521 — bookingLinks/{slug}).
+  // Optional on input like location.
+  onlineBookingEnabled: z.boolean().optional(),
+  bookingSlug: z.string().trim().toLowerCase().max(40).optional(),
+  // 521 emails clients their appointment link (booked, asked to confirm,
+  // canceled by the owner). Optional on input like location.
+  emailClients: z.boolean().optional(),
+  // Reminder emails before appointments. Optional on input like location.
+  reminders: BookingRemindersSchema.optional(),
+  // All-day events in the owner's busy calendars block the whole day
+  // (shared/busyTimes.ts). Optional on input like location.
+  busyAllDay: z.boolean().optional(),
 })
 
 function refineSettings(settings: z.infer<typeof BookingSettingsFields>, ctx: z.RefinementCtx) {
@@ -121,6 +169,13 @@ export const BookingSettingsSchema = z.object({
   slotStepMinutes: BookingSettingsFields.shape.slotStepMinutes.default(30),
   timeZone: BookingSettingsFields.shape.timeZone.default(""),
   location: z.string().trim().max(BOOKING_MAX_LOCATION).default(""),
+  refundCutoffHours: BookingRefundCutoffSchema.default(DEFAULT_BOOKING_REFUND_CUTOFF_HOURS),
+  onlineBookingEnabled: z.boolean().default(false),
+  // "" until a link is picked.
+  bookingSlug: z.string().max(40).default(""),
+  emailClients: z.boolean().default(true),
+  reminders: BookingRemindersSchema.default(DEFAULT_BOOKING_REMINDERS),
+  busyAllDay: z.boolean().default(false),
   updatedAt: z.string().optional(),
 })
 
@@ -130,6 +185,7 @@ export type BookingService = z.infer<typeof BookingServiceSchema>
 export type BookingWeeklyHours = z.infer<typeof WeeklyHoursSchema>
 export type BookingSettingsInput = z.infer<typeof BookingSettingsInputSchema>
 export type BookingSettings = z.infer<typeof BookingSettingsSchema>
+export type BookingReminders = z.infer<typeof BookingRemindersSchema>
 
 /** Why this service can't be saved, or null. */
 export function bookingServiceProblem(service: Pick<BookingService, "name" | "price" | "deposit">): string | null {

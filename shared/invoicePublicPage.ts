@@ -52,7 +52,8 @@ const TONE_COLORS: Record<InvoiceDisplayStatus["tone"], { bg: string; fg: string
 }
 
 // Also the frame for the appointment page (shared/appointmentPublicPage.ts).
-export function shell(title: string, body: string, accent: string): string {
+// `head` adds tags to <head> (the booking page's link preview).
+export function shell(title: string, body: string, accent: string, head = ""): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -60,6 +61,7 @@ export function shell(title: string, body: string, accent: string): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>${escapeHtml(title)}</title>
+${head}
 <style>
   :root { --accent: ${accent}; --ink: #161B1E; --muted: #5B6166; --line: #E2E1DC; --page: #F4F3EF; }
   * { box-sizing: border-box; }
@@ -395,7 +397,13 @@ function renderQuickChargePage(
   </section>
   <section class="section">
     <div class="label">${what && what !== "Payment" ? escapeHtml(what) : "Amount"}</div>
-    <div class="due">${escapeHtml(formatInvoiceMoney(invoice.total))}</div>
+    ${
+      // An appointment's rest-of-the-bill: what's left after the deposit.
+      invoice.status === "sent" && invoiceAmountPaid(invoice) > 0
+        ? `<div class="due">${escapeHtml(formatInvoiceMoney(invoiceBalanceDue(invoice)))}</div>
+    <div class="label" style="margin-top:4px">${escapeHtml(formatInvoiceMoney(invoiceAmountPaid(invoice)))} already paid of ${escapeHtml(formatInvoiceMoney(invoice.total))}</div>`
+        : `<div class="due">${escapeHtml(formatInvoiceMoney(invoice.total))}</div>`
+    }
     ${
       view.showPay && view.payPath
         ? `<form method="post" action="${escapeHtml(view.payPath)}" id="payform" style="margin-top:16px">

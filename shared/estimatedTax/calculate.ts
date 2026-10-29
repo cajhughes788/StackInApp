@@ -32,6 +32,10 @@ export type FederalEstimateInput = {
   // Tips received in the business (already part of the profit) and the
   // person's line of work, for the "no tax on tips" deduction.
   tips?: { amount: number; occupationCode: string | null }
+  // Tips from W-2 jobs reported to the employer (already part of w2Wages)
+  // and the job's line of work — what the employer reports on the W-2
+  // (Box 12 code TP, Box 14b). "000" or "none" = they don't qualify.
+  w2Tips?: { amount: number; occupationCode: string | null }
 }
 
 export type TipsDeductionStatus =
@@ -157,6 +161,15 @@ export function computeQbiDeduction(
   const aboveThreshold = taxableIncomeBeforeQbi > q.threshold[filingStatus]
   if (qualifiedBusinessIncome <= 0 || taxableIncomeBeforeQbi <= 0) return { deduction: 0, aboveThreshold }
   let deduction = qualifiedBusinessIncome * q.rate
+  // Above the threshold the deduction is held to a share of W-2 wages the
+  // business pays and its property. A one-person business usually has
+  // neither, so the limit is taken as $0 (the cautious case): the
+  // deduction phases out to nothing across the phase-in range. Paying
+  // employees or owning business property would leave some of it.
+  if (aboveThreshold) {
+    const phasedIn = Math.min(1, (taxableIncomeBeforeQbi - q.threshold[filingStatus]) / q.phaseInRange[filingStatus])
+    deduction *= 1 - phasedIn
+  }
   // §199A(i) minimum, for at least $1,000 of QBI.
   if (qualifiedBusinessIncome >= q.minimumDeductionQbiFloor) deduction = Math.max(deduction, q.minimumDeduction)
   // Never more than 20% of taxable income (conservative: the minimum is
@@ -165,30 +178,52 @@ export function computeQbiDeduction(
   return { deduction: round2(deduction), aboveThreshold }
 }
 
-/** "No tax on tips" (Schedule 1-A): up to the cap, phased out above the
- * threshold, never more than the business's net income. Income tax only. */
+/** "No tax on tips" (Schedule 1-A): qualified tips — business tips up to
+ * the business's net income, plus W-2 tips — up to the cap, then reduced
+ * $100 for each full $1,000 of modified AGI over the threshold (§224(b)(2);
+ * Schedule 1-A drops a partial $1,000). Income tax only. The status
+ * describes the business tips (the card's note); W-2 tips follow what the
+ * employer reports on the W-2. */
 export function computeTipsDeduction(
   table: EstimatedTaxYear,
   filingStatus: FilingStatus,
   tips: FederalEstimateInput["tips"],
   modifiedAgi: number,
-  businessNetIncome: number
+  businessNetIncome: number,
+  w2Tips?: FederalEstimateInput["w2Tips"]
 ): { deduction: number; status: TipsDeductionStatus } {
   const rules = table.tipsDeduction
   if (!rules) return { deduction: 0, status: "not_this_year" }
-  const amount = Math.max(0, Number(tips?.amount) || 0)
-  if (amount <= 0) return { deduction: 0, status: "no_tips" }
-  const code = tips?.occupationCode ?? null
-  if (!code) return { deduction: 0, status: "occupation_not_chosen" }
-  const occupation = code === NO_TIPPED_OCCUPATION ? null : findTippedOccupation(code)
-  if (!occupation) return { deduction: 0, status: "not_tipped_occupation" }
-  if (occupation.specifiedServiceRisk) return { deduction: 0, status: "specified_service" }
   const threshold = rules.phaseOutThreshold[filingStatus]
+
+  // W-2 tips: qualify when the job's line of work is on the list (the
+  // employer's Box 14b; it reports "000" when they don't).
+  const w2Amount = Math.max(0, Number(w2Tips?.amount) || 0)
+  const w2Code = w2Tips?.occupationCode ?? null
+  const w2Qualified = w2Amount > 0 && w2Code && w2Code !== NO_TIPPED_OCCUPATION && findTippedOccupation(w2Code) ? w2Amount : 0
+
+  // Business tips: the business's own line of work.
+  const amount = Math.max(0, Number(tips?.amount) || 0)
+  const code = tips?.occupationCode ?? null
+  const occupation = code && code !== NO_TIPPED_OCCUPATION ? findTippedOccupation(code) : null
+  let status: TipsDeductionStatus
+  let businessQualified = 0
+  if (amount <= 0) status = "no_tips"
+  else if (!code) status = "occupation_not_chosen"
+  else if (!occupation) status = "not_tipped_occupation"
+  else if (occupation.specifiedServiceRisk) status = "specified_service"
+  else {
+    status = "applied"
+    businessQualified = Math.max(0, Math.min(amount, Math.max(0, businessNetIncome)))
+  }
+  if (businessQualified + w2Qualified <= 0) return { deduction: 0, status }
   if (threshold == null) return { deduction: 0, status: "married_separately" }
-  const cap = Math.max(0, rules.maxDeduction - rules.phaseOutRate * Math.max(0, modifiedAgi - threshold))
-  if (cap <= 0) return { deduction: 0, status: "phased_out" }
-  const deduction = round2(Math.min(amount, cap, Math.max(0, businessNetIncome)))
-  return { deduction, status: deduction > 0 ? "applied" : "no_tips" }
+  const allowed = Math.min(businessQualified + w2Qualified, rules.maxDeduction)
+  if (allowed <= 0) return { deduction: 0, status: "no_tips" }
+  const reduction = Math.floor(Math.max(0, modifiedAgi - threshold) / 1000) * 1000 * rules.phaseOutRate
+  const deduction = round2(Math.max(0, allowed - reduction))
+  if (deduction <= 0) return { deduction: 0, status: "phased_out" }
+  return { deduction, status: businessQualified > 0 ? "applied" : status }
 }
 
 export function computeChildTaxCredit(
@@ -224,7 +259,7 @@ export function computeFederalEstimate(table: EstimatedTaxYear, input: FederalEs
   const qualifiedBusinessIncome = round2(Math.max(0, profit - se.deduction))
   // Comes off before the QBI deduction, whose limit uses taxable income
   // after it. Net business income is held to QBI (the cautious reading).
-  const tipsResult = computeTipsDeduction(table, filingStatus, input.tips, adjustedGrossIncome, qualifiedBusinessIncome)
+  const tipsResult = computeTipsDeduction(table, filingStatus, input.tips, adjustedGrossIncome, qualifiedBusinessIncome, input.w2Tips)
   const taxableIncomeBeforeQbi = round2(Math.max(0, adjustedGrossIncome - federal.standardDeduction - tipsResult.deduction))
   const qbi = computeQbiDeduction(table, filingStatus, qualifiedBusinessIncome, taxableIncomeBeforeQbi)
   const taxableIncome = round2(Math.max(0, taxableIncomeBeforeQbi - qbi.deduction))

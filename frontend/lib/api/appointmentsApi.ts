@@ -6,6 +6,7 @@ import {
   type AppointmentCreateInput,
   type AppointmentType,
 } from "@shared/schemas/appointment"
+import { InvoiceSchema, type InvoiceType } from "@shared/schemas/invoice"
 
 // Appointments — see shared/schemas/appointment.ts. apiFetch, not tryWrite:
 // whether a time is free is decided by the server, so a queued replay could
@@ -43,22 +44,33 @@ export async function getAppointments(workspaceId: string): Promise<AppointmentT
 export async function createAppointment(
   workspaceId: string,
   input: AppointmentCreateInput
-): Promise<{ appointment: AppointmentType; shareUrl: string | null }> {
-  const res = await apiFetch<{ appointment: unknown; shareUrl: string | null }>(
+): Promise<{ appointment: AppointmentType; shareUrl: string | null; email: AppointmentEmailResult }> {
+  const res = await apiFetch<{ appointment: unknown; shareUrl: string | null; email?: AppointmentEmailResult }>(
     `${API_ENDPOINTS.appointments.create}?${query(workspaceId)}`,
     { timeout: APPOINTMENT_TIMEOUT_MS, method: "POST", body: JSON.stringify(input) }
   )
-  return { appointment: requireAppointment(res.appointment), shareUrl: res.shareUrl ?? null }
+  return { appointment: requireAppointment(res.appointment), shareUrl: res.shareUrl ?? null, email: res.email ?? "none" }
 }
 
+// Whether booking emailed the client their link (appointmentEmailService.ts).
+export type AppointmentEmailResult = "sent" | "failed" | "off" | "none"
+
+/** Also returns the appointment's invoice (its deposit) once it has one. */
 export async function updateAppointment(
   workspaceId: string,
   appointmentId: string,
   action: AppointmentAction
-): Promise<{ appointment: AppointmentType; shareUrl: string | null }> {
-  const res = await apiFetch<{ appointment: unknown; shareUrl: string | null }>(
+): Promise<{ appointment: AppointmentType; shareUrl: string | null; invoice: InvoiceType | null; emailedTo: string | null }> {
+  const res = await apiFetch<{ appointment: unknown; shareUrl: string | null; invoice?: unknown; emailedTo?: string | null }>(
     `${API_ENDPOINTS.appointments.update}?${query(workspaceId, appointmentId)}`,
     { timeout: APPOINTMENT_TIMEOUT_MS, method: "POST", body: JSON.stringify(action) }
   )
-  return { appointment: requireAppointment(res.appointment), shareUrl: res.shareUrl ?? null }
+  const invoice = res.invoice ? InvoiceSchema.safeParse(res.invoice) : null
+  return {
+    appointment: requireAppointment(res.appointment),
+    shareUrl: res.shareUrl ?? null,
+    invoice: invoice?.success ? invoice.data : null,
+    // "finish" with "later": where the invoice was emailed.
+    emailedTo: res.emailedTo ?? null,
+  }
 }

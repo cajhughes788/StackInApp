@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { AlertTriangle, CheckCircle2, ChevronRight, Clock, EyeOff, ReceiptText } from "lucide-react"
+import { AlertTriangle, Banknote, CheckCircle2, ChevronRight, Clock, EyeOff, ReceiptText } from "lucide-react"
 
 import { getPlaidItems } from "@/lib/api/plaidApi"
 
@@ -21,6 +21,8 @@ import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
 import { localToday } from "@/components/invoices/invoice-ui"
 import { formatInvoiceMoney } from "@shared/invoiceDisplay"
 import { invoiceBalanceDue, invoiceDueNow } from "@shared/invoicePayments"
+import { useAppointmentsStore } from "@/lib/stores/useAppointmentsStore"
+import { appointmentLeftToPay, appointmentNeedsPayment } from "@shared/appointmentCheckout"
 
 // One review list for everything the bank sent over: deposits (income) and
 // charges and refunds (expenses). Shown on both the Income and Expenses tabs
@@ -102,6 +104,21 @@ export default function NeedsYouPanel() {
       ),
     [invoices, today]
   )
+  // Appointments whose time is over but nobody finished them, or finished
+  // by QR code and never paid (shared/appointmentCheckout.ts). Home loads
+  // the appointments in the background (useWarmClientsAndBooking).
+  const appointments = useAppointmentsStore((s) => (activeWorkspaceId ? s.byWorkspaceId[activeWorkspaceId]?.appointments : undefined))
+  const unpaidAppointments = useMemo(() => {
+    const nowIso = new Date().toISOString()
+    const byId = new Map((invoices ?? []).map((invoice) => [invoice.id, invoice]))
+    return (appointments ?? []).flatMap((appointment) => {
+      const invoice = appointment.invoiceId ? byId.get(appointment.invoiceId) ?? null : null
+      if (!appointmentNeedsPayment(appointment, invoice, nowIso)) return []
+      const left = appointment.status === "completed" && invoice ? invoiceBalanceDue(invoice) : appointmentLeftToPay(appointment, invoice)
+      return [{ appointment, left }]
+    })
+  }, [appointments, invoices])
+  const unpaidAppointmentsTotal = unpaidAppointments.reduce((sum, item) => sum + Math.round(item.left * 100), 0) / 100
   const overdueTotal = overdue.reduce((sum, invoice) => sum + Math.round(invoiceBalanceDue(invoice) * 100), 0) / 100
   const total =
     (incomeCount ?? 0) +
@@ -110,7 +127,8 @@ export default function NeedsYouPanel() {
     openDisputes.length +
     failedPayments.length +
     overdueDeposits.length +
-    (overdue.length > 0 ? 1 : 0)
+    (overdue.length > 0 ? 1 : 0) +
+    (unpaidAppointments.length > 0 ? 1 : 0)
 
   async function hideMissingReceipts() {
     if (!activeWorkspaceId || !settings) return
@@ -262,6 +280,32 @@ export default function NeedsYouPanel() {
         </Link>
       ) : null}
 
+      {unpaidAppointments.length > 0 ? (
+        <Link
+          href={
+            unpaidAppointments.length === 1
+              ? `/app/booking/view?id=${encodeURIComponent(unpaidAppointments[0].appointment.id)}`
+              : "/app/booking"
+          }
+          className="flex items-center gap-3 rounded-[18px] border border-card-border bg-card p-4 hover:bg-muted/40"
+        >
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400">
+            <Banknote className="size-5" aria-hidden="true" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-medium text-foreground">
+              {unpaidAppointments.length === 1
+                ? `${unpaidAppointments[0].appointment.clientName}'s ${unpaidAppointments[0].appointment.serviceName} ended. Get paid?`
+                : `${unpaidAppointments.length} appointments to get paid for`}
+            </span>
+            <span className="block text-sm text-muted-foreground">
+              {unpaidAppointmentsTotal > 0 ? `${formatInvoiceMoney(unpaidAppointmentsTotal)} not collected yet` : "Finish them to close them out"}
+            </span>
+          </span>
+          <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        </Link>
+      ) : null}
+
       <PlaidIncomeReviewPanel />
       <PlaidPendingTransactionsPanel />
 
@@ -288,9 +332,10 @@ export default function NeedsYouPanel() {
           onClick={() => void hideMissingReceipts()}
           aria-label="Stop showing missing receipts here"
           title="Stop showing missing receipts here"
-          className="mr-2 flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+          className="mr-2 flex shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl px-2 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
         >
           <EyeOff className="size-4" aria-hidden="true" />
+          <span className="text-[11px] font-medium leading-none">Hide</span>
         </button>
         </div>
       ) : null}

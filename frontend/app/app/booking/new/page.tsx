@@ -1,18 +1,17 @@
 "use client"
 
-import { Suspense, useEffect, useState } from "react"
+import { Suspense, useEffect, useMemo } from "react"
 import { useRouter } from "next/navigation"
 
 import { NewAppointmentForm } from "@/components/booking/new-appointment-form"
-import { InvoicesPage, cardClass, useInvoicesWorkspace } from "@/components/invoices/invoice-ui"
+import { InvoicesPage, cardClass, useInvoicesWorkspace, useQueryParam } from "@/components/invoices/invoice-ui"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { createAppointment } from "@/lib/api/appointmentsApi"
-import { getBookingSettings } from "@/lib/api/bookingApi"
-import { useAppointmentsStore } from "@/lib/stores/useAppointmentsStore"
+import { createAppointmentInBackground, appointmentDraft } from "@/lib/domain/appointmentService"
+import { useBookingSettingsStore } from "@/lib/stores/useBookingSettingsStore"
+import { useBusyCalendarsStore } from "@/lib/stores/useBusyCalendarsStore"
 import { useClientsStore } from "@/lib/stores/useClientsStore"
 import { cn } from "@/lib/utils"
-import type { BookingSettings } from "@shared/schemas/booking"
 
 export default function NewAppointmentPageRoute() {
   return (
@@ -25,35 +24,33 @@ export default function NewAppointmentPageRoute() {
 function NewAppointmentPage() {
   const router = useRouter()
   const { ready, workspaceId } = useInvoicesWorkspace()
-  const upsert = useAppointmentsStore((state) => state.upsert)
+  // "Fix it" on a booking the server refused brings it back here.
+  const retry = useQueryParam("retry")
+  const draft = useMemo(() => (retry ? appointmentDraft(retry) : null), [retry])
+  // A spot tapped on the calendar.
+  const pickedDate = useQueryParam("date")
+  const pickedTime = useQueryParam("time")
   const clientsEntry = useClientsStore((state) => (workspaceId ? state.byWorkspaceId[workspaceId] : undefined))
   const loadClients = useClientsStore((state) => state.load)
-  const [settings, setSettings] = useState<BookingSettings | null>(null)
-  const [loadStatus, setLoadStatus] = useState<"loading" | "ready" | "error">("loading")
-  const [loadAttempt, setLoadAttempt] = useState(0)
+  const settingsEntry = useBookingSettingsStore((state) => (workspaceId ? state.byWorkspaceId[workspaceId] : undefined))
+  const loadSettings = useBookingSettingsStore((state) => state.load)
+  // Busy times from the owner's own calendars, for the "you're busy" warning.
+  const busyTimes = useBusyCalendarsStore((state) => (workspaceId ? state.byWorkspaceId[workspaceId]?.busy : undefined))
+  const loadBusy = useBusyCalendarsStore((state) => state.load)
+  useEffect(() => {
+    if (workspaceId) void loadBusy(workspaceId).catch(() => {})
+  }, [loadBusy, workspaceId])
+  const settings = settingsEntry?.settings ?? null
+  const loadStatus = settingsEntry?.status ?? "loading"
 
   useEffect(() => {
     if (workspaceId) void loadClients(workspaceId).catch(() => {})
   }, [loadClients, workspaceId])
 
-  // Services, hours and the time zone for this business.
+  // Services, hours and the time zone: the phone's copy shows at once.
   useEffect(() => {
-    if (!workspaceId) return
-    let cancelled = false
-    setLoadStatus("loading")
-    getBookingSettings(workspaceId)
-      .then((loaded) => {
-        if (cancelled) return
-        setSettings(loaded)
-        setLoadStatus("ready")
-      })
-      .catch(() => {
-        if (!cancelled) setLoadStatus("error")
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [workspaceId, loadAttempt])
+    if (workspaceId) void loadSettings(workspaceId).catch(() => {})
+  }, [loadSettings, workspaceId])
 
   return (
     <InvoicesPage
@@ -65,21 +62,40 @@ function NewAppointmentPage() {
     >
       {loadStatus === "ready" && settings && workspaceId ? (
         <NewAppointmentForm
+          key={retry ?? "new"}
           settings={settings}
           savedClients={clientsEntry?.clients ?? []}
-          onCreate={async (input) => {
-            const result = await createAppointment(workspaceId, input)
-            upsert(workspaceId, result.appointment)
-            // A new client may have been saved with it.
-            void loadClients(workspaceId, { force: true }).catch(() => {})
-            router.replace(`/app/booking/view?id=${encodeURIComponent(result.appointment.id)}`)
-            return result
+          draft={draft}
+          initialDate={pickedDate && /^\d{4}-\d{2}-\d{2}$/.test(pickedDate) ? pickedDate : null}
+          initialTime={pickedTime && /^([01]\d|2[0-3]):[0-5]\d$/.test(pickedTime) ? pickedTime : null}
+          busy={busyTimes}
+          onCreate={(input) => {
+            const result = createAppointmentInBackground({
+              workspaceId,
+              input,
+              settings,
+              savedClients: clientsEntry?.clients ?? [],
+              onFix: (mutationId) => router.push(`/app/booking/new?retry=${encodeURIComponent(mutationId)}`),
+            })
+            if ("error" in result) return result.error
+            const { appointment } = result
+            // Emailed (once the server books it); or else the share sheet
+            // opens on the appointment (emails off, or a phone number to
+            // text). No contact: just booked.
+            const arrival =
+              settings.emailClients && appointment.clientEmail
+                ? "sent"
+                : !settings.emailClients || appointment.clientPhone
+                  ? "share"
+                  : null
+            router.replace(`/app/booking/view?id=${encodeURIComponent(appointment.id)}${arrival ? `&then=${arrival}` : ""}`)
+            return null
           }}
         />
       ) : loadStatus === "error" ? (
         <section className={cn(cardClass, "space-y-3 text-center")}>
           <p className="text-sm text-muted-foreground">Couldn&apos;t load your services.</p>
-          <Button type="button" variant="outline" className="rounded-full" onClick={() => setLoadAttempt((n) => n + 1)}>
+          <Button type="button" variant="outline" className="rounded-full" onClick={() => workspaceId && void loadSettings(workspaceId).catch(() => {})}>
             Try again
           </Button>
         </section>

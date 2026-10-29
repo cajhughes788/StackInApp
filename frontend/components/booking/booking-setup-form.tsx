@@ -1,12 +1,15 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Plus, X } from "lucide-react"
+import Link from "next/link"
+import { ChevronDown, Minus, Plus, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { OnlineBookingSection } from "@/components/booking/online-booking-section"
 import { PickerInput } from "@/components/booking/picker-input"
+import { WebsiteButtonSection } from "@/components/booking/website-button-section"
 import { useToast } from "@/hooks/use-toast"
 import { cardClass, fieldLabelClass, localToday, softInputClass } from "@/components/invoices/invoice-ui"
 import { cn } from "@/lib/utils"
@@ -16,7 +19,10 @@ import {
   BOOKING_MAX_BLOCKS_PER_DAY,
   BOOKING_MAX_DAYS_OFF,
   BOOKING_MAX_LOCATION,
+  BOOKING_MAX_REMINDERS,
   BOOKING_MAX_SERVICES,
+  BOOKING_REMINDER_OPTIONS,
+  BOOKING_REFUND_CUTOFF_OPTIONS,
   BOOKING_SLOT_STEPS,
   BookingSettingsSchema,
   bookingDatesInRange,
@@ -30,6 +36,8 @@ import {
   type BookingSettingsInput,
 } from "@shared/schemas/booking"
 import type { InvoiceSettings } from "@shared/schemas/invoice"
+import { cancellationPolicyText, refundCutoffLabel } from "@shared/appointmentDeposits"
+import { bookingSlugProblem } from "@shared/onlineBooking"
 
 const LENGTHS = [15, 30, 45, 60, 75, 90, 120, 150, 180, 240]
 const BUFFERS = [0, 5, 10, 15, 30, 45, 60]
@@ -196,19 +204,30 @@ function draftToService(draft: ServiceDraft): { service: BookingService } | { er
 export function BookingSetupForm({
   initial,
   invoiceSettings,
+  onlinePayments,
   onSave,
 }: {
   initial: BookingSettings
   // New services start from its default deposit.
   invoiceSettings: InvoiceSettings | null
+  // Card payments are on (Stripe connected): clients pay deposits from their link.
+  onlinePayments: boolean
   onSave: (input: BookingSettingsInput) => Promise<BookingSettings>
 }) {
   const { toast } = useToast()
   const [draft, setDraft] = useState<Draft>(() => toDraft(initial))
+  // What's saved: the booking link works only once it's saved and on.
+  const [saved, setSaved] = useState<BookingSettings>(initial)
   const [editing, setEditing] = useState<{ service: ServiceDraft; isNew: boolean } | null>(null)
   // A single day leaves "to" blank.
+  // One day off, or a range (vacation).
+  const [dayOffMode, setDayOffMode] = useState<"one" | "range">("one")
   const [dayOffFrom, setDayOffFrom] = useState("")
   const [dayOffTo, setDayOffTo] = useState("")
+  // "Request these days off?" and "Open this back up?" confirmations.
+  const [confirmingDaysOff, setConfirmingDaysOff] = useState(false)
+  const [reopening, setReopening] = useState<string | null>(null)
+  const [showDaysOff, setShowDaysOff] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const today = localToday()
@@ -231,13 +250,16 @@ export function BookingSetupForm({
     [draft.weeklyHours]
   )
   const hasDayProblem = BOOKING_DAYS.some((day) => dayProblems[day])
+  const hasLinkProblem =
+    (!!draft.bookingSlug && bookingSlugProblem(draft.bookingSlug) !== null) ||
+    (draft.onlineBookingEnabled && (!draft.bookingSlug || !draft.services.some((service) => service.active)))
   const upcomingDaysOff = draft.daysOff.filter((date) => date >= today)
   const dayOffRanges = bookingDayOffRanges(upcomingDaysOff)
   const newDaysOff = /^\d{4}-\d{2}-\d{2}$/.test(dayOffFrom) && dayOffFrom >= today
-    ? bookingDatesInRange(dayOffFrom, dayOffTo || dayOffFrom)
+    ? bookingDatesInRange(dayOffFrom, dayOffMode === "range" && dayOffTo ? dayOffTo : dayOffFrom)
     : []
   const dayOffError =
-    dayOffFrom && dayOffTo && dayOffTo < dayOffFrom
+    dayOffMode === "range" && dayOffFrom && dayOffTo && dayOffTo < dayOffFrom
       ? "The last day off can't be before the first."
       : new Set([...upcomingDaysOff, ...newDaysOff]).size > BOOKING_MAX_DAYS_OFF
         ? "That's more than a year of days off."
@@ -258,22 +280,55 @@ export function BookingSetupForm({
     setEditing(null)
   }
 
+  // Picking the first day of a range fills in the last too, so its
+  // picker opens on that month (and the range is never backwards).
+  function pickDayOffFrom(value: string) {
+    setDayOffFrom(value)
+    if (dayOffMode === "range" && value && (!dayOffTo || dayOffTo < value)) setDayOffTo(value)
+  }
+
+  // Confirmed days off (or ones opened back up) save at once, so clients
+  // can't book them from that moment — along with anything else changed.
+  function saveDaysOff(daysOff: string[], message: string) {
+    const next = { ...draft, daysOff }
+    setDraft(next)
+    if (saving || hasDayProblem || hasLinkProblem || editing) {
+      setSaveError("Saved here, but finish the changes above and tap Save to make it count.")
+      return
+    }
+    void save(next, message)
+  }
+
   // Overlapping or back-to-back ranges join up when they're shown.
   function addDaysOff() {
     if (newDaysOff.length === 0 || dayOffError) return
-    update({ daysOff: [...new Set([...upcomingDaysOff, ...newDaysOff])].sort() })
+    saveDaysOff([...new Set([...upcomingDaysOff, ...newDaysOff])].sort(), "Days off saved")
     setDayOffFrom("")
     setDayOffTo("")
+    setConfirmingDaysOff(false)
+    setShowDaysOff(true)
   }
 
-  async function save() {
-    if (saving || hasDayProblem || editing) return
+  function reopenDaysOff(range: { start: string; end: string }) {
+    saveDaysOff(
+      upcomingDaysOff.filter((date) => date < range.start || date > range.end),
+      "Open for booking again"
+    )
+    setReopening(null)
+  }
+
+  async function save(next: Draft = draft, message = "Booking saved") {
+    if (saving || hasDayProblem || hasLinkProblem || editing) return
     setSaving(true)
     setSaveError(null)
     try {
-      const saved = await onSave({ ...draft, daysOff: upcomingDaysOff })
-      setDraft(toDraft(saved))
-      toast({ title: "Booking saved" })
+      // "All-day events block the whole day" saves on its own, beside the
+      // busy calendars (BusyCalendarsSection): never sent from here.
+      const { busyAllDay: _busyAllDay, ...rest } = next
+      const result = await onSave({ ...rest, daysOff: next.daysOff.filter((date) => date >= today) })
+      setDraft(toDraft(result))
+      setSaved(result)
+      toast({ title: message })
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "Couldn't save. Check your connection and try again.")
     } finally {
@@ -290,8 +345,8 @@ export function BookingSetupForm({
       }}
     >
       <p className="text-sm leading-relaxed text-muted-foreground">
-        Set up what customers can book and when you&apos;re open. Your booking link comes next — nothing here is
-        visible to customers yet.
+        Set up what customers can book and when you&apos;re open. Customers see your services and open times once
+        you turn on online booking below.
       </p>
 
       <section className={cn(cardClass, "space-y-3")}>
@@ -465,61 +520,163 @@ export function BookingSetupForm({
 
       <section className={cn(cardClass, "space-y-3")}>
         <h2 className="text-sm font-semibold text-muted-foreground">Days off</h2>
-        <div className="flex items-end gap-2">
-          <label className={cn(fieldLabelClass, "min-w-0 flex-1")}>
-            From
+        <div role="radiogroup" aria-label="Days off" className="grid grid-cols-2 gap-1 rounded-[14px] bg-muted p-1">
+          {(
+            [
+              { value: "one", label: "One day" },
+              { value: "range", label: "Several days" },
+            ] as const
+          ).map((option) => {
+            const active = dayOffMode === option.value
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => {
+                  setDayOffMode(option.value)
+                  setConfirmingDaysOff(false)
+                  if (option.value === "range" && dayOffFrom && (!dayOffTo || dayOffTo < dayOffFrom)) setDayOffTo(dayOffFrom)
+                }}
+                className={cn(
+                  "h-10 rounded-[10px] text-sm transition-colors",
+                  active ? "bg-card font-semibold text-foreground shadow-sm" : "text-muted-foreground"
+                )}
+              >
+                {option.label}
+              </button>
+            )
+          })}
+        </div>
+        {dayOffMode === "one" ? (
+          <label className={fieldLabelClass}>
+            Day off
             <PickerInput
               type="date"
               min={today}
               placeholder="Pick a date"
               value={dayOffFrom}
-              onChange={(event) => setDayOffFrom(event.target.value)}
+              onChange={(event) => {
+                setDayOffFrom(event.target.value)
+                setConfirmingDaysOff(false)
+              }}
             />
           </label>
-          <label className={cn(fieldLabelClass, "min-w-0 flex-1")}>
-            To
-            <PickerInput
-              type="date"
-              min={dayOffFrom || today}
-              placeholder="Optional"
-              value={dayOffTo}
-              onChange={(event) => setDayOffTo(event.target.value)}
-            />
-          </label>
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          className="h-10 w-full rounded-full border-card-border bg-card font-semibold"
-          disabled={newDaysOff.length === 0 || dayOffError !== null}
-          onClick={addDaysOff}
-        >
-          Add days off
-        </Button>
+        ) : (
+          <div className="flex items-end gap-2">
+            <label className={cn(fieldLabelClass, "min-w-0 flex-1")}>
+              From
+              <PickerInput
+                type="date"
+                min={today}
+                placeholder="First day"
+                value={dayOffFrom}
+                onChange={(event) => {
+                  pickDayOffFrom(event.target.value)
+                  setConfirmingDaysOff(false)
+                }}
+              />
+            </label>
+            <label className={cn(fieldLabelClass, "min-w-0 flex-1")}>
+              To
+              <PickerInput
+                type="date"
+                min={dayOffFrom || today}
+                placeholder="Last day"
+                value={dayOffTo}
+                onChange={(event) => {
+                  setDayOffTo(event.target.value)
+                  setConfirmingDaysOff(false)
+                }}
+              />
+            </label>
+          </div>
+        )}
+        {confirmingDaysOff && newDaysOff.length > 0 ? (
+          <div className="space-y-2 rounded-[14px] bg-muted p-3">
+            <p className="text-sm text-foreground">
+              Request {newDaysOff.length === 1 ? "this day" : "these days"} off?{" "}
+              <span className="font-semibold">{formatDayOffRange(newDaysOff[0], newDaysOff[newDaysOff.length - 1])}</span>
+            </p>
+            <p className="text-xs text-muted-foreground">Clients won&apos;t be able to book {newDaysOff.length === 1 ? "this day" : "these days"}.</p>
+            <div className="flex gap-2">
+              <Button type="button" className="h-10 flex-1 rounded-full" disabled={saving} onClick={addDaysOff}>
+                Yes
+              </Button>
+              <Button type="button" variant="outline" className="h-10 flex-1 rounded-full" onClick={() => setConfirmingDaysOff(false)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 w-full rounded-full border-card-border bg-card font-semibold"
+            disabled={newDaysOff.length === 0 || dayOffError !== null}
+            onClick={() => setConfirmingDaysOff(true)}
+          >
+            {dayOffMode === "one" ? "Add day off" : "Add days off"}
+          </Button>
+        )}
         {dayOffError ? <p className="text-sm text-destructive">{dayOffError}</p> : null}
         {dayOffRanges.length > 0 ? (
-          <ul className="flex flex-wrap gap-2">
-            {dayOffRanges.map((range) => {
-              const label = formatDayOffRange(range.start, range.end)
-              return (
-                <li key={range.start} className="flex items-center gap-1 rounded-full bg-muted py-1 pl-3 pr-1 text-sm">
-                  {label}
-                  <button
-                    type="button"
-                    aria-label={`Remove ${label}`}
-                    className="flex size-7 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
-                    onClick={() =>
-                      update({ daysOff: draft.daysOff.filter((date) => date < range.start || date > range.end) })
-                    }
-                  >
-                    <X className="size-3.5" aria-hidden="true" />
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
+          <div className="rounded-[14px] border border-card-border">
+            <button
+              type="button"
+              aria-expanded={showDaysOff}
+              className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-sm font-medium text-foreground"
+              onClick={() => {
+                setShowDaysOff((open) => !open)
+                setReopening(null)
+              }}
+            >
+              Requested days off ({dayOffRanges.length})
+              <ChevronDown className={cn("size-4 text-muted-foreground transition-transform", showDaysOff && "rotate-180")} aria-hidden="true" />
+            </button>
+            {showDaysOff ? (
+              <ul className="divide-y divide-card-border border-t border-card-border">
+                {dayOffRanges.map((range) => {
+                  const label = formatDayOffRange(range.start, range.end)
+                  return (
+                    <li key={range.start} className="px-3 py-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm text-foreground">{label}</span>
+                        {reopening === range.start ? null : (
+                          <button
+                            type="button"
+                            aria-label={`Open ${label} back up`}
+                            className="flex size-8 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                            onClick={() => setReopening(range.start)}
+                          >
+                            <Minus className="size-4" aria-hidden="true" />
+                          </button>
+                        )}
+                      </div>
+                      {reopening === range.start ? (
+                        <div className="mt-2 space-y-2">
+                          <p className="text-sm text-muted-foreground">
+                            Open {range.start === range.end ? "this day" : "these days"} back up for booking?
+                          </p>
+                          <div className="flex gap-2">
+                            <Button type="button" className="h-9 flex-1 rounded-full" disabled={saving} onClick={() => reopenDaysOff(range)}>
+                              Yes
+                            </Button>
+                            <Button type="button" variant="outline" className="h-9 flex-1 rounded-full" onClick={() => setReopening(null)}>
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      ) : null}
+                    </li>
+                  )
+                })}
+              </ul>
+            ) : null}
+          </div>
         ) : (
-          <p className="text-xs text-muted-foreground">Holidays or vacation: no one can book these dates. For one day, leave To blank.</p>
+          <p className="text-xs text-muted-foreground">Holidays or vacation: no one can book these dates.</p>
         )}
       </section>
 
@@ -599,11 +756,144 @@ export function BookingSetupForm({
         <p className="text-xs text-muted-foreground">Your hours are in this time zone, wherever your customer is.</p>
       </section>
 
+      <section className={cn(cardClass, "space-y-3")}>
+        <h2 className="text-sm font-semibold text-muted-foreground">Deposits</h2>
+        <label className={fieldLabelClass}>
+          Cancellation
+          <select
+            className={softInputClass}
+            value={draft.refundCutoffHours === null ? "never" : String(draft.refundCutoffHours)}
+            onChange={(event) =>
+              update({ refundCutoffHours: event.target.value === "never" ? null : Number(event.target.value) })
+            }
+          >
+            {[...new Set<number>([...BOOKING_REFUND_CUTOFF_OPTIONS, ...(draft.refundCutoffHours === null ? [] : [draft.refundCutoffHours])])]
+              .sort((a, b) => a - b)
+              .map((hours) => (
+                <option key={hours} value={hours}>
+                  Free up to {refundCutoffLabel(hours)} before
+                </option>
+              ))}
+            <option value="never">Deposit is never refunded</option>
+          </select>
+        </label>
+        <p className="text-xs text-muted-foreground">
+          Clients see: &ldquo;{cancellationPolicyText(draft.refundCutoffHours)}&rdquo; If you cancel, they always get the
+          deposit back.
+        </p>
+        {!onlinePayments && draft.services.some((service) => service.deposit.type !== "none") ? (
+          <p className="rounded-[12px] bg-amber-100 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+            Connect Stripe to take deposits by card when clients confirm.{" "}
+            <Link href="/app/invoices/settings" className="font-medium underline">
+              Set up online payments
+            </Link>
+          </p>
+        ) : null}
+      </section>
+
+      <section className={cn(cardClass, "space-y-3")}>
+        <h2 className="text-sm font-semibold text-muted-foreground">Client emails</h2>
+        <label className="flex items-center justify-between gap-3">
+          <span className="min-w-0">
+            <span className="block text-sm font-medium text-foreground">Email clients automatically</span>
+            <span className="block text-xs text-muted-foreground">
+              When you book, 521 emails the client their link: to confirm, or their booking details. They&apos;re also
+              emailed if you cancel. Off, you share the link yourself.
+            </span>
+          </span>
+          <Switch
+            checked={draft.emailClients}
+            onCheckedChange={(emailClients) => update({ emailClients })}
+            aria-label="Email clients automatically"
+          />
+        </label>
+      </section>
+
+      <section className={cn(cardClass, "space-y-3")}>
+        <h2 className="text-sm font-semibold text-muted-foreground">Reminders</h2>
+        <label className="flex items-center justify-between gap-3">
+          <span className="min-w-0">
+            <span className="block text-sm font-medium text-foreground">Remind clients</span>
+            <span className="block text-xs text-muted-foreground">
+              521 emails clients before confirmed appointments. If a client has no email, you get a notification at
+              your first reminder so you can text them.
+            </span>
+          </span>
+          <Switch
+            checked={draft.reminders.length > 0}
+            onCheckedChange={(on) => update({ reminders: on ? [24] : [] })}
+            aria-label="Remind clients"
+          />
+        </label>
+        {draft.reminders.map((hours, index) => {
+          // The other reminder's time can't be picked twice.
+          const other = draft.reminders.find((_, at) => at !== index)
+          const setAt = (next: number | null) => {
+            const list = draft.reminders.flatMap((value, at) => (at === index ? (next === null ? [] : [next]) : [value]))
+            update({ reminders: [...list].sort((a, b) => b - a) })
+          }
+          return (
+            <div key={`${index}-${hours}`} className="flex items-end gap-2">
+              <label className={cn(fieldLabelClass, "min-w-0 flex-1")}>
+                {index === 0 ? "First reminder" : "Second reminder"}
+                <select className={softInputClass} value={hours} onChange={(event) => setAt(Number(event.target.value))}>
+                  {BOOKING_REMINDER_OPTIONS.filter((option) => option.hours !== other).map((option) => (
+                    <option key={option.hours} value={option.hours}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {index > 0 ? (
+                <button
+                  type="button"
+                  aria-label="Remove the second reminder"
+                  className="mb-1 flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                  onClick={() => setAt(null)}
+                >
+                  <Minus className="size-4" aria-hidden="true" />
+                </button>
+              ) : null}
+            </div>
+          )
+        })}
+        {draft.reminders.length > 0 && draft.reminders.length < BOOKING_MAX_REMINDERS ? (
+          <button
+            type="button"
+            className="flex items-center gap-1.5 text-sm font-medium text-foreground"
+            onClick={() => {
+              // Starts at 2 hours before (a day-of nudge), else the next time closer in.
+              const first = draft.reminders[0]
+              const hours = BOOKING_REMINDER_OPTIONS.map((option) => option.hours)
+              const pick = [2, ...hours.filter((value) => value < first), ...hours].find((value) => value !== first)!
+              update({ reminders: [first, pick].sort((a, b) => b - a) })
+            }}
+          >
+            <Plus className="size-4" aria-hidden="true" />
+            Add a second reminder
+          </button>
+        ) : null}
+      </section>
+
+      <OnlineBookingSection
+        enabled={draft.onlineBookingEnabled}
+        slug={draft.bookingSlug}
+        savedEnabled={saved.onlineBookingEnabled}
+        savedSlug={saved.bookingSlug}
+        businessName={invoiceSettings?.businessName ?? ""}
+        hasActiveService={draft.services.some((service) => service.active)}
+        onChange={update}
+      />
+
+      {draft.onlineBookingEnabled && saved.onlineBookingEnabled && saved.bookingSlug && draft.bookingSlug === saved.bookingSlug ? (
+        <WebsiteButtonSection slug={saved.bookingSlug} accentColor={invoiceSettings?.accentColor ?? ""} />
+      ) : null}
+
       {saveError ? <p className="text-sm text-destructive">{saveError}</p> : null}
       {editing ? <p className="text-sm text-muted-foreground">Finish the service you&apos;re editing first.</p> : null}
       <Button
         type="submit"
-        disabled={saving || hasDayProblem || editing !== null}
+        disabled={saving || hasDayProblem || hasLinkProblem || editing !== null}
         className="h-[52px] w-full rounded-full text-base font-semibold"
       >
         {saving ? "Saving..." : "Save"}

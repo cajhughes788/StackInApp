@@ -1,6 +1,7 @@
 import { db } from "../admin"
 import { assertWorkspaceMembership } from "../lib/workspaceMembership"
-import { BadRequestError, ForbiddenError } from "../lib/httpErrors"
+import { BadRequestError, ConflictError, ForbiddenError } from "../lib/httpErrors"
+import { bookingSlugProblem } from "@shared/onlineBooking"
 import {
   BookingSettingsInputSchema,
   BOOKING_MAX_LOCATION,
@@ -17,6 +18,13 @@ import {
 
 export function bookingSettingsDoc(workspaceId: string) {
   return db.collection("workspaces").doc(workspaceId).collection("settings").doc("booking")
+}
+
+// bookingLinks/{slug} → { workspaceId }: who owns each public booking link,
+// so two businesses can't share one. No Firestore rule allows reading it —
+// only the server does.
+export function bookingLinkDoc(slug: string) {
+  return db.collection("bookingLinks").doc(slug)
 }
 
 function formatIssues(error: { issues: Array<{ path: PropertyKey[]; message: string }> }) {
@@ -72,15 +80,48 @@ export async function saveBookingSettings(workspaceId: string, uid: string, raw:
   }
   const timeZone = parsed.data.timeZone || (await workspaceTimeZone(workspaceId))
   // An app version without the address field leaves the saved one alone.
-  const location = parsed.data.location ?? (await readBookingSettings(workspaceId)).location
+  const saved = await readBookingSettings(workspaceId)
+  const location = parsed.data.location ?? saved.location
+  // Same for the cancellation cutoff and the booking link.
+  const refundCutoffHours = parsed.data.refundCutoffHours === undefined ? saved.refundCutoffHours : parsed.data.refundCutoffHours
+  const bookingSlug = parsed.data.bookingSlug ?? saved.bookingSlug
+  const onlineBookingEnabled = parsed.data.onlineBookingEnabled ?? saved.onlineBookingEnabled
+  const emailClients = parsed.data.emailClients ?? saved.emailClients
+  const reminders = parsed.data.reminders ?? saved.reminders
+  const busyAllDay = parsed.data.busyAllDay ?? saved.busyAllDay
+  if (bookingSlug) {
+    const problem = bookingSlugProblem(bookingSlug)
+    if (problem) throw new BadRequestError(`Booking link: ${problem}`)
+  }
+  if (onlineBookingEnabled && !bookingSlug) throw new BadRequestError("Pick a booking link before turning online booking on.")
+  if (onlineBookingEnabled && !parsed.data.services.some((service) => service.active)) {
+    throw new BadRequestError("Add a service customers can book before turning online booking on.")
+  }
+  const nowIso = new Date().toISOString()
   const next = BookingSettingsSchema.parse({
     ...parsed.data,
     timeZone,
     location,
+    refundCutoffHours,
+    bookingSlug,
+    onlineBookingEnabled,
+    emailClients,
+    reminders,
+    busyAllDay,
     // Kept in date order, no repeats.
     daysOff: [...new Set(parsed.data.daysOff)].sort(),
-    updatedAt: new Date().toISOString(),
+    updatedAt: nowIso,
   })
-  await bookingSettingsDoc(workspaceId).set(next)
+  // A new link is claimed (and the old one let go) with the save itself.
+  await db.runTransaction(async (txn) => {
+    const claim = bookingSlug ? await txn.get(bookingLinkDoc(bookingSlug)) : null
+    const previous = saved.bookingSlug && saved.bookingSlug !== bookingSlug ? await txn.get(bookingLinkDoc(saved.bookingSlug)) : null
+    if (claim?.exists && claim.data()?.workspaceId !== workspaceId) {
+      throw new ConflictError("That booking link is taken. Try another.")
+    }
+    if (bookingSlug && !claim?.exists) txn.set(bookingLinkDoc(bookingSlug), { workspaceId, createdAt: nowIso })
+    if (previous?.exists && previous.data()?.workspaceId === workspaceId) txn.delete(previous.ref)
+    txn.set(bookingSettingsDoc(workspaceId), next)
+  })
   return next
 }

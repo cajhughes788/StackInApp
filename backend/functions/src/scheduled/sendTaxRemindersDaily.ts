@@ -7,6 +7,8 @@ import { listActiveWorkspaces } from "../lib/userWorkspaces"
 import { TaxEstimateProfileSchema } from "@shared/schemas/taxEstimateProfile"
 import { getEstimatedTaxYear } from "@shared/estimatedTax/years"
 import { buildTaxReminderMessage, pickTaxReminder } from "@shared/estimatedTax/reminders"
+import { headlineAmount, taxHeadline } from "@shared/estimatedTax/headline"
+import { SHOW_TAXES } from "@shared/estimatedTax/featureFlag"
 import { taxYearForDate } from "@shared/estimatedTax/response"
 
 // Estimated tax reminders: a push seven days before each due date, and on
@@ -20,6 +22,8 @@ export const sendTaxRemindersDaily = onSchedule(
     region: "us-central1",
   },
   async () => {
+    // No tax reminders while the Taxes feature is hidden (featureFlag.ts).
+    if (!SHOW_TAXES) return
     const now = DateTime.now().setZone("America/Los_Angeles")
     const today = now.toISODate()!
     const taxYear = taxYearForDate(today)
@@ -47,21 +51,16 @@ export const sendTaxRemindersDaily = onSchedule(
 
         const estimate = await getTaxEstimate(uid, now)
         if (!estimate.eligible || !estimate.quarterly || estimate.quarterly.dueDate !== reminder.dueDate) continue
-        const { health, quarterly } = estimate
-        // The same amount the Taxes card leads with.
-        const amount =
-          health.canShowSafeHarbor && quarterly.penaltyFree != null
-            ? quarterly.penaltyFree
-            : health.canShowEstimate && !quarterly.belowEstimatesThreshold
-              ? quarterly.basedOnEarnings
-              : 0
+        // The same amount the Taxes page leads with; none when nothing's needed.
+        const amount = headlineAmount(taxHeadline(estimate.health, estimate.quarterly))
         if (!(amount >= 1)) continue
 
         const workspaceId = (await listActiveWorkspaces(uid)).find((w) => w.type === "independent")?.id
         await sendTransactionNotification(uid, {
           ...buildTaxReminderMessage(reminder, amount),
-          // registerPush.ts → deepLinkStore.ts opens Home in this workspace.
-          data: { deepLink: "stackin://home", ...(workspaceId ? { workspaceId } : {}) },
+          // registerPush.ts → deepLinkStore.ts opens the Taxes page in this
+          // workspace (older app builds read it as Home).
+          data: { deepLink: "stackin://home/taxes", ...(workspaceId ? { workspaceId } : {}) },
         })
         await doc.ref.set({ lastReminderKey: reminder.key }, { merge: true })
       } catch (err) {

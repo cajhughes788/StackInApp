@@ -11,9 +11,11 @@ import type { WorkspaceType } from "@shared/contracts/workspace"
 // setup-guide.tsx on Settings). Dims the home page and highlights one area at
 // a time with a short note. Each step points at a `data-tour` attribute on
 // the home page or header; a step whose area isn't on screen (e.g. Needs you
-// before a bank is linked) is skipped.
+// before a bank is linked) is skipped. `inMenu` steps point at the header
+// menu's items, so the tour opens the menu for them (useGuideStore's
+// tourMenuOpen) and closes it again after.
 
-type TourStep = { target: string; title: string; body: string }
+type TourStep = { target: string; title: string; body: string; inMenu?: boolean }
 
 const STEPS: Record<WorkspaceType, TourStep[]> = {
   independent: [
@@ -28,6 +30,11 @@ const STEPS: Record<WorkspaceType, TourStep[]> = {
       body: "This month's total, and how close you are to the goal you set in Settings.",
     },
     {
+      target: "charge",
+      title: "Charge",
+      body: "Take a payment on the spot. Type an amount and show the QR code. Your customer pays on their own phone by card, Apple Pay or Google Pay, and it's added to your income for you.",
+    },
+    {
       target: "needs-you",
       title: "Needs you",
       body: "Bank transactions and anything else waiting on you land here. Confirm them to add them to your records.",
@@ -38,12 +45,32 @@ const STEPS: Record<WorkspaceType, TourStep[]> = {
       body: "Log income or an expense by hand anytime, like a cash payment or a check.",
     },
     {
-      target: "menu",
-      title: "Everything else",
-      body: "Invoices, receipts, Profit & Loss, bank connections and Settings are in this menu. You can replay this tour from here too.",
+      target: "menu-invoices",
+      inMenu: true,
+      title: "Invoices",
+      body: "Send an invoice and get paid online. Paid invoices are added to your income for you.",
     },
     {
-      target: "menu",
+      target: "menu-clients",
+      inMenu: true,
+      title: "Clients",
+      body: "Everyone who pays you, with their invoices and other payments in one place.",
+    },
+    {
+      target: "menu-booking",
+      inMenu: true,
+      title: "Booking",
+      body: "Set your services and hours, then book appointments for clients. You can also share an online booking page so clients book themselves. It's off until you turn it on.",
+    },
+    {
+      target: "menu-list",
+      inMenu: true,
+      title: "Everything else",
+      body: "Receipts, Profit & Loss, bank connections and Settings are in this menu too. You can replay this tour from here.",
+    },
+    {
+      target: "menu-settings",
+      inMenu: true,
       title: "Light or dark",
       body: "Prefer a lighter screen? Switch between light and dark mode anytime in Settings, under Appearance.",
     },
@@ -106,6 +133,7 @@ function sameRect(a: Rect | null, b: Rect | null) {
 export default function HomeTour() {
   const homeTour = useGuideStore((s) => s.homeTour)
   const clearHomeTour = useGuideStore((s) => s.clearHomeTour)
+  const setTourMenuOpen = useGuideStore((s) => s.setTourMenuOpen)
   const workspaceState = useWorkspaceStore((s) => s.state)
   const activeWorkspaceId = workspaceState.status === "ready" ? workspaceState.activeWorkspaceId : null
 
@@ -140,7 +168,9 @@ export default function HomeTour() {
       return
     }
     const timer = window.setTimeout(() => {
-      const available = steps.filter((step) => findTarget(step.target))
+      // Menu items aren't on screen until the menu opens; they're there
+      // whenever the menu button is.
+      const available = steps.filter((step) => findTarget(step.inMenu ? "menu" : step.target))
       if (available.length === 0) {
         clearHomeTour()
         return
@@ -153,13 +183,37 @@ export default function HomeTour() {
 
   const step = visibleSteps?.[index] ?? null
 
+  // Open the header menu for steps that point into it.
+  const inMenu = !!step?.inMenu
+  useEffect(() => {
+    setTourMenuOpen(inMenu)
+  }, [inMenu, setTourMenuOpen])
+  useEffect(() => () => setTourMenuOpen(false), [setTourMenuOpen])
+
   // Bring the step's area into view; the menu lives in the header, which
-  // hides while scrolling down, so that step goes back to the top.
+  // hides while scrolling down, so those steps go back to the top.
   useEffect(() => {
     if (!step) return
     if (step.target === "menu") {
       window.scrollTo({ top: 0, behavior: "smooth" })
       return
+    }
+    if (step.inMenu) {
+      window.scrollTo({ top: 0, behavior: "smooth" })
+      // The menu scrolls on short screens; wait for it to open, then bring
+      // the item into view inside it.
+      let frame = 0
+      let tries = 0
+      const reveal = () => {
+        const el = findTarget(step.target)
+        if (el) {
+          el.scrollIntoView({ block: "nearest" })
+          // Opening the menu moves focus into it; hand it back to Next.
+          cardRef.current?.querySelector<HTMLElement>("[data-tour-next]")?.focus()
+        } else if (tries++ < 60) frame = window.requestAnimationFrame(reveal)
+      }
+      reveal()
+      return () => window.cancelAnimationFrame(frame)
     }
     const el = findTarget(step.target)
     if (!el) return
@@ -329,7 +383,7 @@ export default function HomeTour() {
                 Back
               </Button>
             ) : null}
-            <Button className="rounded-full px-5" onClick={next} autoFocus>
+            <Button className="rounded-full px-5" onClick={next} autoFocus data-tour-next>
               {isLast ? "Done" : "Next"}
             </Button>
           </div>

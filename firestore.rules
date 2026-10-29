@@ -46,6 +46,13 @@ service cloud.firestore {
       match /plaidItems/{itemId} {
         allow read: if false;
       }
+
+      // Busy calendars hold the owner's private calendar links; only the
+      // backend reads them (busyCalendarsService.ts), and the app is only
+      // told each one's name and website.
+      match /busyCalendars/{calendarId} {
+        allow read: if false;
+      }
     }
   }
 }

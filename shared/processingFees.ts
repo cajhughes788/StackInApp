@@ -32,8 +32,14 @@ export function isProcessingFeeTrackingOn(
 // Any income line; refund lines simply have no fee.
 type FeeCarrier = object
 
+// Only lines from a source that keeps a cut count a fee — the same rule the
+// app's fee box follows — so a stray fee on a cash, check, Zelle, Apple Cash
+// or "other" line never lowers profit. (Stripe and bank-matched invoice fees
+// are booked as their own expenses, not on income lines.)
 export function getBreakdownFee(breakdown: FeeCarrier | null | undefined): number {
-  const fee = Number((breakdown as { fee?: unknown } | null | undefined)?.fee ?? 0)
+  const line = breakdown as { fee?: unknown; paymentMethod?: unknown } | null | undefined
+  if (!supportsProcessingFee(line?.paymentMethod as string | undefined)) return 0
+  const fee = Number(line?.fee ?? 0)
   return Number.isFinite(fee) && fee > 0 ? fee : 0
 }
 

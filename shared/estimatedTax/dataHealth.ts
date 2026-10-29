@@ -31,12 +31,25 @@ export type DataHealthInput = {
     businessStartDate: string | null
     situation: TaxSituationAnswers
     priorYearTax: number | null
+    stateCode: string | null
+    // W-2 income question answered for the person's current W-2
+    // workspaces (hasW2Workspace picks which question was asked).
+    w2: { hasW2Workspace: boolean; answered: boolean }
+    // Tips are recorded but no line of work is chosen yet.
+    tipsNeedOccupation: boolean
+    // W-2 tips but no line of work chosen for the job yet.
+    w2TipsNeedOccupation?: boolean
+    // The answers form's "everything is complete" box was ticked.
+    confirmedComplete: boolean
   }
   // Earliest income or expense recorded in the tax year (null = none).
   firstRecordDate: string | null
   uncategorizedExpenseCount: number
   pendingBankReviewCount: number
   pendingImportCount: number
+  // Expenses whose bank charge was later removed (flaggedReason
+  // "bank_reversed"): they still lower profit until checked.
+  reversedExpenseCount: number
 }
 
 export type DataHealthIssueCode =
@@ -44,13 +57,20 @@ export type DataHealthIssueCode =
   | "missing_filing_status"
   | "missing_children"
   | "situation_unanswered"
+  | "missing_state"
+  | "w2_unanswered"
+  | "missing_occupation"
+  | "missing_w2_occupation"
+  | "not_confirmed"
   | "complex_situation"
+  | "other_income"
   | "no_records"
   | "too_little_history"
   | "missing_earlier_months"
   | "unreviewed_bank_deposits"
   | "uncategorized_expenses"
   | "unreviewed_imports"
+  | "reversed_expenses"
 
 export type DataHealthIssue = {
   code: DataHealthIssueCode
@@ -95,6 +115,18 @@ function plural(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`
 }
 
+// Problems the person fixes in the answers form (vs. in their records).
+export const PROFILE_CODES: DataHealthIssueCode[] = [
+  "missing_filing_status",
+  "missing_children",
+  "situation_unanswered",
+  "missing_state",
+  "w2_unanswered",
+  "missing_occupation",
+  "missing_w2_occupation",
+  "not_confirmed",
+]
+
 export function assessTaxDataHealth(input: DataHealthInput): DataHealthResult {
   const issues: DataHealthIssue[] = []
   const { profile } = input
@@ -120,7 +152,38 @@ export function assessTaxDataHealth(input: DataHealthInput): DataHealthResult {
   if (answers.some((answer) => answer == null)) {
     issues.push({ code: "situation_unanswered", severity: "blocker", message: "Answer three quick questions about other income and deductions." })
   }
-  const complex = answers.some((answer) => answer === true)
+  if (!profile.stateCode) {
+    issues.push({ code: "missing_state", severity: "blocker", message: "Choose the state you live in." })
+  }
+  if (!profile.w2.answered) {
+    issues.push({
+      code: "w2_unanswered",
+      severity: "blocker",
+      message: profile.w2.hasW2Workspace
+        ? "Tell us whether all of your W-2 income is recorded in 521."
+        : "Tell us whether you have a W-2 job.",
+    })
+  }
+  if (profile.tipsNeedOccupation) {
+    issues.push({ code: "missing_occupation", severity: "blocker", message: "Choose your line of work — you have tips recorded." })
+  }
+  if (profile.w2TipsNeedOccupation) {
+    issues.push({ code: "missing_w2_occupation", severity: "blocker", message: "Choose your line of work at your W-2 job — you have W-2 tips." })
+  }
+  if (!profile.confirmedComplete) {
+    issues.push({ code: "not_confirmed", severity: "blocker", message: "Confirm that your answers are complete." })
+  }
+  // Other income (investments, rentals, side jobs) isn't in the records, so
+  // the estimate runs low — still shown, marked rough. A spouse's income or
+  // itemizing changes the whole calculation, so those still need a tax pro.
+  if (profile.situation.investmentOrRentalIncome === true) {
+    issues.push({
+      code: "other_income",
+      severity: "warning",
+      message: "Rough: this doesn't include your other income (investments, rentals, side jobs), so your real tax will likely be higher.",
+    })
+  }
+  const complex = profile.situation.spouseHasIncome === true || profile.situation.itemizesDeductions === true
   if (complex) {
     issues.push({
       code: "complex_situation",
@@ -168,17 +231,22 @@ export function assessTaxDataHealth(input: DataHealthInput): DataHealthResult {
   reviewIssue("unreviewed_bank_deposits", input.pendingBankReviewCount, "bank transaction", "bank transactions", "Review")
   reviewIssue("uncategorized_expenses", input.uncategorizedExpenseCount, "expense", "expenses", "Categorize")
   reviewIssue("unreviewed_imports", input.pendingImportCount, "imported item", "imported items", "Review")
+  reviewIssue("reversed_expenses", input.reversedExpenseCount, "expense your bank reversed", "expenses your bank reversed", "Check")
 
   const blockers = issues.filter((issue) => issue.severity === "blocker")
   const canShowEstimate = blockers.length === 0
   // Last year's tax is a fact on their return, so the penalty-free amount
   // only needs that (and a filing status for the 110% AGI rule).
-  const canShowSafeHarbor = profile.priorYearTax != null && profile.filingStatus != null
+  // Every answer is required first: nothing is shown with answers missing.
+  const canShowSafeHarbor =
+    profile.priorYearTax != null &&
+    profile.filingStatus != null &&
+    !blockers.some((issue) => PROFILE_CODES.includes(issue.code))
 
   let status: DataHealthStatus
   if (canShowEstimate) status = issues.length > 0 ? "rough" : "ready"
   else if (complex) status = "unsupported"
-  else if (blockers.some((issue) => ["missing_filing_status", "missing_children", "situation_unanswered"].includes(issue.code))) status = "needs_profile"
+  else if (blockers.some((issue) => PROFILE_CODES.includes(issue.code))) status = "needs_profile"
   else status = "needs_records"
 
   return { status, canShowEstimate, canShowSafeHarbor, issues }

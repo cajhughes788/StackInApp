@@ -133,11 +133,11 @@ export async function claimRefundForPayment(
 // (entriesService.deleteEntry).
 // ---------------------------------------------------------------------------
 
-function counterDoc(workspaceId: string) {
+export function counterDoc(workspaceId: string) {
   return db.collection("workspaces").doc(workspaceId).collection("counters").doc("invoices")
 }
 
-function formatInvoiceNumber(n: number): string {
+export function formatInvoiceNumber(n: number): string {
   return String(n).padStart(4, "0")
 }
 

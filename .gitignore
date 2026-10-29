@@ -104,3 +104,9 @@ traces/
 # ---------------------------------------
 .dataconnect/
 sendgrid.env
+
+# Tax audit oracle (scripts/oracle): local Python env
+scripts/oracle/.venv/
+scripts/oracle/inputs.json
+scripts/oracle/policyengine-results.json
+scripts/oracle/mismatches.json

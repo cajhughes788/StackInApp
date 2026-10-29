@@ -12,7 +12,8 @@ import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import { computeIncomeGaugeForEntries } from "@shared/computeIncomeGauge"
 import { sumEntryProcessingFees } from "@shared/processingFees"
 import { computeSafeToSpend, resolveTaxSetAsidePercent, SHOW_TAX_SET_ASIDE } from "@shared/taxSetAside"
-import { useTaxEstimateStore } from "@/lib/stores/useTaxEstimateStore"
+import { useTaxEstimate } from "@/components/tax/use-tax-estimate"
+import { SHOW_TAXES } from "@shared/estimatedTax/featureFlag"
 import { computeGoalPace } from "@shared/goalPace"
 import { useSelectedPeriod } from "@/lib/stores/usePeriodSelectionStore"
 import { categoryLabels } from "@/lib/incomeBreakdown"
@@ -428,12 +429,13 @@ export default function IncomeStreamsOverview({ onImportCsv }: IncomeStreamsOver
     () => expenses.reduce((sum, expense) => sum + (expense.amount ?? 0), 0) + processingFees,
     [expenses, processingFees]
   )
-  // "Safe to spend" uses the real tax estimate (the Taxes card) when it can
+  // "Safe to spend" uses the real tax estimate (the Taxes page) when it can
   // be shown: the share of each business dollar that goes to federal tax.
   // The old flat % stays behind SHOW_TAX_SET_ASIDE.
-  const taxEstimate = useTaxEstimateStore((s) => s.data)
+  const { data: taxEstimate } = useTaxEstimate()
+  // Not while the Taxes feature is hidden (featureFlag.ts).
   const estimateTaxRate =
-    taxEstimate?.eligible && taxEstimate.health.canShowEstimate ? taxEstimate.quarterly?.businessTaxRate ?? null : null
+    SHOW_TAXES && taxEstimate?.eligible && taxEstimate.health.canShowEstimate ? taxEstimate.quarterly?.businessTaxRate ?? null : null
   const showTaxSetAside = estimateTaxRate != null || SHOW_TAX_SET_ASIDE
   const taxSetAsidePercent =
     estimateTaxRate != null

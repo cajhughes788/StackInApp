@@ -36,6 +36,8 @@ export const API_ENDPOINTS = {
   booking: {
     getSettings: "https://getbookingsettings-3lc2fwdgwq-uc.a.run.app",
     saveSettings: "https://savebookingsettings-3lc2fwdgwq-uc.a.run.app",
+    calendarFeedLink: "https://calendarfeedlink-3lc2fwdgwq-uc.a.run.app",
+    busyCalendars: "https://busycalendars-3lc2fwdgwq-uc.a.run.app",
   },
 
   appointments: {

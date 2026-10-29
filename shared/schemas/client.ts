@@ -36,6 +36,10 @@ const ContactFields = {
 }
 
 export const ClientCreateInputSchema = z.object({
+  // Made by the app (random) so it can show the client before the server
+  // answers; a retry with the same id returns that client. Left out, the
+  // server makes one.
+  id: z.string().regex(/^[A-Za-z0-9]{20,40}$/).optional(),
   name: z.string().trim().min(1).max(80),
   ...ContactFields,
 })

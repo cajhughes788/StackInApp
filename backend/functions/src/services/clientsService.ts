@@ -107,8 +107,61 @@ export async function resolveInvoiceClient(
   return client
 }
 
+function phoneDigits(phone: string | null | undefined): string {
+  return (phone ?? "").replace(/\D/g, "").slice(-10)
+}
+
+/**
+ * The client a customer booking online is (no membership check — the
+ * public booking page calls it): found by email, else by phone, since a
+ * name alone could be someone else with the same name. Otherwise a new
+ * client. Their details fill in blanks, never overwrite.
+ */
+export async function resolveClientByContact(
+  workspaceId: string,
+  input: { clientName: string; clientEmail: string; clientPhone?: string | null }
+): Promise<ClientType> {
+  const email = input.clientEmail.trim().toLowerCase()
+  const phone = phoneDigits(input.clientPhone)
+  const clients = await readAllClients(workspaceId)
+  const byActive = (a: ClientType, b: ClientType) => Number(a.archived) - Number(b.archived) || a.createdAt.localeCompare(b.createdAt)
+  const found =
+    clients.filter((client) => client.email?.trim().toLowerCase() === email).sort(byActive)[0] ??
+    (phone.length === 10 ? clients.filter((client) => phoneDigits(client.phone) === phone).sort(byActive)[0] : undefined)
+  if (found) return resolveInvoiceClient(workspaceId, { ...input, clientId: found.id, clientName: found.name })
+  const nowIso = new Date().toISOString()
+  const ref = clientsCol(workspaceId).doc()
+  const created = ClientSchema.parse({
+    id: ref.id,
+    workspaceId,
+    name: input.clientName.trim(),
+    nameKey: clientKey(input.clientName),
+    email: blankToNull(input.clientEmail),
+    phone: blankToNull(input.clientPhone),
+    address: null,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+  })
+  await ref.set(created)
+  return created
+}
+
+// Only the fields ClientMatchEntry uses (shared/clients.ts) — entryGross
+// reads just incomeBreakdowns and customIncome. Every entry is still read,
+// so lifetime totals stay whole; each one is just smaller.
+const MATCH_ENTRY_FIELDS = [
+  "workspace",
+  "date",
+  "kind",
+  "clientMutationId",
+  "payerName",
+  "refund",
+  "independent.incomeBreakdowns",
+  "independent.customIncome",
+] as const
+
 async function readMatchEntries(workspaceId: string): Promise<ClientMatchEntry[]> {
-  const snap = await db.collection(`workspaces/${workspaceId}/entries`).get()
+  const snap = await db.collection(`workspaces/${workspaceId}/entries`).select(...MATCH_ENTRY_FIELDS).get()
   return snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<ClientMatchEntry, "id">) }))
 }
 
@@ -145,12 +198,17 @@ export async function createClient(workspaceId: string, uid: string, raw: unknow
   const parsed = ClientCreateInputSchema.safeParse(raw)
   if (!parsed.success) throw new BadRequestError("Invalid client", formatIssues(parsed.error))
   const input = parsed.data
+  const ref = input.id ? clientsCol(workspaceId).doc(input.id) : clientsCol(workspaceId).doc()
+  if (input.id) {
+    // A retry of the same add.
+    const retried = parseClient((await ref.get()).data())
+    if (retried) return retried
+  }
   const existing = await findClientByName(workspaceId, input.name)
   if (existing && !existing.archived) {
     throw new ConflictError(`${existing.name} is already a client.`)
   }
   const nowIso = new Date().toISOString()
-  const ref = clientsCol(workspaceId).doc()
   const client = ClientSchema.parse({
     id: ref.id,
     workspaceId,

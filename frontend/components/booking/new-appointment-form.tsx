@@ -9,10 +9,12 @@ import { Textarea } from "@/components/ui/textarea"
 import { PickerInput } from "@/components/booking/picker-input"
 import { cardClass, fieldLabelClass, localToday, softInputClass } from "@/components/invoices/invoice-ui"
 import { cn } from "@/lib/utils"
-import { bookingHoursWarning, formatBookingTime, appointmentEndTime } from "@shared/appointments"
+import { bookingHoursWarning, formatBookingTime, appointmentEndTime, appointmentTimes } from "@shared/appointments"
+import { findBusyConflict } from "@shared/busyTimes"
 import { clientKey } from "@shared/clients"
 import { formatInvoiceMoney } from "@shared/invoiceDisplay"
-import type { AppointmentCreateInput, AppointmentType } from "@shared/schemas/appointment"
+import type { AppointmentDraft } from "@/lib/domain/appointmentService"
+import type { AppointmentCreateInput } from "@shared/schemas/appointment"
 import { BOOKING_MAX_LOCATION, bookingServiceProblem, type BookingDeposit, type BookingSettings } from "@shared/schemas/booking"
 import type { ClientType } from "@shared/schemas/client"
 
@@ -51,43 +53,66 @@ const segmentClass = (active: boolean) =>
 export function NewAppointmentForm({
   settings,
   savedClients,
+  draft,
+  initialDate,
+  initialTime,
+  busy = [],
   onCreate,
 }: {
   settings: BookingSettings
   savedClients: ClientType[]
-  // Resolves once it's booked; throws with the reason (e.g. a double-booking) if not.
-  onCreate: (input: AppointmentCreateInput) => Promise<{ appointment: AppointmentType; shareUrl: string | null }>
+  // A booking the server refused ("Fix it"): the form comes back as it was.
+  draft?: AppointmentDraft | null
+  // A spot tapped on the calendar.
+  initialDate?: string | null
+  initialTime?: string | null
+  // When the owner is busy in their own calendars (Booking setup → Block
+  // busy times): booking then is allowed, with a warning.
+  busy?: Array<{ start: string; end: string; calendar: string }>
+  // Books it (in the background) and moves on, or says now why it can't.
+  onCreate: (input: AppointmentCreateInput & { clientMutationId: string }) => string | null
 }) {
+  const before = draft?.input
   const services = settings.services.filter((service) => service.active)
   const today = localToday()
 
-  const [clientName, setClientName] = useState("")
-  const [clientId, setClientId] = useState<string | null>(null)
-  const [clientEmail, setClientEmail] = useState("")
-  const [clientPhone, setClientPhone] = useState("")
+  const [clientName, setClientName] = useState(before?.clientName ?? "")
+  const [clientId, setClientId] = useState<string | null>(before?.clientId ?? null)
+  const [clientEmail, setClientEmail] = useState(before?.clientEmail ?? "")
+  const [clientPhone, setClientPhone] = useState(before?.clientPhone ?? "")
 
   // A saved service's id, "custom", or nothing picked yet.
-  const [serviceChoice, setServiceChoice] = useState<string | null>(services.length === 0 ? "custom" : null)
-  const [serviceName, setServiceName] = useState("")
-  const [priceText, setPriceText] = useState("")
-  const [minutes, setMinutes] = useState(60)
-  const [bufferMinutes, setBufferMinutes] = useState(0)
-  const [depositType, setDepositType] = useState<BookingDeposit["type"]>("none")
-  const [depositText, setDepositText] = useState("")
-  const [saveAsService, setSaveAsService] = useState(false)
+  const [serviceChoice, setServiceChoice] = useState<string | null>(
+    before
+      ? before.serviceId && services.some((service) => service.id === before.serviceId)
+        ? before.serviceId
+        : "custom"
+      : services.length === 0
+        ? "custom"
+        : null
+  )
+  const [serviceName, setServiceName] = useState(before?.serviceName ?? "")
+  const [priceText, setPriceText] = useState(before ? String(before.price) : "")
+  const [minutes, setMinutes] = useState(before?.minutes ?? 60)
+  const [bufferMinutes, setBufferMinutes] = useState(before?.bufferMinutes ?? 0)
+  const [depositType, setDepositType] = useState<BookingDeposit["type"]>(before?.deposit.type ?? "none")
+  const [depositText, setDepositText] = useState(before && before.deposit.type !== "none" ? String(before.deposit.value) : "")
+  const [saveAsService, setSaveAsService] = useState(before?.saveAsService ?? false)
 
-  const [date, setDate] = useState(today)
-  const [startTime, setStartTime] = useState("")
-  const [askToConfirm, setAskToConfirm] = useState(true)
+  const [date, setDate] = useState(before?.date ?? initialDate ?? today)
+  const [startTime, setStartTime] = useState(before?.startTime ?? initialTime ?? "")
+  const [askToConfirm, setAskToConfirm] = useState(before?.askToConfirm ?? true)
   // Starts from Booking setup; changing it here is for this appointment only.
-  const [location, setLocation] = useState(settings.location)
+  const [location, setLocation] = useState(before?.location ?? settings.location)
 
   const [showErrors, setShowErrors] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(draft?.error ?? null)
   // One id per appointment being made, so a retry after a dropped
   // connection returns the same booking instead of making two.
-  const mutationId = useRef(newMutationId())
+  // A retry of the refused booking keeps its id until something changes,
+  // so it can't be booked twice.
+  const mutationId = useRef(before?.clientMutationId ?? newMutationId())
 
   const pickedService = services.find((service) => service.id === serviceChoice) ?? null
   const isCustom = serviceChoice === "custom"
@@ -145,34 +170,48 @@ export function NewAppointmentForm({
     when: !date || !startTime ? "Pick a date and time." : date < today ? "That date has already passed." : null,
   }
   const hasErrors = Object.values(errors).some(Boolean)
+  // Who gets the link, and how: the server fills a saved client's details in.
+  const matchedClient = clientId
+    ? savedClients.find((client) => client.id === clientId)
+    : savedClients.find((client) => clientName.trim() && client.nameKey === clientKey(clientName))
+  const emailsLink = settings.emailClients && !errors.email && !!(clientEmail.trim() || matchedClient?.email)
+  const firstName = clientName.trim().split(/\s+/)[0] || "them"
   const hoursWarning = date && startTime ? bookingHoursWarning(settings, date, startTime, minutes) : null
+  const busyWarning = useMemo(() => {
+    if (!date || !startTime || busy.length === 0) return null
+    const times = appointmentTimes({ date, startTime, timeZone: settings.timeZone, minutes, bufferMinutes })
+    const conflict = times ? findBusyConflict(times, busy) : null
+    if (!conflict) return null
+    const clock = (iso: string) =>
+      new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: settings.timeZone || undefined }).toLowerCase().replace(" ", "").replace(":00", "")
+    return `You're busy ${clock(conflict.start)} – ${clock(conflict.end)} (${conflict.calendar} calendar).`
+  }, [busy, date, startTime, settings.timeZone, minutes, bufferMinutes])
 
   async function submit() {
     setShowErrors(true)
     if (hasErrors || saving || price === null) return
     setSaving(true)
     setSaveError(null)
-    try {
-      await onCreate({
-        clientMutationId: mutationId.current,
-        clientId,
-        clientName: clientName.trim(),
-        clientEmail: clientEmail.trim() || null,
-        clientPhone: clientPhone.trim() || null,
-        serviceId: pickedService?.id ?? null,
-        serviceName: serviceName.trim(),
-        price,
-        minutes,
-        bufferMinutes,
-        deposit,
-        saveAsService: isCustom && saveAsService,
-        date,
-        startTime,
-        askToConfirm,
-        location: location.trim(),
-      })
-    } catch (error) {
-      setSaveError(error instanceof Error ? error.message : "Couldn't book it. Check your connection and try again.")
+    const problem = onCreate({
+      clientMutationId: mutationId.current,
+      clientId,
+      clientName: clientName.trim(),
+      clientEmail: clientEmail.trim() || null,
+      clientPhone: clientPhone.trim() || null,
+      serviceId: pickedService?.id ?? null,
+      serviceName: serviceName.trim(),
+      price,
+      minutes,
+      bufferMinutes,
+      deposit,
+      saveAsService: isCustom && saveAsService,
+      date,
+      startTime,
+      askToConfirm,
+      location: location.trim(),
+    })
+    if (problem) {
+      setSaveError(problem)
       setSaving(false)
     }
   }
@@ -454,6 +493,12 @@ export function NewAppointmentForm({
             <span>{hoursWarning} You can still book it.</span>
           </p>
         ) : null}
+        {busyWarning ? (
+          <p className="flex items-start gap-2 rounded-xl bg-amber-100 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+            <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            <span>{busyWarning} You can still book it.</span>
+          </p>
+        ) : null}
         {fieldError(errors.when)}
         <label className={fieldLabelClass}>
           Location
@@ -483,15 +528,19 @@ export function NewAppointmentForm({
         </div>
         <p className="text-xs text-muted-foreground">
           {askToConfirm
-            ? "You get a link to text or email them. The time is held for 48 hours while they confirm."
-            : "Confirmed now — you've already agreed on it with them."}
+            ? emailsLink
+              ? `We'll email ${firstName} a link to confirm. The time is held for 48 hours.`
+              : "You'll text or share them a link to confirm. The time is held for 48 hours."
+            : emailsLink
+              ? `Confirmed now. We'll email ${firstName} the details.`
+              : "Confirmed now — you've already agreed on it with them."}
         </p>
       </section>
 
       {saveError ? <p className="text-sm text-destructive">{saveError}</p> : null}
       {showErrors && hasErrors ? <p className="text-sm text-destructive">Fix the highlighted fields above.</p> : null}
       <Button type="submit" disabled={saving} className="h-[52px] w-full rounded-full text-base font-semibold">
-        {saving ? "Booking..." : askToConfirm ? "Book and get link" : "Book it"}
+        {saving ? "Booking..." : "Book"}
       </Button>
     </form>
   )

@@ -75,8 +75,12 @@ export function invoiceDisplayStatus(
     }
     case "void":
       return { label: "Void", tone: "void" }
-    case "closed":
-      return { label: invoiceAmountPaid(invoice) > 0 ? `Closed · ${formatInvoiceMoney(invoiceAmountPaid(invoice))} kept` : "Closed", tone: "closed" }
+    case "closed": {
+      // What was paid, less anything given back (a canceled booking's refund).
+      const kept = Math.round(invoiceAmountPaid(invoice) * 100) - Math.round(refunded * 100)
+      if (kept > 0) return { label: `Closed · ${formatInvoiceMoney(kept / 100)} kept`, tone: "closed" }
+      return { label: refunded > 0 ? "Closed · refunded" : "Closed", tone: "closed" }
+    }
     case "draft":
       return { label: "Draft", tone: "draft" }
     case "sent": {

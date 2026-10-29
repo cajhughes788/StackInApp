@@ -12,6 +12,9 @@ import * as profitLossCache from "@/lib/storage/profitLossCache"
 import * as offlineQueue from "@/lib/storage/offlineQueue"
 import * as receiptAssetsCache from "@/lib/storage/receiptAssetsCache"
 import * as receiptDraftsCache from "@/lib/storage/receiptDraftsCache"
+import * as clientsCache from "@/lib/storage/clientsCache"
+import * as appointmentsCache from "@/lib/storage/appointmentsCache"
+import * as allIncomeCache from "@/lib/storage/allIncomeCache"
 import { listKeysRaw, removeRaw } from "@/lib/storage/base"
 import { debugError, debugLog } from "@/lib/debugLoop"
 
@@ -40,6 +43,9 @@ export async function clearAllLocalDomainData() {
     profitLossCache.clearProfitLossCache(),
     receiptDraftsCache.clearReceiptDraftsCache(),
     receiptAssetsCache.clearReceiptMediaCache(),
+    clientsCache.clearClientsCache(),
+    appointmentsCache.clearAppointmentsCache(),
+    allIncomeCache.clearAllIncomeCache(),
     offlineQueue.clearQueue(),
     clearAllEntries(),
   ])
@@ -115,6 +121,19 @@ export async function clearWorkspaceLocalDomainData(
     {
       name: "receipt_media",
       run: () => receiptAssetsCache.clearReceiptMediaCache(workspaceId),
+    },
+    {
+      name: "clients",
+      run: () => clientsCache.clearClientsCache(workspaceId),
+    },
+    {
+      name: "appointments",
+      run: () => appointmentsCache.clearAppointmentsCache(workspaceId),
+    },
+    {
+      // The saved totals list every workspace, so drop them all.
+      name: "all_income",
+      run: () => allIncomeCache.clearAllIncomeCache(),
     },
     {
       name: "offline_queue",

@@ -108,6 +108,9 @@
       { "source": "/i/**", "function": "publicInvoice" },
       // Appointment links (publicAppointment renders the client's confirm page).
       { "source": "/b/**", "function": "publicAppointment" },
+      // Public booking pages (publicBooking: pick a service and an open time).
+      { "source": "/book/**", "function": "publicBooking" },
+      { "source": "/cal/**", "function": "calendarFeed" },
 
       { "source": "**", "destination": "/index.html" }
     ]

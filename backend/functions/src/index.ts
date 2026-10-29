@@ -48,6 +48,10 @@ export {
   createAppointment,
   updateAppointment,
   publicAppointment,
+  publicBooking,
+  calendarFeedLink,
+  calendarFeed,
+  busyCalendars,
   getClients,
   saveClient,
   mergeClients,
@@ -103,5 +107,7 @@ export { sendWeeklyDigest } from "./scheduled/sendWeeklyDigest"
 export { sendTaxRemindersDaily } from "./scheduled/sendTaxRemindersDaily"
 export { sendOwnerReportWeekly } from "./scheduled/sendOwnerReportWeekly"
 export { sendInvoiceRemindersDaily } from "./scheduled/sendInvoiceRemindersDaily"
+export { sendAppointmentReminders } from "./scheduled/sendAppointmentReminders"
+export { refreshBusyCalendars } from "./scheduled/refreshBusyCalendars"
 export { notifySupportReportCreated } from "./triggers/notifySupportReportCreated"
 export { sendContentLogSignupRow } from "./triggers/sendContentLogSignupRow"

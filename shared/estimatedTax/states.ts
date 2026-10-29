@@ -23,6 +23,9 @@ export type StateTaxRule =
       //   SE tax isn't deductible.
       base: "federal_agi" | "pa_classes"
       standardDeduction?: Record<FilingStatus, number>
+      // federal_agi base only: the deductible half of self-employment tax
+      // goes back onto AGI (Michigan Schedule 1, line 2).
+      addBackSelfEmploymentTaxDeduction?: true
       // Per person on the return (2 when married filing jointly).
       personalExemption?: number
       dependentExemption?: number
@@ -96,10 +99,11 @@ export const STATE_TAX_2026: Record<string, StateTaxRule> = {
     kind: "flat",
     rate: 0.0425,
     base: "federal_agi",
+    addBackSelfEmploymentTaxDeduction: true,
     personalExemption: 5_900,
     dependentExemption: 5_900,
     localTaxNote: "Michigan city income taxes (such as Detroit) aren't included.",
-    source: "Michigan Treasury, 2026 tax year rate notice (Apr 2026) and 2026 withholding guide: 4.25%; exemption $5,900.",
+    source: "Michigan Treasury, 2026 tax year rate notice (Apr 2026) and 2026 withholding guide: 4.25%; exemption $5,900. Schedule 1 line 2 adds back the self-employment tax deduction.",
   },
   NC: {
     kind: "flat",
@@ -129,6 +133,8 @@ export function computeStateTax(
   input: {
     filingStatus: FilingStatus
     federalAgi: number
+    // The deductible half of self-employment tax, for states that add it back.
+    selfEmploymentTaxDeduction?: number
     selfEmploymentProfit: number
     w2Wages: number
     qualifyingChildren: number
@@ -150,7 +156,8 @@ export function computeStateTax(
       ? (rule.personalExemption ?? 0) * people + (rule.dependentExemption ?? 0) * Math.max(0, input.qualifyingChildren)
       : 0
     const deduction = rule.standardDeduction?.[input.filingStatus] ?? 0
-    taxableIncome = Math.max(0, input.federalAgi - deduction - exemptions)
+    const addBack = rule.addBackSelfEmploymentTaxDeduction ? Math.max(0, input.selfEmploymentTaxDeduction ?? 0) : 0
+    taxableIncome = Math.max(0, input.federalAgi + addBack - deduction - exemptions)
   }
   taxableIncome = round2(taxableIncome)
   return {

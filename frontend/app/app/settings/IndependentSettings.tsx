@@ -35,6 +35,15 @@ export default function IndependentSettingsSection({
     setLocal(data ?? {})
   }, [data])
 
+  // Receipts page links here with #missing-receipts; jump to that switch.
+  useEffect(() => {
+    if (window.location.hash !== "#missing-receipts") return
+    const frame = requestAnimationFrame(() => {
+      document.getElementById("missing-receipts")?.scrollIntoView({ block: "center" })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [])
+
   function update<K extends keyof IndependentSettingsType>(
     field: K,
     value: IndependentSettingsType[K],
@@ -168,7 +177,7 @@ export default function IndependentSettingsSection({
             />
           </div>
 
-          <div className="flex items-center justify-between gap-4">
+          <div id="missing-receipts" className="flex items-center justify-between gap-4">
             <div className="space-y-0.5">
               <Label>Missing receipts in Needs you</Label>
               <p className="text-sm text-muted-foreground">

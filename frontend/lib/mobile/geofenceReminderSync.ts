@@ -4,7 +4,10 @@ import { getEntriesForPeriod } from "@/lib/api";
 import * as settingsService from "@/lib/domain/settingsService";
 import { debugError, debugLog } from "@/lib/debugLoop";
 import { flushNativeGeofenceDiagnostics } from "@/lib/mobile/geofenceDiagnostics";
-import { NativeGeofence, type NativeGeofenceRecord, type NativeGeofenceWorkspaceEntryStatus, } from "@/plugins/NativeGeofence";
+import { canAskForLocationReminders, isLocationReminderReady, NativeGeofence, type NativeGeofenceRecord, type NativeGeofenceWorkspaceEntryStatus, } from "@/plugins/NativeGeofence";
+import { showLocationRemindersOffNotice } from "@/lib/mobile/locationRemindersNotice";
+import { useSettingsStore } from "@/lib/stores/useSettingsStore";
+import { Capacitor } from "@capacitor/core";
 import { getCurrentPayPeriodAt } from "@shared/payPeriods";
 import type { WorkspaceSummary } from "@shared/contracts/workspace";
 import type { SettingsType } from "@shared/schemas/settings";
@@ -72,7 +75,7 @@ export async function syncWorkspaceGeofenceReminders(workspace: WorkspaceSummary
         await flushNativeGeofenceDiagnostics(`single_workspace_sync:${workspace.id}:skipped`);
         return;
     }
-    let status = await NativeGeofence.getStatus();
+    const status = await NativeGeofence.getStatus();
     await flushNativeGeofenceDiagnostics(`single_workspace_sync:${workspace.id}:status`);
     logGeofenceSyncInfo("single_workspace_sync_status", {
         workspaceId: workspace.id,
@@ -88,24 +91,10 @@ export async function syncWorkspaceGeofenceReminders(workspace: WorkspaceSummary
         notificationGranted: status.notificationGranted ?? false,
         monitoredCount: status.monitoredCount,
     });
-    if (!status.granted || !status.backgroundGranted || !status.notificationGranted) {
-        const permission = await NativeGeofence.requestPermissions();
-        await flushNativeGeofenceDiagnostics(`single_workspace_sync:${workspace.id}:permissions`);
-        logGeofenceSyncInfo("single_workspace_sync_permissions", {
-            workspaceId: workspace.id,
-            granted: permission.granted,
-            backgroundGranted: permission.backgroundGranted ?? false,
-            notificationGranted: permission.notificationGranted ?? false,
-        });
-        debugLog("native-geofence", "single_workspace_sync_permissions", {
-            workspaceId: workspace.id,
-            granted: permission.granted,
-            backgroundGranted: permission.backgroundGranted ?? false,
-            notificationGranted: permission.notificationGranted ?? false,
-        });
-        if (!permission.granted || !permission.backgroundGranted || !permission.notificationGranted)
-            return;
-    }
+    // Runs after a settings save. The reminder toggle already asked for
+    // permission, so this never asks.
+    if (!isLocationReminderReady(status))
+        return;
     const geofences = buildWorkspaceGeofences(workspace, settings);
     try {
         const result = await NativeGeofence.syncGeofences(geofences);
@@ -140,6 +129,38 @@ export async function syncWorkspaceGeofenceReminders(workspace: WorkspaceSummary
         throw error;
     }
 }
+// Turns off every location reminder (all workspaces) when this phone can't
+// run them. Saved to the account, like flipping the toggle.
+async function turnOffLocationReminders(workspaces: WorkspaceSummary[], allSettings: (SettingsType | null)[]) {
+    for (let i = 0; i < workspaces.length; i++) {
+        const settings = allSettings[i];
+        const reminders = settings?.common?.locationEntryReminders ?? [];
+        if (!reminders.some((reminder) => reminder.enabled))
+            continue;
+        const workspaceId = workspaces[i].id;
+        try {
+            const saved = await settingsService.save(workspaceId, {
+                common: {
+                    locationEntryReminders: reminders.map((reminder) => ({ ...reminder, enabled: false })),
+                },
+            });
+            if (saved.data) {
+                useSettingsStore.getState().setSettings(workspaceId, saved.data, {
+                    source: saved.source === "backend" ? "backend" : "optimistic",
+                    remoteMeta: saved.remoteMeta,
+                    lastSuccessfulSyncAt: saved.lastSuccessfulSyncAt,
+                    localUpdatedAt: saved.localUpdatedAt,
+                });
+            }
+        }
+        catch (error) {
+            logGeofenceSyncError("turn_off_location_reminders_failed", {
+                workspaceId,
+                message: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+}
 export async function syncAllWorkspaceGeofenceReminders(workspaces: WorkspaceSummary[]) {
     ;
     if (!NativeGeofence.isNativeAvailable())
@@ -154,8 +175,9 @@ export async function syncAllWorkspaceGeofenceReminders(workspaces: WorkspaceSum
     });
     const geofences: NativeGeofenceRecord[] = [];
     let shouldRequestPermissions = false;
+    let allSettings: (SettingsType | null)[] = [];
     try {
-        const allSettings = await Promise.all(
+        allSettings = await Promise.all(
             workspaces.map((workspace) => settingsService.loadForWorkspace(workspace.id))
         );
         for (let i = 0; i < workspaces.length; i++) {
@@ -191,13 +213,27 @@ export async function syncAllWorkspaceGeofenceReminders(workspaces: WorkspaceSum
         });
         return;
     }
-    let status = await NativeGeofence.getStatus();
+    const status = await NativeGeofence.getStatus();
     await flushNativeGeofenceDiagnostics("all_workspace_sync:status");
-    if (!status.granted || !status.backgroundGranted || !status.notificationGranted) {
-        const permission = await NativeGeofence.requestPermissions();
-        await flushNativeGeofenceDiagnostics("all_workspace_sync:permissions");
-        if (!permission.granted || !permission.backgroundGranted || !permission.notificationGranted)
+    if (!isLocationReminderReady(status)) {
+        // Runs on every launch. Location reminders are an iPhone feature;
+        // elsewhere just leave them be.
+        if (Capacitor.getPlatform() !== "ios")
             return;
+        // Ask only if the iPhone has never been asked on this device (first
+        // launch on a new phone with a reminder already on). If the answers
+        // fall short, or it can't ask anymore, turn the reminders off so the
+        // toggle matches what works.
+        const canAsk = canAskForLocationReminders(status);
+        const permission = canAsk ? await NativeGeofence.requestPermissions() : status;
+        await flushNativeGeofenceDiagnostics("all_workspace_sync:permissions");
+        if (!isLocationReminderReady(permission)) {
+            await turnOffLocationReminders(workspaces, allSettings);
+            await NativeGeofence.syncGeofences([]);
+            if (canAsk)
+                showLocationRemindersOffNotice(permission);
+            return;
+        }
     }
     try {
         const result = await NativeGeofence.syncGeofences(geofences);

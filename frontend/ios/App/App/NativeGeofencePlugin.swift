@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import Capacitor
 import CoreLocation
 import UserNotifications
@@ -19,9 +20,14 @@ public class NativeGeofencePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManage
   private let geofenceStoreKey = "stackin.nativeGeofences"
   private let entryStatusStoreKey = "stackin.nativeGeofenceEntryStatus"
   private var lastSyncStartedAt: Date?
+  // iOS shows the "Change to Always Allow" question only once per install,
+  // so we remember once it has been asked (reset on reinstall).
+  private let alwaysPromptShownKey = "stackin.alwaysLocationPromptShown"
   private var pendingPermissionCall: CAPPluginCall?
-  private var pendingNotificationGranted: Bool?
   private var pendingPermissionStage: PermissionRequestStage?
+  private var alwaysPromptVisible = false
+  private var alwaysPromptTimeout: DispatchWorkItem?
+  private var lifecycleObservers: [NSObjectProtocol] = []
 
   override public func load() {
     manager.delegate = self
@@ -29,32 +35,104 @@ public class NativeGeofencePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManage
     NSLog("[NativeGeofencePlugin] load complete")
   }
 
+  // Asks for notifications, then location ("While Using", then "Always"),
+  // and reports back only after every question the iPhone shows has been
+  // answered.
   @objc override public func requestPermissions(_ call: CAPPluginCall) {
     NSLog("[NativeGeofencePlugin] requestPermissions invoked")
     DispatchQueue.main.async {
+      if self.pendingPermissionCall != nil {
+        self.finishPermissionRequest()
+      }
       self.pendingPermissionCall = call
-      self.pendingNotificationGranted = nil
       self.pendingPermissionStage = nil
 
-      let status = self.manager.authorizationStatus
-      switch status {
-      case .notDetermined:
-        self.pendingPermissionStage = .requestingWhenInUse
-        self.manager.requestWhenInUseAuthorization()
-      case .authorizedWhenInUse:
-        self.pendingPermissionStage = .requestingAlways
-        self.manager.requestAlwaysAuthorization()
-      default:
-        self.pendingPermissionStage = .resolving
-      }
-
       UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in
-        self.resolveNotificationStatus { notificationGranted in
-          self.pendingNotificationGranted = notificationGranted
-          self.resolvePendingPermissionCallIfPossible()
+        DispatchQueue.main.async {
+          self.requestLocationStage()
         }
       }
     }
+  }
+
+  private func requestLocationStage() {
+    switch manager.authorizationStatus {
+    case .notDetermined:
+      pendingPermissionStage = .requestingWhenInUse
+      manager.requestWhenInUseAuthorization()
+    case .authorizedWhenInUse:
+      requestAlwaysStage()
+    default:
+      finishPermissionRequest()
+    }
+  }
+
+  private func requestAlwaysStage() {
+    guard !UserDefaults.standard.bool(forKey: alwaysPromptShownKey) else {
+      // iOS won't show the question again; nothing to wait for.
+      finishPermissionRequest()
+      return
+    }
+
+    pendingPermissionStage = .requestingAlways
+    alwaysPromptVisible = false
+
+    // Right after the "While Using" answer the app may still be inactive;
+    // ask once it's active again so the new question is noticed.
+    guard UIApplication.shared.applicationState == .active else {
+      var observer: NSObjectProtocol?
+      observer = NotificationCenter.default.addObserver(
+        forName: UIApplication.didBecomeActiveNotification,
+        object: nil,
+        queue: .main
+      ) { [weak self] _ in
+        if let observer { NotificationCenter.default.removeObserver(observer) }
+        self?.lifecycleObservers.removeAll { $0 === observer }
+        guard self?.pendingPermissionStage == .requestingAlways else { return }
+        self?.showAlwaysPrompt()
+      }
+      if let observer { lifecycleObservers.append(observer) }
+      return
+    }
+
+    showAlwaysPrompt()
+  }
+
+  private func showAlwaysPrompt() {
+    // The iPhone question makes the app inactive while it's up. If that
+    // doesn't happen shortly, iOS chose not to show it.
+    lifecycleObservers.append(NotificationCenter.default.addObserver(
+      forName: UIApplication.willResignActiveNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      guard let self, self.pendingPermissionStage == .requestingAlways else { return }
+      self.alwaysPromptVisible = true
+      self.alwaysPromptTimeout?.cancel()
+      UserDefaults.standard.set(true, forKey: self.alwaysPromptShownKey)
+    })
+    lifecycleObservers.append(NotificationCenter.default.addObserver(
+      forName: UIApplication.didBecomeActiveNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      guard let self, self.pendingPermissionStage == .requestingAlways, self.alwaysPromptVisible else { return }
+      // Give iOS a moment to update the status after the answer.
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+        self.finishPermissionRequest()
+      }
+    })
+
+    let timeout = DispatchWorkItem { [weak self] in
+      guard let self, !self.alwaysPromptVisible else { return }
+      // Not shown: iOS has used up this question for the app already.
+      UserDefaults.standard.set(true, forKey: self.alwaysPromptShownKey)
+      self.finishPermissionRequest()
+    }
+    alwaysPromptTimeout = timeout
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: timeout)
+
+    manager.requestAlwaysAuthorization()
   }
 
   @objc func getStatus(_ call: CAPPluginCall) {
@@ -68,12 +146,17 @@ public class NativeGeofencePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManage
         notificationGranted.description,
         self.manager.monitoredRegions.count
       )
-      call.resolve([
-        "granted": self.isAuthorized(status),
-        "backgroundGranted": self.isBackgroundAuthorized(status),
-        "notificationGranted": notificationGranted,
-        "monitoredCount": self.manager.monitoredRegions.count
-      ])
+      self.resolveNotificationAuthorization { notificationStatus in
+        call.resolve([
+          "granted": self.isAuthorized(status),
+          "backgroundGranted": self.isBackgroundAuthorized(status),
+          "notificationGranted": notificationGranted,
+          "monitoredCount": self.manager.monitoredRegions.count,
+          "locationStatus": self.locationStatusName(status),
+          "alwaysPromptShown": UserDefaults.standard.bool(forKey: self.alwaysPromptShownKey),
+          "notificationStatus": notificationStatus
+        ])
+      }
     }
   }
 
@@ -289,61 +372,97 @@ public class NativeGeofencePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManage
     }
   }
 
+  private func resolveNotificationAuthorization(
+    completion: @escaping (String) -> Void
+  ) {
+    UNUserNotificationCenter.current().getNotificationSettings { settings in
+      switch settings.authorizationStatus {
+      case .notDetermined:
+        completion("notDetermined")
+      case .authorized, .provisional, .ephemeral:
+        completion("granted")
+      default:
+        completion("denied")
+      }
+    }
+  }
+
+  private func locationStatusName(_ status: CLAuthorizationStatus) -> String {
+    switch status {
+    case .notDetermined:
+      return "notDetermined"
+    case .authorizedWhenInUse:
+      return "whenInUse"
+    case .authorizedAlways:
+      return "always"
+    default:
+      return "denied"
+    }
+  }
+
   private func resolvePendingPermissionCallIfPossible() {
-    guard let call = pendingPermissionCall else {
+    guard pendingPermissionCall != nil else {
       return
     }
 
     let status = manager.authorizationStatus
-    guard let notificationGranted = pendingNotificationGranted else {
-      return
-    }
-
     switch pendingPermissionStage {
     case .requestingWhenInUse:
       guard status != .notDetermined else {
         return
       }
-
       if status == .authorizedWhenInUse {
-        pendingPermissionStage = .requestingAlways
-        DispatchQueue.main.async {
-          self.manager.requestAlwaysAuthorization()
-        }
-        return
+        requestAlwaysStage()
+      } else {
+        finishPermissionRequest()
       }
 
     case .requestingAlways:
-      guard status != .notDetermined else {
-        return
+      // "Keep Only While Using" may not change the status; that answer is
+      // caught when the app becomes active again (showAlwaysPrompt).
+      if status == .authorizedAlways || status == .denied {
+        finishPermissionRequest()
       }
 
-    case .resolving, .none:
-      guard status != .notDetermined else {
-        return
-      }
+    case .none:
+      return
     }
+  }
 
-    NSLog(
-      "[NativeGeofencePlugin] requestPermissions resolved granted=%@ background=%@ notifications=%@",
-      isAuthorized(status).description,
-      isBackgroundAuthorized(status).description,
-      notificationGranted.description
-    )
-    call.resolve([
-      "granted": isAuthorized(status),
-      "backgroundGranted": isBackgroundAuthorized(status),
-      "notificationGranted": notificationGranted
-    ])
-    pendingPermissionCall = nil
-    pendingNotificationGranted = nil
+  private func finishPermissionRequest() {
+    alwaysPromptTimeout?.cancel()
+    alwaysPromptTimeout = nil
+    for observer in lifecycleObservers {
+      NotificationCenter.default.removeObserver(observer)
+    }
+    lifecycleObservers.removeAll()
+    alwaysPromptVisible = false
     pendingPermissionStage = nil
+
+    guard let call = pendingPermissionCall else {
+      return
+    }
+    pendingPermissionCall = nil
+
+    let status = manager.authorizationStatus
+    resolveNotificationStatus { notificationGranted in
+      NSLog(
+        "[NativeGeofencePlugin] requestPermissions resolved granted=%@ background=%@ notifications=%@",
+        self.isAuthorized(status).description,
+        self.isBackgroundAuthorized(status).description,
+        notificationGranted.description
+      )
+      call.resolve([
+        "granted": self.isAuthorized(status),
+        "backgroundGranted": self.isBackgroundAuthorized(status),
+        "notificationGranted": notificationGranted
+      ])
+    }
   }
 
   private enum PermissionRequestStage {
     case requestingWhenInUse
     case requestingAlways
-    case resolving
   }
 
   private func scheduleNotification(

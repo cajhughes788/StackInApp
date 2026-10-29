@@ -33,9 +33,28 @@ export const TaxEstimateProfileSchema = z.object({
   // From last year's return (Form 1040 total tax and AGI).
   priorYearTax: Money.nullable().default(null),
   priorYearAgi: z.number().finite().nullable().default(null),
-  // Federal income tax withheld so far, from a real W-2 pay stub.
+  // Optional, with W-2 pay: federal tax withheld so far from a real pay
+  // stub. Entered → the whole return less withholding; blank → the
+  // business's share, assuming the job withholds its own tax (quarterly.ts).
   ytdWithholding: Money.nullable().default(null),
   withholdingAsOf: DateSchema.nullable().default(null),
+  // W-2 income. With a W-2 workspace in 521: "Is all of your W-2 income
+  // recorded in 521?" (w2AllRecorded). Without one: "Do you have a W-2
+  // job?" (hasW2Job). Either way, pay not in 521 is a yearly amount
+  // (unrecordedW2Pay). w2WorkspaceKey is the person's W-2 workspaces when
+  // they answered — a change asks again (taxEstimateService).
+  w2AllRecorded: z.boolean().nullable().default(null),
+  hasW2Job: z.boolean().nullable().default(null),
+  unrecordedW2Pay: Money.nullable().default(null),
+  // How much of that unrecorded pay is tips reported to the employer.
+  unrecordedW2Tips: Money.nullable().default(null),
+  // The W-2 job's line of work, for its tips — what the employer reports in
+  // W-2 Box 14b. "none" = not on the list, or the employer reports "000".
+  w2OccupationCode: z.string().max(10).nullable().default(null),
+  w2WorkspaceKey: z.string().nullable().default(null),
+  // "I've answered every question for my whole tax return and recorded all
+  // my income in 521" — ticked on every save of the answers form.
+  confirmedComplete: z.boolean().default(false),
   // Legacy single "paid so far" figure from before the payment log; moved
   // into the log as one carried-over payment (see taxEstimateService).
   estimatedPaymentsMade: Money.default(0),
@@ -71,6 +90,13 @@ export function rollTaxEstimateProfileToYear(profile: TaxEstimateProfile, taxYea
     ytdWithholding: null,
     withholdingAsOf: null,
     estimatedPaymentsMade: 0,
+    // A new year: confirm W-2 income and completeness again.
+    w2AllRecorded: null,
+    hasW2Job: null,
+    unrecordedW2Pay: null,
+    unrecordedW2Tips: null,
+    w2WorkspaceKey: null,
+    confirmedComplete: false,
   }
 }
 

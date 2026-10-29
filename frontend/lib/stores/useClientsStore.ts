@@ -3,6 +3,8 @@
 import { create } from "zustand"
 
 import { getClients } from "@/lib/api/clientsApi"
+import { isSaving } from "@/lib/domain/backgroundSave"
+import { readClientsCache, saveClientsCache } from "@/lib/storage/clientsCache"
 import type { ClientPaymentSummary, ClientType } from "@shared/schemas/client"
 
 // Saved clients per workspace, with what each paid outside invoices (this
@@ -28,6 +30,11 @@ export function currentYear(): string {
 
 const inFlight = new Map<string, Promise<void>>()
 
+/** The background-save key for a client (lib/domain/clientService.ts). */
+export function clientSaveKey(clientId: string): string {
+  return `client:${clientId}`
+}
+
 export const useClientsStore = create<ClientsStore>((set, get) => ({
   byWorkspaceId: {},
 
@@ -47,11 +54,33 @@ export const useClientsStore = create<ClientsStore>((set, get) => ({
           },
         },
       }))
+      const year = currentYear()
+      const fresh = getClients(workspaceId, year)
+      fresh.catch(() => {}) // awaited below
+      // First time this launch: show the last list saved on this phone while
+      // the fresh one loads.
+      let fromCache = false
+      if (!existing) {
+        const cached = await readClientsCache(workspaceId, year).catch(() => null)
+        if (cached) {
+          set((state) => {
+            const current = state.byWorkspaceId[workspaceId]
+            if (current?.status !== "loading" || current.clients.length > 0) return state
+            fromCache = true
+            return { byWorkspaceId: { ...state.byWorkspaceId, [workspaceId]: { ...cached, status: "loading" } } }
+          })
+        }
+      }
       try {
-        const { clients, payments } = await getClients(workspaceId, currentYear())
-        set((state) => ({
-          byWorkspaceId: { ...state.byWorkspaceId, [workspaceId]: { clients, payments, status: "ready" } },
-        }))
+        const { clients: loaded, payments } = await fresh
+        void saveClientsCache(workspaceId, year, loaded, payments).catch(() => {})
+        set((state) => {
+          // Ones with changes still on their way keep what's on screen.
+          const pending = (state.byWorkspaceId[workspaceId]?.clients ?? []).filter((client) => isSaving(clientSaveKey(client.id)))
+          const pendingIds = new Set(pending.map((client) => client.id))
+          const clients = [...loaded.filter((client) => !pendingIds.has(client.id)), ...pending]
+          return { byWorkspaceId: { ...state.byWorkspaceId, [workspaceId]: { clients, payments, status: "ready" } } }
+        })
       } catch (error) {
         set((state) => ({
           byWorkspaceId: {
@@ -59,7 +88,8 @@ export const useClientsStore = create<ClientsStore>((set, get) => ({
             [workspaceId]: {
               clients: state.byWorkspaceId[workspaceId]?.clients ?? [],
               payments: state.byWorkspaceId[workspaceId]?.payments ?? {},
-              status: "error",
+              // A saved list stays up when the fresh one can't load.
+              status: fromCache ? "ready" : "error",
             },
           },
         }))

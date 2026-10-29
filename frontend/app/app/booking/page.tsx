@@ -2,16 +2,24 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { ChevronRight, Plus, Settings2 } from "lucide-react"
+import { CalendarDays, ChevronRight, List, Plus, Settings2 } from "lucide-react"
 
 import { AppointmentStatusPill, appointmentTimeRange } from "@/components/booking/appointment-ui"
+import { BookingCalendar } from "@/components/booking/booking-calendar"
 import { InvoicesPage, cardClass, useInvoicesWorkspace } from "@/components/invoices/invoice-ui"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAppointmentsStore } from "@/lib/stores/useAppointmentsStore"
+import { useBookingSettingsStore } from "@/lib/stores/useBookingSettingsStore"
+import { useBusyCalendarsStore } from "@/lib/stores/useBusyCalendarsStore"
 import { cn } from "@/lib/utils"
-import { formatAppointmentDate, formatBookingTime } from "@shared/appointments"
-import type { AppointmentType } from "@shared/schemas/appointment"
+import { appointmentStatus, formatAppointmentDate, formatBookingTime } from "@shared/appointments"
+import type { AppointmentStatus, AppointmentType } from "@shared/schemas/appointment"
+
+type BookingView = "calendar" | "list"
+const VIEW_STORAGE_KEY = "521.bookingView"
+
+const OFF_STATUSES = new Set<AppointmentStatus>(["canceled", "declined", "expired"])
 
 export default function BookingPageRoute() {
   return (
@@ -38,18 +46,60 @@ function BookingPage() {
   const entry = useAppointmentsStore((state) => (workspaceId ? state.byWorkspaceId[workspaceId] : undefined))
   const load = useAppointmentsStore((state) => state.load)
   const [showEarlier, setShowEarlier] = useState(false)
+  const [showCanceled, setShowCanceled] = useState(false)
+
+  const loadSettings = useBookingSettingsStore((state) => state.load)
+  const bookingSettings = useBookingSettingsStore((state) =>
+    workspaceId ? state.byWorkspaceId[workspaceId]?.settings ?? null : null
+  )
+  const [view, setView] = useState<BookingView>("calendar")
+  // The last view used, on this phone.
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(VIEW_STORAGE_KEY)
+      if (saved === "list" || saved === "calendar") setView(saved)
+    } catch {
+      // Calendar, then.
+    }
+  }, [])
+  function pickView(next: BookingView) {
+    setView(next)
+    try {
+      window.localStorage.setItem(VIEW_STORAGE_KEY, next)
+    } catch {
+      // Only remembered when it can be.
+    }
+  }
 
   useEffect(() => {
     if (workspaceId) void load(workspaceId, { force: true }).catch(() => {})
   }, [load, workspaceId])
+  // Busy times from the owner's own calendars, drawn on the calendar.
+  const busyTimes = useBusyCalendarsStore((state) => (workspaceId ? state.byWorkspaceId[workspaceId]?.busy : undefined))
+  const loadBusy = useBusyCalendarsStore((state) => state.load)
+  useEffect(() => {
+    if (workspaceId) void loadBusy(workspaceId).catch(() => {})
+  }, [loadBusy, workspaceId])
 
-  const { upcoming, earlier } = useMemo(() => {
+  // Ready before New appointment opens.
+  useEffect(() => {
+    if (workspaceId) void loadSettings(workspaceId).catch(() => {})
+  }, [loadSettings, workspaceId])
+
+  const { upcoming, earlier, canceled } = useMemo(() => {
     const nowIso = new Date().toISOString()
-    const all = entry?.appointments ?? []
-    // Still upcoming until it ends.
+    // A customer who started booking online but never paid the deposit
+    // didn't book anything: leave those out.
+    const all = (entry?.appointments ?? []).filter((item) => !(item.source === "online" && appointmentStatus(item, nowIso) === "expired"))
+    // Ones that aren't happening (canceled, can't make it, never answered)
+    // get their own list, so the main one is only real appointments.
+    const off = (item: AppointmentType) => OFF_STATUSES.has(appointmentStatus(item, nowIso))
+    const active = all.filter((item) => !off(item))
     return {
-      upcoming: all.filter((item) => item.endAt > nowIso),
-      earlier: all.filter((item) => item.endAt <= nowIso).reverse(),
+      // Still upcoming until it ends.
+      upcoming: active.filter((item) => item.endAt > nowIso),
+      earlier: active.filter((item) => item.endAt <= nowIso).reverse(),
+      canceled: all.filter(off).sort((a, b) => b.startAt.localeCompare(a.startAt)),
     }
   }, [entry?.appointments])
   const thisYear = String(new Date().getFullYear())
@@ -95,7 +145,31 @@ function BookingPage() {
         </section>
       ) : (
         <>
-          {upcoming.length === 0 ? (
+          <div className="grid grid-cols-2 gap-1 rounded-[14px] bg-muted p-1" role="group" aria-label="View">
+            {(["calendar", "list"] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                aria-pressed={view === option}
+                onClick={() => pickView(option)}
+                className={cn(
+                  "flex h-9 items-center justify-center gap-1.5 rounded-[10px] text-sm transition-colors",
+                  view === option ? "bg-card font-semibold text-foreground shadow-sm" : "text-muted-foreground"
+                )}
+              >
+                {option === "calendar" ? <CalendarDays className="size-4" aria-hidden="true" /> : <List className="size-4" aria-hidden="true" />}
+                {option === "calendar" ? "Calendar" : "List"}
+              </button>
+            ))}
+          </div>
+          {view === "calendar" ? (
+            <BookingCalendar
+              appointments={[...upcoming, ...earlier]}
+              busy={busyTimes ?? []}
+              settings={bookingSettings}
+              timeZone={bookingSettings?.timeZone || upcoming[0]?.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone}
+            />
+          ) : upcoming.length === 0 ? (
             <section className={cn(cardClass, "space-y-1 text-center")}>
               <p className="font-medium text-foreground">No upcoming appointments</p>
               <p className="text-sm text-muted-foreground">
@@ -107,7 +181,7 @@ function BookingPage() {
               <AppointmentGroup key={group.date} title={formatAppointmentDate(group.date, thisYear)} appointments={group.appointments} />
             ))
           )}
-          {earlier.length > 0 ? (
+          {view === "list" && earlier.length > 0 ? (
             showEarlier ? (
               <>
                 <h2 className="px-1 pt-2 text-sm font-semibold text-muted-foreground">Earlier (last 30 days)</h2>
@@ -126,6 +200,28 @@ function BookingPage() {
                 onClick={() => setShowEarlier(true)}
               >
                 Show earlier ({earlier.length})
+              </button>
+            )
+          ) : null}
+          {canceled.length > 0 ? (
+            showCanceled ? (
+              <>
+                <h2 className="px-1 pt-2 text-sm font-semibold text-muted-foreground">Canceled</h2>
+                {groupByDate(canceled).map((group) => (
+                  <AppointmentGroup
+                    key={group.date}
+                    title={formatAppointmentDate(group.date, thisYear)}
+                    appointments={group.appointments}
+                  />
+                ))}
+              </>
+            ) : (
+              <button
+                type="button"
+                className="w-full py-2 text-sm font-medium text-muted-foreground hover:text-foreground"
+                onClick={() => setShowCanceled(true)}
+              >
+                Canceled ({canceled.length})
               </button>
             )
           ) : null}
@@ -161,6 +257,7 @@ function AppointmentGroup({ title, appointments }: { title: string; appointments
                 </span>
                 <span className="block truncate text-xs text-muted-foreground">
                   {appointment.serviceName} · {appointmentTimeRange(appointment)}
+                  {appointment.source === "online" ? " · Booked online" : ""}
                 </span>
               </span>
               <AppointmentStatusPill status={appointment.status} short />
