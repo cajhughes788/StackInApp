@@ -1,6 +1,6 @@
 import { DateTime } from "luxon"
 
-import { appointmentTimes, findAppointmentConflict, type AppointmentTimes } from "./appointments"
+import { appointmentStatus, appointmentTimes, findAppointmentConflict, type AppointmentTimes } from "./appointments"
 import type { AppointmentType } from "./schemas/appointment"
 import { BOOKING_DAYS, bookingMinutesOfDay, type BookingSettings } from "./schemas/booking"
 
@@ -188,4 +188,24 @@ export function bookingOpenDays(input: {
     if (bookingOpenTimes({ ...input, date }).length > 0) days.push(date)
   }
   return days
+}
+
+export const ONLINE_BOOKING_COUNT_DAYS = 30
+
+/**
+ * Online bookings made in the last 30 days, and how many came through the
+ * "Book now" button on the owner's website — for the Booking page. Canceled,
+ * declined and abandoned (expired) ones don't count.
+ */
+export function onlineBookingCounts(
+  appointments: Array<Pick<AppointmentType, "source" | "bookedFrom" | "createdAt" | "status" | "holdExpiresAt">>,
+  nowIso: string
+): { online: number; website: number } {
+  const since = new Date(Date.parse(nowIso) - ONLINE_BOOKING_COUNT_DAYS * 86_400_000).toISOString()
+  const counted = appointments.filter((appointment) => {
+    if (appointment.source !== "online" || appointment.createdAt < since) return false
+    const status = appointmentStatus(appointment, nowIso)
+    return status !== "canceled" && status !== "declined" && status !== "expired"
+  })
+  return { online: counted.length, website: counted.filter((appointment) => appointment.bookedFrom === "website").length }
 }

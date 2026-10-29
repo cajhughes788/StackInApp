@@ -10,6 +10,7 @@ const {
   bookingOpenTimes,
   bookingSlugFrom,
   bookingSlugProblem,
+  onlineBookingCounts,
   publicBookingUrl,
 } = require("../shared/onlineBooking.ts");
 const { appointmentTimes } = require("../shared/appointments.ts");
@@ -272,6 +273,34 @@ test("a form error shows above the form with what they typed, escaped", () => {
   assert.match(html, /Enter a valid email\./);
   assert.match(html, /value="&quot;&gt;&lt;script&gt;"/);
   assert.doesNotMatch(html, /<script>/);
+});
+
+test("Booking page count: online bookings in the last 30 days, and from the website", () => {
+  const now = "2026-12-01T12:00:00.000Z";
+  const made = (daysAgo, extra = {}) => ({
+    source: "online",
+    bookedFrom: null,
+    createdAt: new Date(Date.parse(now) - daysAgo * 86_400_000).toISOString(),
+    status: "confirmed",
+    holdExpiresAt: null,
+    ...extra,
+  });
+  const counts = onlineBookingCounts(
+    [
+      made(1),
+      made(3, { bookedFrom: "website" }),
+      made(10, { bookedFrom: "website", status: "completed" }),
+      made(29, { status: "no_show" }),
+      made(31), // too long ago
+      made(2, { source: "owner" }), // booked by the owner
+      made(2, { status: "canceled" }),
+      made(2, { bookedFrom: "website", status: "expired" }), // left the deposit unpaid
+      made(2, { status: "requested", holdExpiresAt: "2026-11-30T12:00:00.000Z" }), // lapsed hold reads as expired
+    ],
+    now
+  );
+  assert.deepEqual(counts, { online: 4, website: 2 });
+  assert.deepEqual(onlineBookingCounts([], now), { online: 0, website: 0 });
 });
 
 if (failures > 0) {

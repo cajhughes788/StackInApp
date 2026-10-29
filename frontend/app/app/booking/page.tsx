@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { CalendarDays, ChevronRight, List, Plus, Settings2 } from "lucide-react"
+import { CalendarDays, ChevronRight, Globe, List, Plus, Settings2 } from "lucide-react"
 
 import { AppointmentStatusPill, appointmentTimeRange } from "@/components/booking/appointment-ui"
 import { BookingCalendar } from "@/components/booking/booking-calendar"
@@ -14,6 +14,7 @@ import { useBookingSettingsStore } from "@/lib/stores/useBookingSettingsStore"
 import { useBusyCalendarsStore } from "@/lib/stores/useBusyCalendarsStore"
 import { cn } from "@/lib/utils"
 import { appointmentStatus, formatAppointmentDate, formatBookingTime } from "@shared/appointments"
+import { ONLINE_BOOKING_COUNT_DAYS, onlineBookingCounts } from "@shared/onlineBooking"
 import type { AppointmentStatus, AppointmentType } from "@shared/schemas/appointment"
 
 type BookingView = "calendar" | "list"
@@ -103,6 +104,9 @@ function BookingPage() {
     }
   }, [entry?.appointments])
   const thisYear = String(new Date().getFullYear())
+  // Online bookings lately, and how many came from the owner's website button.
+  const counts = useMemo(() => onlineBookingCounts(entry?.appointments ?? [], new Date().toISOString()), [entry?.appointments])
+  const showCounts = !!entry && entry.status !== "error" && (bookingSettings?.onlineBookingEnabled || counts.online > 0)
 
   return (
     <InvoicesPage
@@ -125,6 +129,17 @@ function BookingPage() {
           New appointment
         </Link>
       </Button>
+
+      {showCounts ? (
+        <p className="flex items-center justify-center gap-1.5 text-sm text-muted-foreground">
+          <Globe className="size-4 shrink-0" aria-hidden="true" />
+          {counts.online === 0
+            ? `No online bookings in the last ${ONLINE_BOOKING_COUNT_DAYS} days`
+            : `Last ${ONLINE_BOOKING_COUNT_DAYS} days: ${counts.online} booked online${
+                counts.website > 0 ? ` · ${counts.website} from your website` : ""
+              }`}
+        </p>
+      ) : null}
 
       {!entry || (entry.status === "loading" && entry.appointments.length === 0) ? (
         <div className="space-y-3" aria-hidden="true">
