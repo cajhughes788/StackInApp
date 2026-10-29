@@ -51,6 +51,12 @@ const TONE_COLORS: Record<InvoiceDisplayStatus["tone"], { bg: string; fg: string
   closed: { bg: "#ECEBE6", fg: "#5B6166" },
 }
 
+// The line under every public page: who it's from, and the privacy policy
+// for the people (clients, not 521 users) who read and fill them in.
+export function pageFoot(label: string): string {
+  return `<p class="foot">${escapeHtml(label)} · <a href="/privacy" style="color:inherit">Privacy</a></p>`
+}
+
 // Also the frame for the appointment page (shared/appointmentPublicPage.ts).
 // `head` adds tags to <head> (the booking page's link preview).
 export function shell(title: string, body: string, accent: string, head = ""): string {
@@ -363,7 +369,7 @@ export function renderPublicInvoicePage(
   }
 </article>
 <div class="actions"><button class="btn secondary" type="button" onclick="window.print()">Save as PDF</button></div>
-<p class="foot">Sent with 521</p>`
+${pageFoot("Sent with 521")}`
 
   return shell(`Invoice #${invoice.number} from ${businessName}`, body, accent)
 }
@@ -418,7 +424,7 @@ function renderQuickChargePage(
   </section>
 </article>
 ${invoice.status === "paid" ? `<div class="actions"><button class="btn secondary" type="button" onclick="window.print()">Save receipt as PDF</button></div>` : ""}
-<p class="foot">Paid with 521</p>`
+${pageFoot("Paid with 521")}`
   return shell(`Pay ${view.businessName}`, body, view.accent)
 }
 

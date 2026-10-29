@@ -11,7 +11,7 @@ import {
 import { formatMovedFrom, type ClientMoveView, type ClientRescheduleCheck } from "./appointmentReschedule"
 import { appointmentEndTime, appointmentMapLinks, formatAppointmentDate, formatBookingTime } from "./appointments"
 import { formatInvoiceMoney, formatInvoicePhone } from "./invoiceDisplay"
-import { escapeHtml, shell, telHref } from "./invoicePublicPage"
+import { escapeHtml, pageFoot, shell, telHref } from "./invoicePublicPage"
 import type { AppointmentStatus, AppointmentType } from "./schemas/appointment"
 import { DEFAULT_INVOICE_ACCENT_COLOR, type InvoiceSettings, type InvoiceType } from "./schemas/invoice"
 
@@ -336,7 +336,7 @@ export function renderPublicAppointmentPage(
   </section>
   ${policies ? `<section class="section"><div class="label">Policies</div><div class="policies" style="margin-top:6px">${escapeHtml(policies)}</div></section>` : ""}
 </article>
-<p class="foot">Booked with 521</p>`
+${pageFoot("Booked with 521")}`
   return shell(`${appointment.serviceName} with ${businessName}`, body, accent)
 }
 

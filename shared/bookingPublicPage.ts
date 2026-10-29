@@ -3,7 +3,7 @@ import { DateTime } from "luxon"
 import { appointmentDepositAmount, appointmentDepositOnline, cancellationPolicyText } from "./appointmentDeposits"
 import { appointmentEndTime, formatAppointmentDate, formatBookingTime } from "./appointments"
 import { formatInvoiceMoney, formatInvoicePhone } from "./invoiceDisplay"
-import { escapeHtml, shell, telHref } from "./invoicePublicPage"
+import { escapeHtml, pageFoot, shell, telHref } from "./invoicePublicPage"
 import { BOOKING_VIA_WEBSITE, publicBookingUrl } from "./onlineBooking"
 import type { BookingService, BookingSettings } from "./schemas/booking"
 import { DEFAULT_INVOICE_ACCENT_COLOR, type InvoiceSettings } from "./schemas/invoice"
@@ -207,7 +207,7 @@ export function renderPublicBookingPage(context: PublicBookingContext, view: Pub
   </section>
   ${policies && view.step === "details" ? `<section class="section"><div class="label">Policies</div><div class="policies" style="margin-top:6px">${escapeHtml(policies)}</div></section>` : ""}
 </article>
-<p class="foot">Booked with 521</p>`
+${pageFoot("Booked with 521")}`
   // The preview card when the link is shared in a text or a post, with the
   // logo when there is one (served at /book/{slug}/logo by publicBooking).
   const preview = [

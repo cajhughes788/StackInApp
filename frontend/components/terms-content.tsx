@@ -16,7 +16,7 @@ export default function TermsContent({
       <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4 text-sm leading-relaxed text-muted-foreground">
         <section>
           <p><strong>Effective Date:</strong> 04/27/2026</p>
-          <p><strong>Last Updated:</strong> 04/27/2026</p>
+          <p><strong>Last Updated:</strong> 10/29/2026</p>
           <p><strong>Owner:</strong> Optivium AI Solutions LLC</p>
         </section>
 
@@ -46,14 +46,18 @@ export default function TermsContent({
             and device, features may include work-entry tracking, W-2 and independent income
             logging, expense tracking, receipt capture, OCR-assisted data extraction, profit and
             loss summaries, paycheck and withholding estimates, pay stub generation, reminders,
-            workspace management, notifications, and premium features.
+            workspace management, notifications, and premium features. For independent
+            workspaces, features may also include invoicing, online payments and Charge now
+            through Stripe, a client list, appointment booking and a public booking page,
+            appointment deposits, reminders sent to your clients, calendar sync, and blocking busy
+            times from calendars you connect.
           </p>
           <p>
             521 is designed to help you organize information. It is not represented as an
             official bookkeeping system of record, payroll processor, payroll administrator,
             employer, employer-of-record, consumer reporting agency, bank, lender, money
-            transmitter, tax filing service, tax preparation service, or government reporting
-            platform.
+            transmitter, payment processor, tax filing service, tax preparation service, or
+            government reporting platform.
           </p>
         </section>
 
@@ -141,7 +145,85 @@ export default function TermsContent({
         </section>
 
         <section>
-          <h3 className="font-semibold text-foreground">9. Offline Use, Local Storage, and Sync</h3>
+          <h3 className="font-semibold text-foreground">9. Invoices, Online Payments, and Charge Now</h3>
+          <p>
+            521 lets you send invoices, take payments by QR code (&quot;Charge now&quot;), and collect
+            appointment deposits and balances. Online payments are processed by Stripe, Inc. through
+            a payment account you open with Stripe. By setting up online payments, you agree to
+            Stripe&apos;s Connected Account Agreement and other applicable Stripe terms
+            (stripe.com/legal), and you authorize 521 to create and manage payments, refunds, and
+            payout records on your Stripe account as needed for the features you use.
+          </p>
+          <p>
+            521 does not hold your funds. Money your clients pay online goes to your Stripe account,
+            and Stripe pays it out to you. Stripe&apos;s fees, reviews, holds, reserves, and payout
+            timing are set by Stripe, not by 521.
+          </p>
+          <p>
+            You are the seller in every sale you make with 521. You are solely responsible for the
+            goods and services you provide, your prices, any taxes you owe or must collect, the
+            receipts and records the law requires of you, and refunds, disputes, and chargebacks
+            with your clients, including any fees Stripe charges for them. 521 is not a party to any
+            sale between you and your clients. Payments you record as made another way (such as cash
+            or a payment app) are your own records, and you are responsible for their accuracy.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">10. Booking, Deposits, and Cancellation Policies</h3>
+          <p>
+            521 lets you take appointments, publish a booking page, ask for deposits, send
+            reminders, move appointments, and block times you are busy in calendars you connect. You
+            choose your services, prices, hours, deposits, cancellation cutoff, and whether and until
+            when clients may move their own appointments. These are your policies with your clients;
+            521 shows them to your clients and applies them on your behalf.
+          </p>
+          <p>
+            When a client cancels before your cancellation cutoff, 521 refunds a deposit they paid
+            online through Stripe; after the cutoff, or when an appointment is marked as a no-show,
+            the deposit is kept, as your settings say. When you cancel an appointment, its deposit is
+            refunded. You are responsible for making sure your policies are lawful, clearly
+            communicated, and honored, and for resolving any disagreement with a client about them.
+          </p>
+          <p>
+            521 works to prevent double-booking, but the times offered depend on your settings, on
+            calendars you connect (which may be out of date), and on device, network, and
+            third-party conditions. You are responsible for confirming your schedule. 521 is not
+            liable for missed or double-booked appointments, appointments booked during times you
+            meant to keep free, lost revenue, or reminders and notifications that are delayed,
+            duplicated, or not delivered.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">11. Your Clients and Messages Sent on Your Behalf</h3>
+          <p>
+            Your client list holds information you enter and information clients submit when they
+            book through your booking page. You represent that you have the right to collect, store,
+            and use that information and to contact those clients, and you are responsible for your
+            own obligations to them, including any privacy notices and consents the law requires of
+            you.
+          </p>
+          <p>
+            At your direction, 521 sends transactional emails to your clients, such as invoices,
+            payment reminders, appointment confirmations, reminders, and notices that an appointment
+            was moved or canceled. They are sent from a 521 address with your business name, and
+            replies go to the business email you set. You may not use these features to send
+            marketing, spam, or messages your clients have not agreed to receive, or to impersonate
+            anyone. Text messages you send from your own device are sent by you, through your own
+            phone and carrier.
+          </p>
+          <p>
+            Your booking page shows your business name, logo, contact details, services, prices, and
+            open times to anyone who has the link. Private appointment and invoice links let anyone
+            who has them view that appointment or invoice and act on it (for example, pay, cancel, or
+            move it); share them only with the intended client. Calendar links you add or create are
+            private and should be kept like a password.
+          </p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-foreground">12. Offline Use, Local Storage, and Sync</h3>
           <p>
             Some 521 features may support caching, offline entry, delayed synchronization, or
             queued actions. Because of that, information shown on your device may temporarily differ
@@ -160,7 +242,7 @@ export default function TermsContent({
         </section>
 
         <section>
-          <h3 className="font-semibold text-foreground">10. Accounts and Security</h3>
+          <h3 className="font-semibold text-foreground">13. Accounts and Security</h3>
           <p>
             You are responsible for maintaining accurate account information, safeguarding your
             login credentials, and all activity that occurs under your account. You must notify us
@@ -171,7 +253,7 @@ export default function TermsContent({
         </section>
 
         <section>
-          <h3 className="font-semibold text-foreground">11. Limited License</h3>
+          <h3 className="font-semibold text-foreground">14. Limited License</h3>
           <p>
             Subject to your compliance with these terms, we grant you a limited, personal,
             non-exclusive, non-transferable, non-sublicensable, revocable license to use 521
@@ -181,7 +263,7 @@ export default function TermsContent({
         </section>
 
         <section>
-          <h3 className="font-semibold text-foreground">12. Access and Availability</h3>
+          <h3 className="font-semibold text-foreground">15. Access and Availability</h3>
           <p>
             Access to 521 may depend on account status, eligibility, device compatibility,
             regional availability, and technical requirements. Features, limits, and availability
@@ -195,7 +277,7 @@ export default function TermsContent({
         </section>
 
         <section>
-          <h3 className="font-semibold text-foreground">13. Device Platforms</h3>
+          <h3 className="font-semibold text-foreground">16. Device Platforms</h3>
           <p>
             If you download or access 521 through a third-party device platform or
             distributor, you acknowledge that the platform provider is not a party to these terms
@@ -211,7 +293,7 @@ export default function TermsContent({
         </section>
 
         <section id="privacy">
-          <h3 className="font-semibold text-foreground">14. Privacy and Electronic Communications</h3>
+          <h3 className="font-semibold text-foreground">17. Privacy and Electronic Communications</h3>
           <p>
             Your use of 521 is also subject to our Privacy Policy. By using the app, you
             consent to the collection, use, storage, and processing of information as described in
@@ -227,7 +309,7 @@ export default function TermsContent({
         </section>
 
         <section>
-          <h3 className="font-semibold text-foreground">15. Your Content and Data</h3>
+          <h3 className="font-semibold text-foreground">18. Your Content and Data</h3>
           <p>
             As between you and Optivium AI Solutions LLC, you retain ownership of the information
             and content you submit to 521. You grant us a worldwide, non-exclusive,
@@ -243,7 +325,7 @@ export default function TermsContent({
         </section>
 
         <section>
-          <h3 className="font-semibold text-foreground">16. Feedback</h3>
+          <h3 className="font-semibold text-foreground">19. Feedback</h3>
           <p>
             If you send us suggestions, ideas, requests, or feedback about 521, you allow us
             to use that feedback without restriction or compensation to you.
@@ -251,7 +333,7 @@ export default function TermsContent({
         </section>
 
         <section>
-          <h3 className="font-semibold text-foreground">17. Prohibited Uses</h3>
+          <h3 className="font-semibold text-foreground">20. Prohibited Uses</h3>
           <p>
             You may not use 521 for any unlawful, fraudulent, deceptive, abusive, harmful, or
             unauthorized purpose. This includes attempting to access another user’s data,
@@ -262,15 +344,18 @@ export default function TermsContent({
             or financial recordkeeping laws. It also includes using 521 to fabricate, falsify,
             or deceptively alter pay stubs, income records, receipts, tax-related information, or
             other documents, or to mislead employers, workers, lenders, landlords, insurers,
-            regulators, courts, or government agencies.
+            regulators, courts, or government agencies. It also includes using 521 to send spam or
+            unwanted messages, to take payments for unlawful goods or services or for anything other
+            than a genuine sale, or to collect deposits or payments you do not intend to honor.
           </p>
         </section>
 
         <section>
-          <h3 className="font-semibold text-foreground">18. Third-Party Services and Content</h3>
+          <h3 className="font-semibold text-foreground">21. Third-Party Services and Content</h3>
           <p>
             521 may rely on or integrate with third-party services such as authentication,
-            cloud hosting, notifications, app stores, analytics, maps, OCR, or other service
+            cloud hosting, notifications, app stores, analytics, maps, OCR, payment processing
+            (Stripe), bank connections (Plaid), email delivery, calendar providers, or other service
             providers. We are not responsible for the availability, accuracy, security, legality,
             or terms of any third-party services, content, or products. Those providers may
             change, suspend, or discontinue their services at any time.
@@ -278,7 +363,7 @@ export default function TermsContent({
         </section>
 
         <section>
-          <h3 className="font-semibold text-foreground">19. Beta or Experimental Features</h3>
+          <h3 className="font-semibold text-foreground">22. Beta or Experimental Features</h3>
           <p>
             We may offer beta, preview, early access, or experimental features from time to time.
             Those features may be incomplete, unstable, changed, or removed at any time and are
@@ -287,7 +372,7 @@ export default function TermsContent({
         </section>
 
         <section>
-          <h3 className="font-semibold text-foreground">20. Service Availability and Changes</h3>
+          <h3 className="font-semibold text-foreground">23. Service Availability and Changes</h3>
           <p>
             We may modify, improve, restrict, suspend, or discontinue all or part of 521 at
             any time, with or without notice, to the extent permitted by law. We do not guarantee
@@ -297,7 +382,7 @@ export default function TermsContent({
         </section>
 
         <section>
-          <h3 className="font-semibold text-foreground">21. Suspension, Termination, and Account Deletion</h3>
+          <h3 className="font-semibold text-foreground">24. Suspension, Termination, and Account Deletion</h3>
           <p>
             We may suspend or terminate your access to 521, with or without notice, if we
             believe you violated these terms, created legal, financial, or security risk, failed
@@ -313,7 +398,7 @@ export default function TermsContent({
         </section>
 
         <section>
-          <h3 className="font-semibold text-foreground">22. Intellectual Property</h3>
+          <h3 className="font-semibold text-foreground">25. Intellectual Property</h3>
           <p>
             521, including its software, code, design, branding, interfaces, text, graphics,
             underlying technology, and related intellectual property, is owned by Optivium AI
@@ -323,7 +408,7 @@ export default function TermsContent({
         </section>
 
         <section>
-          <h3 className="font-semibold text-foreground">23. Disclaimer of Warranties</h3>
+          <h3 className="font-semibold text-foreground">26. Disclaimer of Warranties</h3>
           <p>
             TO THE MAXIMUM EXTENT PERMITTED BY LAW, 521 IS PROVIDED &quot;AS IS&quot; AND &quot;AS
             AVAILABLE.&quot; WE DISCLAIM ALL WARRANTIES, WHETHER EXPRESS, IMPLIED, STATUTORY, OR
@@ -334,13 +419,14 @@ export default function TermsContent({
           <p>
             WITHOUT LIMITING THE FOREGOING, WE DO NOT WARRANT THAT ANY DATA, ESTIMATE,
             CLASSIFICATION, GENERATED DOCUMENT, REMINDER, RECEIPT EXTRACTION, LOCATION-BASED
-            FEATURE, SYNC PROCESS, OR THIRD-PARTY INTEGRATION WILL BE ACCURATE, COMPLETE, CURRENT,
+            FEATURE, SYNC PROCESS, BOOKING OR AVAILABILITY, PAYMENT, REFUND, MESSAGE TO YOUR
+            CLIENTS, CALENDAR CONNECTION, OR THIRD-PARTY INTEGRATION WILL BE ACCURATE, COMPLETE, CURRENT,
             ACCEPTED BY THIRD PARTIES, ERROR-FREE, SECURE, OR UNINTERRUPTED.
           </p>
         </section>
 
         <section>
-          <h3 className="font-semibold text-foreground">24. Limitation of Liability</h3>
+          <h3 className="font-semibold text-foreground">27. Limitation of Liability</h3>
           <p>
             TO THE MAXIMUM EXTENT PERMITTED BY LAW, OPTIVIUM AI SOLUTIONS LLC AND ITS AFFILIATES,
             OFFICERS, MEMBERS, EMPLOYEES, CONTRACTORS, LICENSORS, AND SERVICE PROVIDERS WILL NOT BE
@@ -359,7 +445,7 @@ export default function TermsContent({
         </section>
 
         <section>
-          <h3 className="font-semibold text-foreground">25. Indemnification</h3>
+          <h3 className="font-semibold text-foreground">28. Indemnification</h3>
           <p>
             You agree to defend, indemnify, and hold harmless Optivium AI Solutions LLC and its
             affiliates, officers, members, employees, contractors, licensors, and service
@@ -371,7 +457,7 @@ export default function TermsContent({
         </section>
 
         <section>
-          <h3 className="font-semibold text-foreground">26. Dispute Resolution; Arbitration; Class Action Waiver</h3>
+          <h3 className="font-semibold text-foreground">29. Dispute Resolution; Arbitration; Class Action Waiver</h3>
           <p>
             To the maximum extent permitted by law, you and Optivium AI Solutions LLC agree to try
             to resolve disputes informally first. Except for disputes that qualify for small claims
@@ -398,7 +484,7 @@ export default function TermsContent({
         </section>
 
         <section>
-          <h3 className="font-semibold text-foreground">27. Governing Law</h3>
+          <h3 className="font-semibold text-foreground">30. Governing Law</h3>
           <p>
             Except to the extent preempted by applicable federal law or otherwise required by
             mandatory law, these terms are governed by the laws of the state in which Optivium AI
@@ -410,7 +496,7 @@ export default function TermsContent({
         </section>
 
         <section>
-          <h3 className="font-semibold text-foreground">28. Updates to These Terms</h3>
+          <h3 className="font-semibold text-foreground">31. Updates to These Terms</h3>
           <p>
             We may update these terms from time to time. If we make material changes, we may
             provide notice by updating the date above, posting updated terms in the app, emailing
@@ -420,7 +506,7 @@ export default function TermsContent({
         </section>
 
         <section>
-          <h3 className="font-semibold text-foreground">29. Miscellaneous</h3>
+          <h3 className="font-semibold text-foreground">32. Miscellaneous</h3>
           <p>
             These terms, together with any incorporated policies or additional terms presented to
             you, form the entire agreement between you and us regarding 521. If any provision
@@ -433,7 +519,7 @@ export default function TermsContent({
         </section>
 
         <section>
-          <h3 className="font-semibold text-foreground">30. Contact Information</h3>
+          <h3 className="font-semibold text-foreground">33. Contact Information</h3>
           <p>Optivium AI Solutions LLC</p>
           <p>
             For support, legal notices, or terms-related questions, please use the contact

@@ -10,24 +10,29 @@ const PRIVACY_SECTIONS: Array<{ title: string; paragraphs: string[] }> = [
       "If you use receipt capture or upload features, we collect the photos you provide and information extracted from them (such as merchant name, date, and amount) to help create or organize expense records. Receipt images are processed using a third-party optical character recognition service to extract this information.",
       "If you subscribe to a paid plan, our payment processor collects and processes your payment card details directly; we do not receive or store your full card number.",
       "If you create invoices, we collect the invoice details you enter, such as line items, amounts, due dates, notes, and your business details, along with the delivery and payment status of each invoice.",
+      "If you use Charge now, we collect the amount, an optional description, an optional customer name, and whether and how it was paid.",
+      "If you use booking, we collect the services, prices, hours, location, and booking settings you set up, and the details of the appointments made, such as the client, service, date and time, deposit, and status.",
+      "If you add your own calendars to block busy times, you give us a private calendar (iCal) link. We read that calendar periodically and keep only the start and end times of busy events — never event titles, locations, notes, or guests. We keep the link so the calendar can be read again; it is never shown to your clients, and removing the calendar deletes the link and the busy times read from it. If you use calendar sync, we create a private link that lets your calendar app read your 521 appointments, including your clients' names; anyone with that link can see them, and you can reset it at any time.",
+      "If you turn on online booking, your business name, logo, contact details, services, prices, and open times are shown publicly on your booking page, and your logo may appear in previews when the link is shared.",
       "If you set up online invoice payments, you create a payment account with Stripe. Stripe collects the identity, tax, and bank payout information it requires directly from you; we do not receive or store your full bank account or tax identification numbers. We receive and store your Stripe account identifier, its setup status, and information about the payments, refunds, and payouts made through it so that 521 can record and match them to your invoices.",
       "If you enable location-based features, reminders, or workplace tools, we collect precise location information and related saved location details, such as workplace coordinates or addresses, and link that information to your account or workspace.",
-      "To deliver push notifications (such as alerts about new bank transactions to review), we collect a device notification token tied to your device and account.",
+      "To deliver push notifications (such as alerts about new bookings, cancellations, and bank transactions to review), we collect a device notification token tied to your device and account.",
       "We automatically collect limited technical and usage information, such as app version, device type, and error or crash information, to help us maintain and improve the service.",
     ],
   },
   {
     title: "Information about your clients",
     paragraphs: [
-      "When you create an invoice, you may enter information about the person or business you are billing, such as their name, email address, phone number, and mailing address. We store this information in your account and use it only to deliver invoices and payment reminders on your behalf, to show the invoice on a private link, and to pre-fill a text message in your own messaging app when you choose to text an invoice. Texts are sent from your device and phone number, not by 521.",
-      "When a client pays an invoice online, Stripe collects and processes their payment details directly; we do not receive or store their full card or bank account number.",
-      "We do not use client information for marketing, and we do not sell it or share it for advertising. If you are a client of a 521 user and want your information corrected or removed, you can contact the business that invoiced you or contact us using the information in the Contact section below.",
+      "When you create an invoice, book an appointment, or save a client, you may enter information about the person or business you are serving or billing, such as their name, email address, phone number, and mailing address. We store this information in your client list and use it only to deliver invoices, payment reminders, appointment confirmations, appointment reminders, and notices that an appointment was moved or canceled on your behalf, to show their invoice or appointment on a private link, and to pre-fill a text message in your own messaging app when you choose to text them. Texts are sent from your device and phone number, not by 521.",
+      "People who book through a 521 user's booking page enter their own name, email address, and (optionally) phone number. We store this with the appointment and in that business's client list, and use it to confirm, remind, and update them about their appointment on the business's behalf. Each business decides how it uses its clients' information and is responsible for its own policies and communications with them.",
+      "When a client pays an invoice, a deposit, or a Charge now payment online, Stripe collects and processes their payment details directly; we do not receive or store their full card or bank account number.",
+      "We do not use client information for marketing, and we do not sell it or share it for advertising. If you are a client of a 521 user and want your information corrected or removed, you can contact the business you booked with or that invoiced you, or contact us using the information in the Contact section below.",
     ],
   },
   {
     title: "How we use information",
     paragraphs: [
-      "We use collected information to provide the core functionality of 521, including account authentication, workspace management, income and expense tracking, bank transaction review, pay and tax estimate features, receipt storage and processing, invoicing and invoice payments, reminders, and customer support.",
+      "We use collected information to provide the core functionality of 521, including account authentication, workspace management, income and expense tracking, bank transaction review, pay and tax estimate features, receipt storage and processing, invoicing, online payments and Charge now, appointment booking and booking pages, appointment deposits and reminders, calendar features, reminders, and customer support.",
       "We also use information to maintain security, detect and prevent misuse, troubleshoot issues, process user requests, send service-related notifications, and operate, improve, and support the reliability of the service.",
     ],
   },
@@ -49,11 +54,12 @@ const PRIVACY_SECTIONS: Array<{ title: string; paragraphs: string[] }> = [
     paragraphs: [
       "We share information with the following categories of service providers, only as needed for them to perform their function on our behalf and under obligations to protect your information:",
       "Plaid Inc. — to enable bank account connectivity and retrieve transaction and account data you authorize us to access.",
-      "Payment processing providers (including Stripe) — to process subscription payments and billing, to set up the payment accounts you use to accept invoice payments, and to process invoice payments, refunds, and payouts. Stripe's own use of information is governed by its privacy policy, available at stripe.com/privacy.",
+      "Payment processing providers (including Stripe) — to process subscription payments and billing, to set up the payment accounts you use to accept payments, and to process invoice payments, appointment deposits, Charge now payments, refunds, and payouts. Stripe's own use of information is governed by its privacy policy, available at stripe.com/privacy.",
       "Cloud infrastructure providers (including Google Cloud Platform and Firebase) — for hosting, databases, authentication, file storage, and push notification delivery.",
       "Optical character recognition and document-processing providers (including Amazon Web Services) — to extract information from receipt images you upload.",
       "AI service providers (including Anthropic) — to suggest expense categories for bank transactions, using only the merchant's business name and the bank's category label.",
-      "Email delivery providers (including SendGrid) — to send account, billing, and support-related emails, and to deliver invoices and payment reminders to your clients on your behalf.",
+      "Email delivery providers (including SendGrid) — to send account, billing, and support-related emails, and to deliver invoices, payment reminders, appointment confirmations, appointment reminders, and appointment updates to your clients on your behalf.",
+      "Calendar providers you choose (such as Google, Apple, or Microsoft) — we request the private calendar links you add, to read when you are busy; we do not send them your information.",
       "We may also disclose information when required by law, to respond to valid legal requests, to enforce our terms, or to protect the rights, safety, and security of 521, our users, or others.",
     ],
   },
@@ -71,7 +77,7 @@ const PRIVACY_SECTIONS: Array<{ title: string; paragraphs: string[] }> = [
       "If you request deletion of your account and do not have an active paid subscription, your data is deleted promptly upon request.",
       "If you have an active paid subscription at the time you request deletion, deletion is scheduled to occur once your current paid period ends, and is then completed automatically, typically within about 24 hours of that date.",
       "If you disconnect a linked bank account without deleting your entire account, that connection is revoked immediately, independent of your account's overall status.",
-      "When your account is deleted, your invoices, your clients' information, and the private invoice links you created are deleted with it. Stripe keeps its own records of your payment account and the payments made through it, as required by law and its own policies.",
+      "When your account is deleted, your invoices, appointments, client list, booking settings, and the calendar links you added are deleted with it, and your booking page, private invoice and appointment links, and calendar sync link stop working. Stripe keeps its own records of your payment account and the payments made through it, as required by law and its own policies.",
       "We may retain limited records, such as a log that a deletion request was made and completed, after other data has been deleted, solely to demonstrate compliance with this policy.",
     ],
   },
@@ -123,7 +129,7 @@ export default function PrivacyPolicyContent() {
           <strong className="text-foreground">Effective Date:</strong> 09/06/2026
         </p>
         <p>
-          <strong className="text-foreground">Last Updated:</strong> 10/19/2026
+          <strong className="text-foreground">Last Updated:</strong> 10/29/2026
         </p>
       </section>
 
