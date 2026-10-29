@@ -147,15 +147,39 @@ const page = (a, move, extra = {}) =>
     ...extra,
   });
 
-test("offers a move with its deadline, or says to contact the business", () => {
+test("coming back later: a small link, or how to get in touch", () => {
   const open = page(appointment(), { check: { ok: true, deadline: hoursBefore(24) }, view: null });
   assert.match(open, /href="\/b\/tok\?move=1">Need a different time\?<\/a>/);
-  assert.match(open, /You can move it once, until Dec 2 at 10am\./);
+  // Not a button, and no deadline until they ask.
+  assert.doesNotMatch(open, /class="btn[^"]*"[^>]*>Need a different time/);
+  assert.doesNotMatch(open, /You can move it/);
   const used = page(moved("client"), { check: { ok: false, reason: "used" }, view: null });
   assert.match(used, /You've already moved this once\. To change the time, contact Fresh &lt;Cuts&gt;\./);
   assert.match(used, /moved from Thu, Dec 3 at 10am/);
   assert.match(page(appointment(), { check: { ok: false, reason: "late" }, view: null }), /To change the time, contact/);
   assert.doesNotMatch(page(appointment(), { check: { ok: false, reason: "status" }, view: null }), /contact Fresh|Need a different time/);
+});
+
+test("right after booking: Cancel only, and where to find the link", () => {
+  const check = { ok: true, deadline: hoursBefore(24) };
+  const booked = page(appointment(), { check, view: null }, { justAnswered: true, confirmationEmailedTo: "jordan@example.com" });
+  assert.doesNotMatch(booked, /Need a different time/);
+  assert.match(booked, /Cancel appointment/);
+  assert.match(booked, /We emailed your confirmation to jordan@example\.com\. Use the link in it if you need to change anything\./);
+  const paid = page(appointment(), { check, view: null }, { justPaid: true, confirmationEmailedTo: null });
+  assert.doesNotMatch(paid, /Need a different time/);
+  assert.match(paid, /Save this page's link if you might need to change anything\./);
+  // Coming back: no note.
+  assert.doesNotMatch(page(appointment(), { check, view: null }), /Save this page|We emailed your confirmation/);
+});
+
+test("a warning before picking", () => {
+  const warn = page(appointment(), { check: { ok: true, deadline: hoursBefore(24) }, view: { step: "warn", deadline: hoursBefore(24) } });
+  assert.match(warn, /Move this appointment\?/);
+  assert.match(warn, /You can move it yourself only once, until Dec 2 at 10am\. After that, you'll need to contact Fresh &lt;Cuts&gt; to change it\./);
+  assert.match(warn, /href="\/b\/tok\?move=1&amp;pick=1">Yes, pick a new time</);
+  assert.match(warn, /href="\/b\/tok">Keep my appointment</);
+  assert.doesNotMatch(warn, /Cancel appointment/);
 });
 
 test("the steps: days, times, then a form that posts the move", () => {
@@ -166,6 +190,7 @@ test("the steps: days, times, then a form that posts the move", () => {
   const times = page(appointment(), { check: { ok: true, deadline: hoursBefore(24) }, view: { step: "times", date: "2026-12-04", times: ["14:00"], taken: true } });
   assert.match(times, /href="\/b\/tok\?move=1&amp;date=2026-12-04&amp;time=14%3A00">2pm</);
   assert.match(times, /That time was just taken/);
+  assert.match(times, /href="\/b\/tok\?move=1&amp;pick=1" style="[^"]*">&larr; Days/);
   const confirm = page(appointment(), { check: { ok: true, deadline: hoursBefore(24) }, view: { step: "confirm", date: "2026-12-04", time: "14:00" } });
   assert.match(confirm, /Move to Fri, Dec 4 at 2pm\?/);
   assert.match(confirm, /<form method="post" action="\/b\/tok\/move"/);

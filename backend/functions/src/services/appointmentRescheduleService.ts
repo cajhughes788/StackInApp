@@ -59,29 +59,34 @@ async function blockingAhead(workspaceId: string, booking: BookingSettings, excl
 export async function clientMoveView(
   shared: SharedAppointment,
   // null: only whether they may (the page itself, not picking a time).
-  query: { date?: string; from?: string; time?: string } | null
-): Promise<{ check: ClientRescheduleCheck; view: ClientMoveView | null }> {
+  // pick: past the warning, choosing a day.
+  query: { date?: string; from?: string; time?: string; pick?: boolean } | null
+): Promise<{ check: ClientRescheduleCheck; view: ClientMoveView | null; emailClients: boolean }> {
   const booking = await readBookingSettings(shared.workspaceId)
+  const result = (check: ClientRescheduleCheck, view: ClientMoveView | null) => ({ check, view, emailClients: booking.emailClients })
   const nowIso = new Date().toISOString()
   const check = clientCanReschedule(shared.appointment, booking.noRefundRescheduleHours, nowIso)
-  if (!check.ok || !query) return { check, view: null }
+  if (!check.ok || !query) return result(check, null)
+  // The warning comes first; picking starts once they say yes.
+  if (!query.pick && !query.date && !query.from) return result(check, { step: "warn", deadline: check.deadline })
   const service = { minutes: shared.appointment.minutes, bufferMinutes: shared.appointment.bufferMinutes }
   const appointments = await blockingAhead(shared.workspaceId, booking, shared.appointment.id, nowIso)
   const date = query.date && /^\d{4}-\d{2}-\d{2}$/.test(query.date) ? query.date : null
   if (!date) {
     const from = query.from && /^\d{4}-\d{2}-\d{2}$/.test(query.from) ? query.from : undefined
     const days = bookingOpenDays({ settings: booking, service, appointments, nowIso, from, limit: MOVE_DAYS_PER_PAGE + 1 })
-    return {
-      check,
-      view: { step: "days", days: days.slice(0, MOVE_DAYS_PER_PAGE), moreFrom: days.length > MOVE_DAYS_PER_PAGE ? days[MOVE_DAYS_PER_PAGE] : null },
-    }
+    return result(check, {
+      step: "days",
+      days: days.slice(0, MOVE_DAYS_PER_PAGE),
+      moreFrom: days.length > MOVE_DAYS_PER_PAGE ? days[MOVE_DAYS_PER_PAGE] : null,
+    })
   }
   // Its own current time isn't a move.
   const times = bookingOpenTimes({ settings: booking, service, date, appointments, nowIso }).filter(
     (time) => !(date === shared.appointment.date && time === shared.appointment.startTime)
   )
-  if (query.time && times.includes(query.time)) return { check, view: { step: "confirm", date, time: query.time } }
-  return { check, view: { step: "times", date, times, taken: !!query.time } }
+  if (query.time && times.includes(query.time)) return result(check, { step: "confirm", date, time: query.time })
+  return result(check, { step: "times", date, times, taken: !!query.time })
 }
 
 type MoveTarget = { date: string; startTime: string }

@@ -34,9 +34,10 @@ export function clientRescheduleDeadline(
   return new Date(Date.parse(appointment.startAt) - hours * 3_600_000).toISOString()
 }
 
-// The client's page while they pick a new time: open days, a day's open
-// times, then "Move to …?".
+// The client's page while they move it: a warning first ("you can only do
+// this once, until …"), then open days, a day's open times, "Move to …?".
 export type ClientMoveView =
+  | { step: "warn"; deadline: string }
   | { step: "days"; days: string[]; moreFrom: string | null }
   | { step: "times"; date: string; times: string[]; taken?: boolean }
   | { step: "confirm"; date: string; time: string }

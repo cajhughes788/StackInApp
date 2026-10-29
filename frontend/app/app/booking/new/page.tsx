@@ -79,15 +79,11 @@ function NewAppointmentPage() {
             })
             if ("error" in result) return result.error
             const { appointment } = result
-            // Emailed (once the server books it); or else the share sheet
-            // opens on the appointment (emails off, or a phone number to
-            // text). No contact: just booked.
+            // Emailed (once the server books it); else Messages opens on
+            // their number, or the share sheet when there's only an email
+            // (emails turned off).
             const arrival =
-              settings.emailClients && appointment.clientEmail
-                ? "sent"
-                : !settings.emailClients || appointment.clientPhone
-                  ? "share"
-                  : null
+              settings.emailClients && appointment.clientEmail ? "sent" : appointment.clientPhone ? "text" : "share"
             router.replace(`/app/booking/view?id=${encodeURIComponent(appointment.id)}${arrival ? `&then=${arrival}` : ""}`)
             return null
           }}

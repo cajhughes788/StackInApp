@@ -119,7 +119,10 @@ export async function publicAppointmentHandler(req: Request, res: Response): Pro
     }
     const { clientMoveView } = await import("../services/appointmentRescheduleService.js")
     const moving = req.query.move === "1"
-    const moveState = await clientMoveView(shared, moving ? { date: query(req, "date"), from: query(req, "from"), time: query(req, "time") } : null)
+    const moveState = await clientMoveView(
+      shared,
+      moving ? { date: query(req, "date"), from: query(req, "from"), time: query(req, "time"), pick: req.query.pick === "1" } : null
+    )
     res.status(200).send(
       renderPublicAppointmentPage(shared.appointment, shared.settings, {
         respondPath: `${pagePath}/respond`,
@@ -131,7 +134,10 @@ export async function publicAppointmentHandler(req: Request, res: Response): Pro
         justAnswered: req.query.answered === "1",
         justPaid: req.query.paid === "1",
         askingToCancel: req.query.cancel === "1",
-        move: { ...moveState, movePath: `${pagePath}/move`, justMoved: req.query.moved === "1" },
+        move: { check: moveState.check, view: moveState.view, movePath: `${pagePath}/move`, justMoved: req.query.moved === "1" },
+        // Their confirmation (with this link) went by email when 521 sends them.
+        confirmationEmailedTo:
+          shared.appointment.lastEmailedTo ?? (moveState.emailClients ? shared.appointment.clientEmail : null),
       })
     )
   } catch (error) {

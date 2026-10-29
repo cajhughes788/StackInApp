@@ -31,7 +31,7 @@ function AppointmentPage() {
   // once, then dropped from the address so going back doesn't repeat it.
   const then = useQueryParam("then")
   const [arrival] = useState<AppointmentArrival | null>(() =>
-    then === "sent" || then === "failed" || then === "share" || then === "remind" ? then : null
+    then === "sent" || then === "failed" || then === "text" || then === "share" || then === "remind" ? then : null
   )
   useEffect(() => {
     if (then && appointmentId) router.replace(`/app/booking/view?id=${encodeURIComponent(appointmentId)}`)

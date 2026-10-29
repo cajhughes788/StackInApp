@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { Capacitor } from "@capacitor/core"
 import { Mail, MessageSquare } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -13,6 +12,7 @@ import { fieldLabelClass, softInputClass } from "@/components/invoices/invoice-u
 import { updateInvoiceStatus } from "@/lib/api/invoicesApi"
 import { emailInvoiceInBackground, invoiceSaved, latestInvoice } from "@/lib/domain/invoiceService"
 import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
+import { smsHref } from "@/lib/smsLink"
 import { formatInvoiceDate, formatInvoiceMoney, publicInvoiceUrl } from "@shared/invoiceDisplay"
 import { invoiceBalanceDue } from "@shared/invoicePayments"
 import type { InvoiceSettings, InvoiceType } from "@shared/schemas/invoice"
@@ -22,13 +22,6 @@ import type { InvoiceSettings, InvoiceType } from "@shared/schemas/invoice"
 // share the invoice first, which sends a draft.
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
-// iOS wants "sms:<number>&body=", everything else "sms:<number>?body=".
-function smsHref(phone: string, body: string): string {
-  const number = phone.replace(/[^\d+]/g, "")
-  const ios = Capacitor.getPlatform() === "ios" || /iPhone|iPad|iPod/.test(navigator.userAgent)
-  return `sms:${number}${ios ? "&" : "?"}body=${encodeURIComponent(body)}`
-}
 
 export default function SendInvoiceSheet({
   open,

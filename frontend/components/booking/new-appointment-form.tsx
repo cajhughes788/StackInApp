@@ -157,8 +157,17 @@ export function NewAppointmentForm({
   const deposit: BookingDeposit =
     depositType === "none" ? { type: "none", value: 0 } : { type: depositType, value: parseAmount(depositText) ?? 0 }
 
+  // Who gets the link, and how: the server fills a saved client's details in.
+  const matchedClient = clientId
+    ? savedClients.find((client) => client.id === clientId)
+    : savedClients.find((client) => clientName.trim() && client.nameKey === clientKey(clientName))
   const errors = {
     client: clientName.trim() ? null : "Who's the appointment for?",
+    // Every client gets their appointment link, by email or text.
+    contact:
+      clientEmail.trim() || clientPhone.trim() || matchedClient?.email || matchedClient?.phone
+        ? null
+        : "Add their phone or email so they get their appointment link.",
     service: serviceChoice ? (serviceName.trim() ? null : "Name the service.") : "Pick a service, or Custom.",
     price: serviceChoice && price === null ? "Enter the price, like 60 or 45.50." : null,
     deposit:
@@ -170,10 +179,6 @@ export function NewAppointmentForm({
     when: !date || !startTime ? "Pick a date and time." : date < today ? "That date has already passed." : null,
   }
   const hasErrors = Object.values(errors).some(Boolean)
-  // Who gets the link, and how: the server fills a saved client's details in.
-  const matchedClient = clientId
-    ? savedClients.find((client) => client.id === clientId)
-    : savedClients.find((client) => clientName.trim() && client.nameKey === clientKey(clientName))
   const emailsLink = settings.emailClients && !errors.email && !!(clientEmail.trim() || matchedClient?.email)
   const firstName = clientName.trim().split(/\s+/)[0] || "them"
   const hoursWarning = date && startTime ? bookingHoursWarning(settings, date, startTime, minutes) : null
@@ -291,7 +296,7 @@ export function NewAppointmentForm({
               className={softInputClass}
               value={clientEmail}
               onChange={(event) => setClientEmail(event.target.value)}
-              placeholder="Optional"
+              placeholder="client@email.com"
               maxLength={254}
               autoComplete="off"
               inputMode="email"
@@ -304,13 +309,17 @@ export function NewAppointmentForm({
               className={softInputClass}
               value={clientPhone}
               onChange={(event) => setClientPhone(event.target.value)}
-              placeholder="Optional"
+              placeholder="(512) 555-0100"
               maxLength={40}
               autoComplete="off"
             />
           </label>
         </div>
         {fieldError(errors.email)}
+        {showErrors && errors.contact ? null : (
+          <p className="text-xs text-muted-foreground">Email or phone, so they get their appointment link.</p>
+        )}
+        {fieldError(errors.contact)}
       </section>
 
       <section className={cn(cardClass, "space-y-3")}>

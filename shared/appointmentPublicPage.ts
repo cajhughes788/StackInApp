@@ -23,8 +23,10 @@ import { DEFAULT_INVOICE_ACCENT_COLOR, type InvoiceSettings, type InvoiceType } 
 // post to /b/{token}/respond. When the deposit is paid online, Confirm is
 // "Confirm & pay deposit" (a POST to /b/{token}/pay, on to Stripe). A
 // confirmed appointment can be canceled from here (?cancel=1 first says
-// what happens to the deposit), or moved once to an open time (?move=1 →
-// a day → a time → "Move to …?", a POST to /b/{token}/move).
+// what happens to the deposit), or moved once to an open time (?move=1 is
+// a warning first; then a day → a time → "Move to …?", a POST to
+// /b/{token}/move). Right after booking the page offers only Cancel: moving
+// is offered when they come back to it from their email or text.
 // ---------------------------------------------------------------------------
 
 const STATUS_PILLS: Record<AppointmentStatus, { label: string; bg: string; fg: string }> = {
@@ -73,6 +75,9 @@ export type PublicAppointmentPageOptions = {
   justAnswered?: boolean
   justPaid?: boolean
   askingToCancel?: boolean
+  // Right after booking: where the confirmation (with this link) was
+  // emailed, or null to tell them to keep this page's link.
+  confirmationEmailedTo?: string | null
   // Moving it (appointmentReschedule.ts): whether they may, and the step
   // they're on (null when not picking a time).
   move?: { check: ClientRescheduleCheck; view: ClientMoveView | null; movePath: string; justMoved?: boolean }
@@ -83,11 +88,24 @@ function moveWhen(date: string, time: string, thisYear: string): string {
   return `${formatAppointmentDate(date, thisYear)} at ${formatBookingTime(time)}`
 }
 
-// The steps for picking a new time; plain links and one form, no scripts.
-function renderMoveStep(view: ClientMoveView, pagePath: string, movePath: string, thisYear: string): string {
+// The steps for moving it; plain links and one form, no scripts.
+function renderMoveStep(
+  view: ClientMoveView,
+  context: { pagePath: string; movePath: string; thisYear: string; businessName: string; timeZone: string }
+): string {
+  const { pagePath, movePath, thisYear } = context
   const link = (params: Record<string, string>) => `${pagePath}?${new URLSearchParams({ move: "1", ...params }).toString()}`
   const back = (href: string, label: string) =>
     `<a href="${escapeHtml(href)}" style="display:inline-block;margin:16px 0 4px;color:var(--muted);font-size:14px;text-decoration:none">&larr; ${escapeHtml(label)}</a>`
+  if (view.step === "warn") {
+    return `<div style="margin-top:16px;padding:14px;border-radius:12px;background:#FFF4DE;color:#5C3D00">
+      <p style="margin:0;font-weight:600">Move this appointment?</p>
+      <p style="margin:6px 0 0">You can move it yourself only once, until ${escapeHtml(formatHoldUntil(view.deadline, context.timeZone))}. After that, you'll need to contact ${escapeHtml(context.businessName)} to change it.</p>
+      <p style="margin:6px 0 0">Your current time stays yours until you pick a new one. Your deposit, if you paid one, moves with it.</p>
+      <a class="btn pay" style="display:block;text-align:center;text-decoration:none;margin-top:12px" href="${escapeHtml(link({ pick: "1" }))}">Yes, pick a new time</a>
+      <a class="btn secondary" style="display:block;text-align:center;text-decoration:none;margin-top:8px" href="${escapeHtml(pagePath)}">Keep my appointment</a>
+    </div>`
+  }
   if (view.step === "days") {
     const days = view.days
       .map(
@@ -107,10 +125,10 @@ function renderMoveStep(view: ClientMoveView, pagePath: string, movePath: string
           `<a class="tip" style="color:inherit;text-decoration:none" href="${escapeHtml(link({ date: view.date, time }))}">${escapeHtml(formatBookingTime(time))}</a>`
       )
       .join("")
-    return `${back(link({}), "Days")}
+    return `${back(link({ pick: "1" }), "Days")}
     ${view.taken ? `<p style="margin:8px 0 0;padding:10px 12px;border-radius:10px;background:#FFF4DE;color:#8A5A00">That time was just taken — pick another.</p>` : ""}
     <p class="label" style="margin:8px 0 0">${escapeHtml(formatAppointmentDate(view.date, thisYear))}</p>
-    ${times ? `<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px">${times}</div>` : `<p>No open times left that day. <a href="${escapeHtml(link({}))}">Pick another day</a>.</p>`}`
+    ${times ? `<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px">${times}</div>` : `<p>No open times left that day. <a href="${escapeHtml(link({ pick: "1" }))}">Pick another day</a>.</p>`}`
   }
   return `<div style="margin-top:16px;padding:14px;border-radius:12px;background:#F6F5F1">
       <p style="margin:0;font-weight:600">Move to ${escapeHtml(moveWhen(view.date, view.time, thisYear))}?</p>
@@ -228,22 +246,40 @@ export function renderPublicAppointmentPage(
 
   const thisYear = options.nowIso.slice(0, 4)
   const move = options.move
+  // Right after booking (or paying), only Cancel is offered: moving shows
+  // when they come back to this page later.
+  const justBooked = !!options.justAnswered || !!options.justPaid
   const moveOffer = (() => {
-    if (!move || appointment.status !== "confirmed" || !before) return ""
+    if (!move || appointment.status !== "confirmed" || !before || justBooked) return ""
     if (move.check.ok) {
-      const deadline = DateTime.fromISO(move.check.deadline, { zone: appointment.timeZone })
-      return `<a class="btn secondary" style="display:block;text-align:center;text-decoration:none;margin-top:16px" href="${escapeHtml(options.pagePath)}?move=1">Need a different time?</a>
-      <p class="muted" style="margin:6px 0 0;font-size:13px;text-align:center">You can move it once, until ${escapeHtml(formatHoldUntil(deadline.toISO()!, appointment.timeZone))}.</p>`
+      return `<a style="display:block;text-align:center;margin-top:14px;color:var(--muted);font-size:14px" href="${escapeHtml(options.pagePath)}?move=1">Need a different time?</a>`
     }
     if (move.check.reason === "status") return ""
     return `<p class="muted" style="margin:16px 0 0;font-size:14px">${
       move.check.reason === "used" ? "You've already moved this once. " : ""
     }To change the time, contact ${escapeHtml(businessName)}.</p>`
   })()
+  // Where to find this page again.
+  const keepLinkNote =
+    justBooked && (appointment.status === "confirmed" || appointment.status === "requested")
+      ? `<p class="muted" style="margin:8px 0 0;font-size:14px">${
+          options.confirmationEmailedTo
+            ? `We emailed your confirmation to ${escapeHtml(options.confirmationEmailedTo)}. Use the link in it if you need to change anything.`
+            : "Save this page's link if you might need to change anything."
+        }</p>`
+      : ""
 
   const actions = (() => {
     if (options.askingToCancel && canCancel) return cancelStep
-    if (move?.view && move.check.ok) return renderMoveStep(move.view, options.pagePath, move.movePath, thisYear)
+    if (move?.view && move.check.ok) {
+      return renderMoveStep(move.view, {
+        pagePath: options.pagePath,
+        movePath: move.movePath,
+        thisYear,
+        businessName,
+        timeZone: appointment.timeZone,
+      })
+    }
     if (appointment.status === "requested") {
       const confirm = payNow
         ? `<button class="btn pay" type="submit" formaction="${escapeHtml(options.payPath)}">Confirm &amp; pay ${depositMoney} deposit</button>`
@@ -295,6 +331,7 @@ export function renderPublicAppointmentPage(
     </div>
     ${depositRow}
     ${messages[appointment.status] ? `<p style="margin:16px 0 0">${messages[appointment.status]}</p>` : ""}
+    ${keepLinkNote}
     ${actions}
   </section>
   ${policies ? `<section class="section"><div class="label">Policies</div><div class="policies" style="margin-top:6px">${escapeHtml(policies)}</div></section>` : ""}

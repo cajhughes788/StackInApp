@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import { PickerInput } from "@/components/booking/picker-input"
 import { cardClass, fieldLabelClass, localToday, softInputClass } from "@/components/invoices/invoice-ui"
 import { shareLink } from "@/lib/documentExport"
+import { smsHref } from "@/lib/smsLink"
 import { cn } from "@/lib/utils"
 import { appointmentCanFinish, appointmentLeftToPay } from "@shared/appointmentCheckout"
 import { appointmentDepositOnline, appointmentMoney } from "@shared/appointmentDeposits"
@@ -58,9 +59,10 @@ function formatHold(iso: string): string {
 }
 
 // How the client got their link when this was just booked: emailed, the
-// email failed, or (no email on file) the owner shares it. "remind": the
-// owner tapped the push for a client with no email for their reminder.
-export type AppointmentArrival = "sent" | "failed" | "share" | "remind"
+// email failed, texted (Messages opens on their number), or shared (no
+// email or phone to send to). "remind": the owner tapped the push for a
+// client with no email for their reminder.
+export type AppointmentArrival = "sent" | "failed" | "text" | "share" | "remind"
 
 export function AppointmentDetail({
   appointment,
@@ -119,6 +121,38 @@ export function AppointmentDetail({
   const leftToPay = status === "completed" && invoice ? invoiceBalanceDue(invoice) : appointmentLeftToPay(appointment, invoice)
   const finishHref = `/app/booking/finish?id=${encodeURIComponent(appointment.id)}`
 
+  // What goes with the link when it's texted or shared.
+  function linkMessage(reminder: boolean): string {
+    return (
+      (reminder
+        ? `Reminder of your ${appointment.serviceName} appointment: ${appointmentWhen(appointment)}`
+        : status === "requested"
+          ? depositOnline && money.kind === "due"
+            ? `Please confirm your ${appointment.serviceName} appointment with a ${formatInvoiceMoney(deposit)} deposit: ${appointmentWhen(appointment)}`
+            : `Please confirm your ${appointment.serviceName} appointment: ${appointmentWhen(appointment)}`
+          : depositOnline && money.kind === "due"
+            ? `Your ${appointment.serviceName} appointment (${formatInvoiceMoney(deposit)} deposit to pay): ${appointmentWhen(appointment)}`
+            : `Your ${appointment.serviceName} appointment: ${appointmentWhen(appointment)}`) +
+      (appointment.location.trim() ? ` · ${appointmentLocationLine(appointment.location)}` : "")
+    )
+  }
+
+  // Remembers the link went out, which clears "hasn't been sent their link".
+  function markShared() {
+    if (!appointment.linkSharedAt) void onAction({ action: "mark_shared" }).catch(() => {})
+  }
+
+  // Messages, addressed to the client and filled in; with no phone, the
+  // share sheet instead.
+  function textLink(reminder = false) {
+    if (!appointment.clientPhone || !appointment.shareToken) {
+      void run({ action: "share" }, { reminder })
+      return
+    }
+    window.location.href = smsHref(appointment.clientPhone, `${linkMessage(reminder)}\n${publicAppointmentUrl(appointment.shareToken)}`)
+    markShared()
+  }
+
   async function run(action: AppointmentAction, options: { reminder?: boolean } = {}) {
     setBusy(action.action)
     setError(null)
@@ -131,21 +165,9 @@ export function AppointmentDetail({
           ? publicAppointmentUrl(appointment.shareToken)
           : (await onAction(action)).shareUrl
       if (action.action === "share" && shareUrl) {
-        const shared = await shareLink(
-          shareUrl,
-          `${appointment.serviceName} appointment`,
-          (options.reminder
-            ? `Reminder of your ${appointment.serviceName} appointment: ${appointmentWhen(appointment)}`
-            : status === "requested"
-            ? depositOnline && money.kind === "due"
-              ? `Please confirm your ${appointment.serviceName} appointment with a ${formatInvoiceMoney(deposit)} deposit: ${appointmentWhen(appointment)}`
-              : `Please confirm your ${appointment.serviceName} appointment: ${appointmentWhen(appointment)}`
-            : depositOnline && money.kind === "due"
-              ? `Your ${appointment.serviceName} appointment (${formatInvoiceMoney(deposit)} deposit to pay): ${appointmentWhen(appointment)}`
-              : `Your ${appointment.serviceName} appointment: ${appointmentWhen(appointment)}`) +
-            (appointment.location.trim() ? ` · ${appointmentLocationLine(appointment.location)}` : "")
-        )
+        const shared = await shareLink(shareUrl, `${appointment.serviceName} appointment`, linkMessage(!!options.reminder))
         setNote(shared === "copied" ? "Link copied." : shared === "unavailable" ? shareUrl : null)
+        if (shared !== "unavailable") markShared()
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't do that. Check your connection and try again.")
@@ -210,7 +232,8 @@ export function AppointmentDetail({
     if (arrivalHandled.current || !arrival) return
     arrivalHandled.current = true
     if (arrival === "share" || arrival === "failed") void run({ action: "share" })
-    if (arrival === "remind" && open) void run({ action: "share" }, { reminder: true })
+    if (arrival === "text") textLink()
+    if (arrival === "remind" && open) textLink(true)
     // Only once, on arrival.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [arrival])
@@ -417,6 +440,17 @@ export function AppointmentDetail({
                   ? "Send the deposit link"
                   : "Share appointment details"}
           </Button>
+        ) : null}
+        {open && appointment.source === "owner" && !appointment.lastEmailedAt && !appointment.linkSharedAt && arrival !== "sent" ? (
+          <div className="space-y-2 rounded-[14px] bg-amber-100 p-3 text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+            <p className="flex items-start gap-2 text-sm">
+              <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+              {appointment.clientName} hasn&apos;t been sent their link yet.
+            </p>
+            <Button type="button" className="h-10 w-full rounded-full" disabled={busy !== null} onClick={() => textLink()}>
+              {appointment.clientPhone ? "Text the link" : "Share the link"}
+            </Button>
+          </div>
         ) : null}
         {canMove ? (
           moving ? (

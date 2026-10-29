@@ -116,6 +116,10 @@ export async function createAppointment(
     clientEmail: input.clientEmail,
     clientPhone: input.clientPhone,
   })
+  // Every client gets their appointment link, by email or text.
+  if (!(input.clientEmail || client.email) && !(input.clientPhone || client.phone)) {
+    throw new BadRequestError("Add their phone or email so they get their appointment link.")
+  }
   const ref = appointmentsCol(workspaceId).doc(`cmid_${input.clientMutationId}`)
   const keepService = input.saveAsService && input.serviceId === null
 
@@ -316,6 +320,12 @@ async function changeAppointment(
       appointment: next,
       shareUrl: next.shareToken ? publicAppointmentUrl(next.shareToken) : null,
     })
+
+    if (action.action === "mark_shared") {
+      const next = AppointmentSchema.parse({ ...stored, linkSharedAt: nowIso })
+      txn.set(ref, next)
+      return done(asOfNow(next, nowIso))
+    }
 
     if (action.action === "share") {
       if (stored.shareToken) return done(asOfNow(stored, nowIso))

@@ -103,6 +103,10 @@ export const AppointmentSchema = z.object({
   bookedFrom: z.enum(["website"]).nullable().default(null),
   // The last time 521 emailed the client their link, and where.
   lastEmailedAt: IsoSchema.nullable().default(null),
+  // The last time the owner texted or shared the client their link from the
+  // app (521 can't see whether a text was sent, only that it was opened).
+  // Neither this nor lastEmailedAt: the app nudges "hasn't been sent their link".
+  linkSharedAt: IsoSchema.nullable().default(null),
   lastEmailedTo: z.string().nullable().default(null),
   // Recent sends, for the daily cap on resends.
   recentEmailSends: z.array(IsoSchema).default([]),
@@ -164,6 +168,8 @@ export const AppointmentActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("complete") }),
   // The client didn't come: ends it and keeps any deposit.
   z.object({ action: z.literal("no_show") }),
+  // The owner texted or shared the client their link (linkSharedAt).
+  z.object({ action: z.literal("mark_shared") }),
   // Moves it to a new time (same service and length).
   z.object({ action: z.literal("reschedule"), date: DateSchema, startTime: TimeSchema }),
   // Finish & get paid (shared/appointmentCheckout.ts): the rest, with any

@@ -168,6 +168,8 @@ function optimistic(appointment: AppointmentType, action: AppointmentAction, inv
       // A paid deposit waits for its refund.
       if ((invoice?.payments ?? []).length > 0) return null
       return { ...base, status: "canceled", holdExpiresAt: null, canceledAt: nowIso, canceledBy: "owner", depositCheckout: null }
+    case "mark_shared":
+      return { ...appointment, linkSharedAt: nowIso }
     case "email": {
       const to = action.to ?? appointment.clientEmail
       return to ? { ...appointment, clientEmail: to, lastEmailedAt: nowIso, lastEmailedTo: to } : null
