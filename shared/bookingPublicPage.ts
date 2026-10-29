@@ -208,12 +208,19 @@ export function renderPublicBookingPage(context: PublicBookingContext, view: Pub
   ${policies && view.step === "details" ? `<section class="section"><div class="label">Policies</div><div class="policies" style="margin-top:6px">${escapeHtml(policies)}</div></section>` : ""}
 </article>
 <p class="foot">Booked with 521</p>`
-  // The preview card when the link is shared in a text or a post.
+  // The preview card when the link is shared in a text or a post, with the
+  // logo when there is one (served at /book/{slug}/logo by publicBooking).
   const preview = [
     `<meta property="og:type" content="website">`,
     `<meta property="og:title" content="${escapeHtml(`Book with ${settings.businessName || "me"}`)}">`,
     `<meta property="og:description" content="Book an appointment online.">`,
     `<meta property="og:url" content="${escapeHtml(publicBookingUrl(context.slug))}">`,
+    ...(settings.logoDataUrl
+      ? [
+          `<meta property="og:image" content="${escapeHtml(`${publicBookingUrl(context.slug)}/logo`)}">`,
+          `<meta property="og:image:alt" content="${escapeHtml(`${settings.businessName || "Business"} logo`)}">`,
+        ]
+      : []),
     `<meta name="twitter:card" content="summary">`,
   ].join("\n")
   return shell(`Book with ${businessName}`, body, accent, preview)

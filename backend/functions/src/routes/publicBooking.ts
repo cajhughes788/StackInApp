@@ -19,6 +19,10 @@ import { renderPublicBookingPage, renderPublicBookingUnavailable, type PublicBoo
 // POST /book/{slug}/book books it (a form post), then 303s to Stripe for a
 // deposit, or to the customer's appointment page (/b/{token}). A GET of
 // /book lands back on the page.
+//
+// GET /book/{slug}/logo is the business's logo as an image, for the link's
+// preview card (iMessage, Facebook): the logo is kept inside the settings,
+// which preview fetchers can't read.
 const SECURITY_HEADERS: Record<string, string> = {
   "Content-Security-Policy":
     "default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'self' https://checkout.stripe.com; frame-ancestors 'none'",
@@ -32,11 +36,28 @@ const SECURITY_HEADERS: Record<string, string> = {
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/
 
-function parsePath(req: Request): { slug: string; book: boolean } {
+function parsePath(req: Request): { slug: string; book: boolean; logo: boolean } {
   const segments = req.path.split("/").filter(Boolean)
   const at = segments.indexOf("book")
   const rest = at >= 0 ? segments.slice(at + 1) : segments
-  return { slug: (rest[0] ?? "").toLowerCase(), book: rest[1] === "book" }
+  return { slug: (rest[0] ?? "").toLowerCase(), book: rest[1] === "book", logo: rest[1] === "logo" }
+}
+
+// Only the image types logos are saved as; never SVG (it can carry script).
+const LOGO_DATA_URL = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/
+
+async function sendLogo(slug: string, res: Response): Promise<void> {
+  const page = await findBookingPage(slug)
+  const match = page?.settings.logoDataUrl?.match(LOGO_DATA_URL)
+  if (!match) {
+    res.status(404).type("text/plain").send("No logo")
+    return
+  }
+  res.setHeader("Content-Type", match[1])
+  // Previews are fetched once and cached by the apps; an hour here spares repeats.
+  res.setHeader("Cache-Control", "public, max-age=3600")
+  res.setHeader("X-Content-Type-Options", "nosniff")
+  res.status(200).send(Buffer.from(match[2], "base64"))
 }
 
 function query(req: Request, name: string): string {
@@ -74,10 +95,19 @@ async function viewFor(page: BookingPage, req: Request): Promise<PublicBookingVi
 export async function publicBookingHandler(req: Request, res: Response): Promise<void> {
   for (const [key, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(key, value)
   res.setHeader("Content-Type", "text/html; charset=utf-8")
-  const { slug, book } = parsePath(req)
+  const { slug, book, logo } = parsePath(req)
   const allowed = book ? ["GET", "POST", "HEAD"] : ["GET", "HEAD"]
   if (!allowed.includes(req.method)) {
     res.status(405).send("Method not allowed")
+    return
+  }
+  if (logo) {
+    try {
+      await sendLogo(slug, res)
+    } catch (error) {
+      console.error("publicBooking: logo failed", error)
+      res.status(500).type("text/plain").send("Couldn't load the logo")
+    }
     return
   }
   const pagePath = `/book/${encodeURIComponent(slug)}`

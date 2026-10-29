@@ -275,6 +275,17 @@ test("a form error shows above the form with what they typed, escaped", () => {
   assert.doesNotMatch(html, /<script>/);
 });
 
+test("preview card: the logo's own address when there is one", () => {
+  const withLogo = renderPublicBookingPage(
+    context({ settings: InvoiceSettingsSchema.parse({ businessName: "Fresh <Cuts>", logoDataUrl: "data:image/png;base64,iVBORw0KGgo=" }) }),
+    { step: "services" }
+  );
+  assert.match(withLogo, /<meta property="og:image" content="https:\/\/app\.the521app\.com\/book\/fresh-cuts\/logo">/);
+  assert.match(withLogo, /<meta property="og:image:alt" content="Fresh &lt;Cuts&gt; logo">/);
+  assert.match(withLogo, /<meta property="og:title" content="Book with Fresh &lt;Cuts&gt;">/);
+  assert.doesNotMatch(renderPublicBookingPage(context(), { step: "services" }), /og:image/);
+});
+
 test("Booking page count: online bookings in the last 30 days, and from the website", () => {
   const now = "2026-12-01T12:00:00.000Z";
   const made = (daysAgo, extra = {}) => ({
