@@ -873,6 +873,32 @@ export function BookingSetupForm({
           Clients see: &ldquo;{cancellationPolicyText(draft.refundCutoffHours)}&rdquo; If you cancel, they always get the
           deposit back.
         </p>
+        {draft.refundCutoffHours === null ? (
+          // Otherwise clients can move it up to the cancellation cutoff.
+          <label className={fieldLabelClass}>
+            Clients can move their appointment
+            <select
+              className={softInputClass}
+              value={draft.noRefundRescheduleHours === null ? "never" : String(draft.noRefundRescheduleHours)}
+              onChange={(event) =>
+                update({ noRefundRescheduleHours: event.target.value === "never" ? null : Number(event.target.value) })
+              }
+            >
+              {[...new Set<number>([...BOOKING_REFUND_CUTOFF_OPTIONS, ...(draft.noRefundRescheduleHours === null ? [] : [draft.noRefundRescheduleHours])])]
+                .sort((a, b) => a - b)
+                .map((hours) => (
+                  <option key={hours} value={hours}>
+                    Up to {refundCutoffLabel(hours)} before
+                  </option>
+                ))}
+              <option value="never">No, they contact you</option>
+            </select>
+          </label>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Clients can move their appointment once themselves, up to {refundCutoffLabel(draft.refundCutoffHours)} before.
+          </p>
+        )}
         {!onlinePayments && draft.services.some((service) => service.deposit.type !== "none") ? (
           <p className="rounded-[12px] bg-amber-100 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">
             Connect Stripe to take deposits by card when clients confirm.{" "}

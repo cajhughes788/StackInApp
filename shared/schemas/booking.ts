@@ -149,6 +149,11 @@ const BookingSettingsFields = z.object({
   // All-day events in the owner's busy calendars block the whole day
   // (shared/busyTimes.ts). Optional on input like location.
   busyAllDay: z.boolean().optional(),
+  // When deposits are never refunded (refundCutoffHours null): how long
+  // before the appointment clients may still move it themselves (same
+  // choices as the cutoff), or null = they contact you
+  // (shared/appointmentReschedule.ts). Optional on input like location.
+  noRefundRescheduleHours: BookingRefundCutoffSchema.optional(),
 })
 
 function refineSettings(settings: z.infer<typeof BookingSettingsFields>, ctx: z.RefinementCtx) {
@@ -176,6 +181,7 @@ export const BookingSettingsSchema = z.object({
   emailClients: z.boolean().default(true),
   reminders: BookingRemindersSchema.default(DEFAULT_BOOKING_REMINDERS),
   busyAllDay: z.boolean().default(false),
+  noRefundRescheduleHours: BookingRefundCutoffSchema.default(DEFAULT_BOOKING_REFUND_CUTOFF_HOURS),
   updatedAt: z.string().optional(),
 })
 

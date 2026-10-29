@@ -249,6 +249,19 @@ export async function updateAppointment(
     }
   }
 
+  if (action.action === "reschedule") {
+    const { rescheduleByOwner } = await import("./appointmentRescheduleService.js")
+    const moved = await rescheduleByOwner(workspaceId, appointmentId, { date: action.date, startTime: action.startTime })
+    const deposits = await import("./appointmentDepositsService.js")
+    return {
+      appointment: asOfNow(moved.appointment, new Date().toISOString()),
+      shareUrl: moved.appointment.shareToken ? publicAppointmentUrl(moved.appointment.shareToken) : null,
+      invoice: await deposits.readAppointmentInvoice(workspaceId, moved.appointment),
+      // Where "Your appointment moved" went; null means share it instead.
+      emailedTo: moved.email === "sent" ? moved.appointment.clientEmail : null,
+    }
+  }
+
   if (action.action === "finish") {
     const { finishAppointment } = await import("./appointmentCheckoutService.js")
     const finished = await finishAppointment(workspaceId, uid, appointmentId, action)
@@ -291,7 +304,7 @@ export async function updateAppointment(
 async function changeAppointment(
   workspaceId: string,
   ref: FirebaseFirestore.DocumentReference,
-  action: Exclude<AppointmentAction, { action: "record_deposit" | "email" | "finish" }>
+  action: Exclude<AppointmentAction, { action: "record_deposit" | "email" | "finish" | "reschedule" }>
 ): Promise<AppointmentUpdate> {
   return db.runTransaction(async (txn) => {
     const snap = await txn.get(ref)

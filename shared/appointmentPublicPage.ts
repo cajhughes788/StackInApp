@@ -8,6 +8,7 @@ import {
   clientCancelRefunds,
   refundCutoffLabel,
 } from "./appointmentDeposits"
+import { formatMovedFrom, type ClientMoveView, type ClientRescheduleCheck } from "./appointmentReschedule"
 import { appointmentEndTime, appointmentMapLinks, formatAppointmentDate, formatBookingTime } from "./appointments"
 import { formatInvoiceMoney, formatInvoicePhone } from "./invoiceDisplay"
 import { escapeHtml, shell, telHref } from "./invoicePublicPage"
@@ -22,7 +23,8 @@ import { DEFAULT_INVOICE_ACCENT_COLOR, type InvoiceSettings, type InvoiceType } 
 // post to /b/{token}/respond. When the deposit is paid online, Confirm is
 // "Confirm & pay deposit" (a POST to /b/{token}/pay, on to Stripe). A
 // confirmed appointment can be canceled from here (?cancel=1 first says
-// what happens to the deposit).
+// what happens to the deposit), or moved once to an open time (?move=1 →
+// a day → a time → "Move to …?", a POST to /b/{token}/move).
 // ---------------------------------------------------------------------------
 
 const STATUS_PILLS: Record<AppointmentStatus, { label: string; bg: string; fg: string }> = {
@@ -71,6 +73,55 @@ export type PublicAppointmentPageOptions = {
   justAnswered?: boolean
   justPaid?: boolean
   askingToCancel?: boolean
+  // Moving it (appointmentReschedule.ts): whether they may, and the step
+  // they're on (null when not picking a time).
+  move?: { check: ClientRescheduleCheck; view: ClientMoveView | null; movePath: string; justMoved?: boolean }
+}
+
+// "Thu, Dec 4 at 2pm", or "… 2026" when not this year.
+function moveWhen(date: string, time: string, thisYear: string): string {
+  return `${formatAppointmentDate(date, thisYear)} at ${formatBookingTime(time)}`
+}
+
+// The steps for picking a new time; plain links and one form, no scripts.
+function renderMoveStep(view: ClientMoveView, pagePath: string, movePath: string, thisYear: string): string {
+  const link = (params: Record<string, string>) => `${pagePath}?${new URLSearchParams({ move: "1", ...params }).toString()}`
+  const back = (href: string, label: string) =>
+    `<a href="${escapeHtml(href)}" style="display:inline-block;margin:16px 0 4px;color:var(--muted);font-size:14px;text-decoration:none">&larr; ${escapeHtml(label)}</a>`
+  if (view.step === "days") {
+    const days = view.days
+      .map(
+        (date) =>
+          `<a class="opt" style="color:inherit;text-decoration:none" href="${escapeHtml(link({ date }))}"><span>${escapeHtml(formatAppointmentDate(date, thisYear))}</span><strong class="muted">&rsaquo;</strong></a>`
+      )
+      .join("")
+    return `${back(pagePath, "Keep my current time")}
+    <p class="label" style="margin:8px 0 0">Pick a new day</p>
+    ${days || "<p>No other open times right now.</p>"}
+    ${view.moreFrom ? `<a class="btn secondary" style="display:block;text-align:center;text-decoration:none;margin-top:14px" href="${escapeHtml(link({ from: view.moreFrom }))}">Later dates</a>` : ""}`
+  }
+  if (view.step === "times") {
+    const times = view.times
+      .map(
+        (time) =>
+          `<a class="tip" style="color:inherit;text-decoration:none" href="${escapeHtml(link({ date: view.date, time }))}">${escapeHtml(formatBookingTime(time))}</a>`
+      )
+      .join("")
+    return `${back(link({}), "Days")}
+    ${view.taken ? `<p style="margin:8px 0 0;padding:10px 12px;border-radius:10px;background:#FFF4DE;color:#8A5A00">That time was just taken — pick another.</p>` : ""}
+    <p class="label" style="margin:8px 0 0">${escapeHtml(formatAppointmentDate(view.date, thisYear))}</p>
+    ${times ? `<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px">${times}</div>` : `<p>No open times left that day. <a href="${escapeHtml(link({}))}">Pick another day</a>.</p>`}`
+  }
+  return `<div style="margin-top:16px;padding:14px;border-radius:12px;background:#F6F5F1">
+      <p style="margin:0;font-weight:600">Move to ${escapeHtml(moveWhen(view.date, view.time, thisYear))}?</p>
+      <p class="muted" style="margin:6px 0 0;font-size:14px">You can move it yourself once. Your deposit, if you paid one, moves with it.</p>
+      <form method="post" action="${escapeHtml(movePath)}" style="margin-top:12px">
+        <input type="hidden" name="date" value="${escapeHtml(view.date)}">
+        <input type="hidden" name="time" value="${escapeHtml(view.time)}">
+        <button class="btn pay" type="submit">Yes, move it</button>
+      </form>
+      <a class="btn secondary" style="display:block;text-align:center;text-decoration:none;margin-top:8px" href="${escapeHtml(link({ date: view.date }))}">Pick another time</a>
+    </div>`
 }
 
 export function renderPublicAppointmentPage(
@@ -136,9 +187,11 @@ export function renderPublicAppointmentPage(
         : "",
     confirmed: options.justPaid
       ? "Deposit received — you're booked. Stripe is emailing you a receipt."
-      : options.justAnswered
-        ? "You're booked. See you then!"
-        : "You're booked.",
+      : options.move?.justMoved
+        ? "Your appointment is moved. See you then!"
+        : options.justAnswered
+          ? "You're booked. See you then!"
+          : "You're booked.",
     declined: `You let ${escapeHtml(businessName)} know you can't make it. Reach out to pick another time.`,
     canceled: canceledMessage,
     completed: "Thanks for coming in.",
@@ -173,8 +226,24 @@ export function renderPublicAppointmentPage(
       <button class="btn pay" type="submit">${label}</button>
     </form>`
 
+  const thisYear = options.nowIso.slice(0, 4)
+  const move = options.move
+  const moveOffer = (() => {
+    if (!move || appointment.status !== "confirmed" || !before) return ""
+    if (move.check.ok) {
+      const deadline = DateTime.fromISO(move.check.deadline, { zone: appointment.timeZone })
+      return `<a class="btn secondary" style="display:block;text-align:center;text-decoration:none;margin-top:16px" href="${escapeHtml(options.pagePath)}?move=1">Need a different time?</a>
+      <p class="muted" style="margin:6px 0 0;font-size:13px;text-align:center">You can move it once, until ${escapeHtml(formatHoldUntil(deadline.toISO()!, appointment.timeZone))}.</p>`
+    }
+    if (move.check.reason === "status") return ""
+    return `<p class="muted" style="margin:16px 0 0;font-size:14px">${
+      move.check.reason === "used" ? "You've already moved this once. " : ""
+    }To change the time, contact ${escapeHtml(businessName)}.</p>`
+  })()
+
   const actions = (() => {
     if (options.askingToCancel && canCancel) return cancelStep
+    if (move?.view && move.check.ok) return renderMoveStep(move.view, options.pagePath, move.movePath, thisYear)
     if (appointment.status === "requested") {
       const confirm = payNow
         ? `<button class="btn pay" type="submit" formaction="${escapeHtml(options.payPath)}">Confirm &amp; pay ${depositMoney} deposit</button>`
@@ -186,6 +255,7 @@ export function renderPublicAppointmentPage(
     }
     const parts = [
       payNow && !options.justPaid ? payForm(`Pay ${depositMoney} deposit`) : "",
+      moveOffer,
       canCancel
         ? `<a style="display:block;text-align:center;margin-top:14px;color:var(--muted);font-size:14px" href="${escapeHtml(options.pagePath)}?cancel=1">Cancel appointment</a>`
         : "",
@@ -213,7 +283,11 @@ export function renderPublicAppointmentPage(
       <span class="pill" style="background:${pill.bg};color:${pill.fg}">${pill.label}</span>
     </div>
     <p style="margin:8px 0 0">${when}</p>
-    <p class="muted" style="margin:2px 0 0">For ${escapeHtml(appointment.clientName)}</p>
+    <p class="muted" style="margin:2px 0 0">For ${escapeHtml(appointment.clientName)}${
+      appointment.reschedules.length > 0
+        ? ` · moved from ${escapeHtml(formatMovedFrom(appointment.reschedules[appointment.reschedules.length - 1], thisYear))}`
+        : ""
+    }</p>
     ${renderWhere(appointment.location)}
     <div class="total" style="margin-top:16px">
       <span class="label">Price</span>

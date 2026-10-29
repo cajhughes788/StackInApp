@@ -98,6 +98,39 @@ export async function emailAppointmentReminder(
   return true
 }
 
+/**
+ * "Your appointment moved", once per new time, when Booking setup's "Email
+ * clients automatically" is on and the client has an email. Never throws.
+ */
+export async function emailAppointmentMoved(
+  workspaceId: string,
+  appointment: AppointmentType,
+  by: "owner" | "client"
+): Promise<{ result: AppointmentEmailResult; appointment: AppointmentType }> {
+  const movedFrom = appointment.reschedules[appointment.reschedules.length - 1]
+  if (!appointment.clientEmail || !appointment.shareToken || !movedFrom) return { result: "none", appointment }
+  const marker = db.doc(`workspaces/${workspaceId}/appointmentEmails/moved_${appointment.id}_${Date.parse(appointment.startAt)}`)
+  try {
+    const booking = await readBookingSettings(workspaceId)
+    if (!booking.emailClients) return { result: "off", appointment }
+    try {
+      await marker.create({ at: new Date().toISOString() })
+    } catch {
+      return { result: "sent", appointment } // Already sent.
+    }
+    try {
+      const updated = await sendAppointmentEmail(workspaceId, appointment, "moved", appointment.clientEmail, { movedFrom, movedBy: by })
+      return { result: "sent", appointment: updated }
+    } catch (error) {
+      await marker.delete().catch(() => null)
+      throw error
+    }
+  } catch (error) {
+    console.error("appointmentEmail: moved email failed", { workspaceId, id: appointment.id }, error)
+    return { result: "failed", appointment }
+  }
+}
+
 /** The owner's Resend: the email for where the appointment stands now, to `to` (saved as their address). */
 export async function resendAppointmentEmail(workspaceId: string, appointment: AppointmentType, to: string): Promise<AppointmentType> {
   const now = Date.now()
@@ -113,7 +146,12 @@ async function sendAppointmentEmail(
   appointment: AppointmentType,
   kind: AppointmentEmailKind,
   to: string,
-  options: { depositRefunded?: boolean; nowIso?: string }
+  options: {
+    depositRefunded?: boolean
+    nowIso?: string
+    movedFrom?: { fromDate: string; fromStartTime: string }
+    movedBy?: "owner" | "client"
+  }
 ): Promise<AppointmentType> {
   // Workspace daily cap, reserved before sending.
   const now = Date.now()
@@ -141,6 +179,8 @@ async function sendAppointmentEmail(
     depositDueOnline: appointmentDepositOnline(appointment, onlinePayments) && appointmentMoney(appointment, invoice).kind === "due",
     depositRefunded: options.depositRefunded,
     nowIso: options.nowIso,
+    movedFrom: options.movedFrom,
+    movedBy: options.movedBy,
   })
 
   sgMail.setApiKey(SENDGRID_API_KEY.value())

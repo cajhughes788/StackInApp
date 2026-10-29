@@ -11,6 +11,7 @@ import { runAppointmentAction, useBookingEmailFailed } from "@/lib/domain/appoin
 import { useSaving } from "@/lib/domain/backgroundSave"
 import { appointmentSaveKey, useAppointmentsStore } from "@/lib/stores/useAppointmentsStore"
 import { useBookingSettingsStore } from "@/lib/stores/useBookingSettingsStore"
+import { useBusyCalendarsStore } from "@/lib/stores/useBusyCalendarsStore"
 import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
 import { cn } from "@/lib/utils"
 
@@ -39,6 +40,10 @@ function AppointmentPage() {
     workspaceId ? state.byWorkspaceId[workspaceId]?.settings?.emailClients ?? true : true
   )
   const loadBookingSettings = useBookingSettingsStore((state) => state.load)
+  const bookingSettings = useBookingSettingsStore((state) => (workspaceId ? state.byWorkspaceId[workspaceId]?.settings ?? null : null))
+  // When the owner is busy in their own calendars, for "Change time".
+  const busyTimes = useBusyCalendarsStore((state) => (workspaceId ? state.byWorkspaceId[workspaceId]?.busy : undefined))
+  const loadBusy = useBusyCalendarsStore((state) => state.load)
   const entry = useAppointmentsStore((state) => (workspaceId ? state.byWorkspaceId[workspaceId] : undefined))
   const load = useAppointmentsStore((state) => state.load)
   const appointment = entry?.appointments.find((item) => item.id === appointmentId) ?? null
@@ -54,7 +59,8 @@ function AppointmentPage() {
     void load(workspaceId, { force: true }).catch(() => {})
     void loadInvoices(workspaceId, { force: true }).catch(() => {})
     void loadBookingSettings(workspaceId).catch(() => {})
-  }, [load, loadInvoices, loadBookingSettings, workspaceId])
+    void loadBusy(workspaceId).catch(() => {})
+  }, [load, loadInvoices, loadBookingSettings, loadBusy, workspaceId])
 
   return (
     <InvoicesPage
@@ -72,6 +78,8 @@ function AppointmentPage() {
           emailClients={emailClients}
           arrival={emailFailed ? "failed" : arrival}
           saving={saving}
+          bookingSettings={bookingSettings}
+          busyTimes={busyTimes ?? []}
           onAction={(action) => runAppointmentAction(workspaceId, appointment, action, invoice)}
         />
       ) : !entry || entry.status === "loading" ? (

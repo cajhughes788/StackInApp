@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
-import { Banknote, Check, Mail, MapPin, Phone, Share2, TriangleAlert, UserX, X } from "lucide-react"
+import { Banknote, CalendarClock, Check, Mail, MapPin, Phone, Share2, TriangleAlert, UserX, X } from "lucide-react"
 
 import {
   AppointmentStatusPill,
@@ -16,7 +16,18 @@ import { shareLink } from "@/lib/documentExport"
 import { cn } from "@/lib/utils"
 import { appointmentCanFinish, appointmentLeftToPay } from "@shared/appointmentCheckout"
 import { appointmentDepositOnline, appointmentMoney } from "@shared/appointmentDeposits"
-import { appointmentLocationLine, appointmentMapLinks, formatBookingTime, publicAppointmentUrl } from "@shared/appointments"
+import {
+  appointmentLocationLine,
+  appointmentMapLinks,
+  appointmentTimes,
+  bookingHoursWarning,
+  formatAppointmentDate,
+  formatBookingTime,
+  publicAppointmentUrl,
+} from "@shared/appointments"
+import { formatMovedFrom, ownerCanReschedule } from "@shared/appointmentReschedule"
+import { findBusyConflict } from "@shared/busyTimes"
+import type { BookingSettings } from "@shared/schemas/booking"
 import { formatInvoiceDate, formatInvoiceMoney, formatInvoicePhone } from "@shared/invoiceDisplay"
 import { invoiceBalanceDue, invoiceTipsReceived } from "@shared/invoicePayments"
 import type { AppointmentAction, AppointmentType } from "@shared/schemas/appointment"
@@ -58,6 +69,8 @@ export function AppointmentDetail({
   emailClients,
   arrival,
   saving,
+  bookingSettings = null,
+  busyTimes = [],
   onAction,
 }: {
   appointment: AppointmentType
@@ -70,13 +83,22 @@ export function AppointmentDetail({
   arrival: AppointmentArrival | null
   // Changes still on their way to the server.
   saving: boolean
-  onAction: (action: AppointmentAction) => Promise<{ appointment: AppointmentType; shareUrl: string | null }>
+  // For "Change time": its hours warning, and when the owner is busy in
+  // their own calendars.
+  bookingSettings?: BookingSettings | null
+  busyTimes?: Array<{ start: string; end: string; calendar: string }>
+  // emailedTo: "reschedule" only — where "Your appointment moved" went.
+  onAction: (action: AppointmentAction) => Promise<{ appointment: AppointmentType; shareUrl: string | null; emailedTo?: string | null }>
 }) {
   const [busy, setBusy] = useState<AppointmentAction["action"] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
   const [confirmingCancel, setConfirmingCancel] = useState(false)
   const [confirmingNoShow, setConfirmingNoShow] = useState(false)
+  // "Change time": the new date and time being picked.
+  const [moving, setMoving] = useState(false)
+  const [moveDate, setMoveDate] = useState(appointment.date)
+  const [moveTime, setMoveTime] = useState(appointment.startTime)
   const [recording, setRecording] = useState(false)
   const [paidDate, setPaidDate] = useState(localToday())
   const [method, setMethod] = useState<InvoicePaidMethod | null>(null)
@@ -131,6 +153,53 @@ export function AppointmentDetail({
       setBusy(null)
       setConfirmingCancel(false)
       setConfirmingNoShow(false)
+    }
+  }
+
+  const canMove = ownerCanReschedule(appointment, new Date().toISOString())
+  const movePicked = /^\d{4}-\d{2}-\d{2}$/.test(moveDate) && /^([01]\d|2[0-3]):[0-5]\d$/.test(moveTime)
+  const moveIsSame = moveDate === appointment.date && moveTime === appointment.startTime
+  const moveWarnings = (() => {
+    if (!movePicked || moveIsSame) return []
+    const warnings: string[] = []
+    const hours = bookingSettings ? bookingHoursWarning(bookingSettings, moveDate, moveTime, appointment.minutes) : null
+    if (hours) warnings.push(hours)
+    const times = appointmentTimes({
+      date: moveDate,
+      startTime: moveTime,
+      timeZone: appointment.timeZone,
+      minutes: appointment.minutes,
+      bufferMinutes: appointment.bufferMinutes,
+    })
+    const conflict = times ? findBusyConflict(times, busyTimes) : null
+    if (conflict) warnings.push(`You're busy then (${conflict.calendar} calendar).`)
+    return warnings
+  })()
+
+  // Moves it; the server emails the client, else the share sheet opens.
+  async function moveAppointment() {
+    if (!movePicked || moveIsSame) return
+    setBusy("reschedule")
+    setError(null)
+    setNote(null)
+    try {
+      const result = await onAction({ action: "reschedule", date: moveDate, startTime: moveTime })
+      setMoving(false)
+      const moved = result.appointment
+      if (result.emailedTo) {
+        setNote(`Moved. ${appointment.clientName} was emailed the new time.`)
+      } else if (moved.shareToken) {
+        const shared = await shareLink(
+          publicAppointmentUrl(moved.shareToken),
+          `${moved.serviceName} appointment`,
+          `Your ${moved.serviceName} appointment moved to ${appointmentWhen(moved)}`
+        )
+        setNote(shared === "copied" ? "Moved. Link copied." : "Moved.")
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't move it. Check your connection and try again.")
+    } finally {
+      setBusy(null)
     }
   }
 
@@ -206,6 +275,12 @@ export function AppointmentDetail({
             Booked outside your usual hours.
           </p>
         ) : null}
+        {appointment.reschedules.map((move) => (
+          <p key={move.at} className="flex items-start gap-2 text-sm text-muted-foreground">
+            <CalendarClock className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            Moved from {formatMovedFrom(move)} by {move.by === "client" ? "the client" : "you"}.
+          </p>
+        ))}
         {appointment.location.trim() ? (
           // Opens Maps (the app hands non-app links to the phone).
           <a
@@ -342,6 +417,82 @@ export function AppointmentDetail({
                   ? "Send the deposit link"
                   : "Share appointment details"}
           </Button>
+        ) : null}
+        {canMove ? (
+          moving ? (
+            <div className={cn(cardClass, "space-y-3")}>
+              <p className="text-sm font-semibold text-foreground">Move to a new time</p>
+              <div className="flex items-end gap-2">
+                <label className={cn(fieldLabelClass, "min-w-0 flex-1")}>
+                  Date
+                  <PickerInput
+                    type="date"
+                    min={localToday()}
+                    placeholder="Pick a date"
+                    value={moveDate}
+                    onChange={(event) => setMoveDate(event.target.value)}
+                  />
+                </label>
+                <label className={cn(fieldLabelClass, "min-w-0 flex-1")}>
+                  Time
+                  <PickerInput type="time" placeholder="Pick a time" value={moveTime} onChange={(event) => setMoveTime(event.target.value)} />
+                </label>
+              </div>
+              {moveWarnings.map((warning) => (
+                <p
+                  key={warning}
+                  className="flex items-start gap-2 rounded-xl bg-amber-100 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+                >
+                  <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                  <span>{warning} You can still move it.</span>
+                </p>
+              ))}
+              {movePicked && !moveIsSame ? (
+                <p className="text-sm text-foreground">
+                  Move {appointment.clientName}&apos;s {appointment.serviceName} to{" "}
+                  <span className="font-semibold">
+                    {formatAppointmentDate(moveDate)} at {formatBookingTime(moveTime)}
+                  </span>
+                  ?
+                </p>
+              ) : null}
+              <p className="text-xs text-muted-foreground">
+                {emailClients && appointment.clientEmail
+                  ? `We'll email ${appointment.clientName} the new time.`
+                  : "Then you can text them the new time."}{" "}
+                Same service, price and deposit.
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  className="h-11 flex-1 rounded-full"
+                  disabled={busy !== null || !movePicked || moveIsSame}
+                  onClick={() => void moveAppointment()}
+                >
+                  {busy === "reschedule" ? "Moving..." : "Move it"}
+                </Button>
+                <Button type="button" variant="outline" className="h-11 flex-1 rounded-full" onClick={() => setMoving(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 w-full rounded-full"
+              disabled={busy !== null}
+              onClick={() => {
+                setMoveDate(appointment.date)
+                setMoveTime(appointment.startTime)
+                setError(null)
+                setMoving(true)
+              }}
+            >
+              <CalendarClock className="size-4" aria-hidden="true" />
+              Change time
+            </Button>
+          )
         ) : null}
         {arrival === "failed" && !appointment.lastEmailedAt ? (
           <p className="text-center text-sm text-destructive">

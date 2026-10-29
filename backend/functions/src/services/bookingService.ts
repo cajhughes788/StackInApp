@@ -89,6 +89,8 @@ export async function saveBookingSettings(workspaceId: string, uid: string, raw:
   const emailClients = parsed.data.emailClients ?? saved.emailClients
   const reminders = parsed.data.reminders ?? saved.reminders
   const busyAllDay = parsed.data.busyAllDay ?? saved.busyAllDay
+  const noRefundRescheduleHours =
+    parsed.data.noRefundRescheduleHours === undefined ? saved.noRefundRescheduleHours : parsed.data.noRefundRescheduleHours
   if (bookingSlug) {
     const problem = bookingSlugProblem(bookingSlug)
     if (problem) throw new BadRequestError(`Booking link: ${problem}`)
@@ -108,6 +110,7 @@ export async function saveBookingSettings(workspaceId: string, uid: string, raw:
     emailClients,
     reminders,
     busyAllDay,
+    noRefundRescheduleHours,
     // Kept in date order, no repeats.
     daysOff: [...new Set(parsed.data.daysOff)].sort(),
     updatedAt: nowIso,

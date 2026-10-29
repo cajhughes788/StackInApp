@@ -84,6 +84,20 @@ export const AppointmentSchema = z.object({
   // Who made it: the owner in the app, or the customer on the public
   // booking page (step 4).
   source: z.enum(["owner", "online"]).default("owner"),
+  // Each time it was moved to a new time (oldest first): where it was, when,
+  // and who moved it. Clients may move their own once
+  // (shared/appointmentReschedule.ts).
+  reschedules: z
+    .array(
+      z.object({
+        fromDate: DateSchema,
+        fromStartTime: TimeSchema,
+        fromStartAt: IsoSchema,
+        at: IsoSchema,
+        by: z.enum(["owner", "client"]),
+      })
+    )
+    .default([]),
   // Where an online customer came from: the "Book now" button on the
   // owner's website (?via=site), or null for the plain link.
   bookedFrom: z.enum(["website"]).nullable().default(null),
@@ -150,6 +164,8 @@ export const AppointmentActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("complete") }),
   // The client didn't come: ends it and keeps any deposit.
   z.object({ action: z.literal("no_show") }),
+  // Moves it to a new time (same service and length).
+  z.object({ action: z.literal("reschedule"), date: DateSchema, startTime: TimeSchema }),
   // Finish & get paid (shared/appointmentCheckout.ts): the rest, with any
   // extras and discount, goes on the appointment's invoice. "qr": the client
   // pays on their phone now. "paid": they paid another way (with any tip).
@@ -177,6 +193,9 @@ export const AppointmentActionSchema = z.discriminatedUnion("action", [
 // From the client's page. "cancel" is a confirmed appointment called off by
 // the client (the deposit is refunded or kept by the cancellation rule).
 export const AppointmentResponseSchema = z.enum(["confirm", "decline", "cancel"])
+
+// The client moving their own appointment from its page (/b/{token}/move).
+export const AppointmentClientMoveSchema = z.object({ date: DateSchema, time: TimeSchema })
 
 export type AppointmentStatus = z.infer<typeof AppointmentStatusSchema>
 export type AppointmentType = z.infer<typeof AppointmentSchema>

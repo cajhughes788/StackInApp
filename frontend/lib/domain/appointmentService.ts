@@ -150,7 +150,8 @@ export function createAppointmentInBackground(params: {
   return { appointment }
 }
 
-type ActionResult = { appointment: AppointmentType; shareUrl: string | null }
+// emailedTo: "reschedule" only — where "Your appointment moved" went.
+type ActionResult = { appointment: AppointmentType; shareUrl: string | null; emailedTo?: string | null }
 
 /** What an action does on screen now, or null when it waits for the server. */
 function optimistic(appointment: AppointmentType, action: AppointmentAction, invoice: InvoiceType | null): AppointmentType | null {

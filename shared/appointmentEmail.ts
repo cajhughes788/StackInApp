@@ -1,5 +1,6 @@
 import { appointmentDepositAmount, appointmentRefundCutoffAt, cancellationPolicyText } from "./appointmentDeposits"
 import { appointmentDayWords, appointmentWhenWords, formatReminderMoment } from "./appointmentReminders"
+import { formatMovedFrom } from "./appointmentReschedule"
 import { appointmentEndTime, appointmentLocationLine, formatAppointmentDate, formatBookingTime } from "./appointments"
 import { formatInvoiceMoney, textColorOnAccent } from "./invoiceDisplay"
 import { escapeHtml } from "./invoicePublicPage"
@@ -9,11 +10,12 @@ import { DEFAULT_INVOICE_ACCENT_COLOR, type InvoiceSettings } from "./schemas/in
 // ---------------------------------------------------------------------------
 // The email 521 sends a client about an appointment
 // (appointmentEmailService.ts): asked to confirm, booked, canceled by the
-// business, or a reminder before it (appointmentReminders.ts). Same look and rules as the invoice email (invoiceEmail.ts):
+// business, a reminder before it (appointmentReminders.ts), or moved to a
+// new time (appointmentReschedule.ts). Same look and rules as the invoice email (invoiceEmail.ts):
 // tables and inline styles, no images, everything typed escaped.
 // ---------------------------------------------------------------------------
 
-export type AppointmentEmailKind = "request" | "booked" | "canceled" | "reminder"
+export type AppointmentEmailKind = "request" | "booked" | "canceled" | "reminder" | "moved"
 export type AppointmentEmail = { subject: string; text: string; html: string }
 
 type AppointmentEmailParams = {
@@ -28,6 +30,9 @@ type AppointmentEmailParams = {
   depositRefunded?: boolean
   // "reminder" only: when it's sent, for "tomorrow" and the free-cancel line.
   nowIso?: string
+  // "moved" only: the time it had before, and who moved it.
+  movedFrom?: { fromDate: string; fromStartTime: string }
+  movedBy?: "owner" | "client"
 }
 
 /** "PDT" for the business's time zone at that moment; "" if unknown. */
@@ -59,6 +64,8 @@ export function buildAppointmentEmail(params: AppointmentEmailParams): Appointme
   const dayWords = kind === "reminder" ? appointmentDayWords(appointment, nowIso) || `on ${day}` : ""
   const balance = Math.round((appointment.price - deposit) * 100) / 100
   const cancelFreeUntil = appointmentRefundCutoffAt(appointment)
+  // A waiting request that was moved still asks them to confirm.
+  const asRequest = kind === "request" || (kind === "moved" && appointment.status === "requested")
 
   const subject =
     kind === "request"
@@ -67,7 +74,9 @@ export function buildAppointmentEmail(params: AppointmentEmailParams): Appointme
         ? `You're booked: ${service} with ${business} on ${day} at ${start}`
         : kind === "reminder"
           ? `Reminder: ${service} with ${business} ${dayWords} at ${start}`
-          : `Canceled: ${service} with ${business} on ${day}`
+          : kind === "moved"
+            ? `Moved: ${service} with ${business}, now ${day} at ${start}`
+            : `Canceled: ${service} with ${business} on ${day}`
   const lead =
     kind === "request"
       ? `${business} booked a time for you. Please confirm it.`
@@ -75,7 +84,13 @@ export function buildAppointmentEmail(params: AppointmentEmailParams): Appointme
         ? `You're booked with ${business}.`
         : kind === "reminder"
           ? `Your appointment with ${business} is ${appointmentWhenWords(appointment, nowIso) || dayWords}.`
-          : `${business} canceled your appointment.`
+          : kind === "moved"
+            ? params.movedBy === "client"
+              ? `Your appointment with ${business} is moved.`
+              : asRequest
+                ? `${business} moved the time they're holding for you. Please confirm it.`
+                : `${business} moved your appointment.`
+            : `${business} canceled your appointment.`
   const moneyLine =
     kind === "canceled"
       ? depositPaid
@@ -84,7 +99,7 @@ export function buildAppointmentEmail(params: AppointmentEmailParams): Appointme
           : null
         : null
       : payNow
-        ? kind === "request"
+        ? asRequest
           ? `A ${depositText} deposit confirms it.`
           : `A ${depositText} deposit is due to hold your time.`
         : depositPaid
@@ -97,13 +112,15 @@ export function buildAppointmentEmail(params: AppointmentEmailParams): Appointme
       ? "The time is held for you for 48 hours."
       : kind === "reminder"
         ? "Can't make it? You can cancel from your appointment page."
-        : null
+        : kind === "moved" && params.movedFrom
+          ? `It was ${formatMovedFrom(params.movedFrom, new Date().toISOString().slice(0, 4))}.`
+          : null
   const button =
-    kind === "request"
+    asRequest
       ? payNow
         ? `Confirm & pay ${depositText} deposit`
         : "Confirm"
-      : (kind === "booked" || kind === "reminder") && payNow
+      : (kind === "booked" || kind === "reminder" || kind === "moved") && payNow
         ? `Pay ${depositText} deposit`
         : "View appointment"
   // A reminder only says when cancelling stops being free, and only while
