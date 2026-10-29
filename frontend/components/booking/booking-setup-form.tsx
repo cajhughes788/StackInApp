@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { ChevronDown, Minus, Plus, X } from "lucide-react"
 
@@ -160,6 +160,15 @@ function weeklyHoursSummary(weeklyHours: Draft["weeklyHours"]): string[] {
   return lines
 }
 
+const AUTOSAVE_DELAY_MS = 1000
+
+// What a save would send, for "has anything changed?": past days off and
+// the all-day switch (saved on its own) don't count.
+function draftKey(draft: Draft, today: string): string {
+  const { busyAllDay: _busyAllDay, updatedAt: _updatedAt, ...rest } = draft as Draft & { updatedAt?: string }
+  return JSON.stringify({ ...rest, daysOff: draft.daysOff.filter((date) => date >= today) })
+}
+
 function deviceTimeZones(): string[] {
   try {
     const all = (Intl as unknown as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf?.("timeZone")
@@ -241,7 +250,6 @@ export function BookingSetupForm({
   // What's saved: the booking link works only once it's saved and on.
   const [saved, setSaved] = useState<BookingSettings>(initial)
   const [editing, setEditing] = useState<{ service: ServiceDraft; isNew: boolean } | null>(null)
-  // A single day leaves "to" blank.
   // One day off, or a range (vacation).
   const [dayOffMode, setDayOffMode] = useState<"one" | "range">("one")
   const [dayOffFrom, setDayOffFrom] = useState("")
@@ -251,10 +259,14 @@ export function BookingSetupForm({
   const [reopening, setReopening] = useState<string | null>(null)
   const [showDaysOff, setShowDaysOff] = useState(false)
   const [saving, setSaving] = useState(false)
-  // Weekly hours fold into a summary once they've been saved; open for a
-  // first setup, and again after each Save.
+  // Weekly hours fold into a summary once they've been saved (open for a
+  // first setup); Done folds them again.
   const [hoursOpen, setHoursOpen] = useState(!initial.updatedAt)
   const [saveError, setSaveError] = useState<string | null>(null)
+  // Changes save themselves, like Settings: a moment after the last change.
+  // A change that failed isn't retried until it's changed again.
+  const [failedKey, setFailedKey] = useState<string | null>(null)
+  const [savedOnce, setSavedOnce] = useState(false)
   const today = localToday()
 
   function update(patch: Partial<Draft>) {
@@ -317,10 +329,8 @@ export function BookingSetupForm({
   function saveDaysOff(daysOff: string[], message: string) {
     const next = { ...draft, daysOff }
     setDraft(next)
-    if (saving || hasDayProblem || hasLinkProblem || editing) {
-      setSaveError("Saved here, but finish the changes above and tap Save to make it count.")
-      return
-    }
+    // Fixing a problem above saves it along with everything else.
+    if (saving || hasDayProblem || hasLinkProblem || editing) return
     void save(next, message)
   }
 
@@ -342,8 +352,9 @@ export function BookingSetupForm({
     setReopening(null)
   }
 
-  async function save(next: Draft = draft, message = "Booking saved") {
+  async function save(next: Draft = draft, message?: string) {
     if (saving || hasDayProblem || hasLinkProblem || editing) return
+    const sentKey = draftKey(next, today)
     setSaving(true)
     setSaveError(null)
     try {
@@ -351,28 +362,49 @@ export function BookingSetupForm({
       // busy calendars (BusyCalendarsSection): never sent from here.
       const { busyAllDay: _busyAllDay, ...rest } = next
       const result = await onSave({ ...rest, daysOff: next.daysOff.filter((date) => date >= today) })
-      setDraft(toDraft(result))
+      // Only take the server's copy if nothing changed meanwhile (typing
+      // carries on while a save is out).
+      if (draftKey(latestDraft.current, today) === sentKey) setDraft(toDraft(result))
       setSaved(result)
-      setHoursOpen(false)
-      toast({ title: message })
+      setFailedKey(null)
+      setSavedOnce(true)
+      if (message) toast({ title: message })
     } catch (error) {
+      setFailedKey(sentKey)
       setSaveError(error instanceof Error ? error.message : "Couldn't save. Check your connection and try again.")
     } finally {
       setSaving(false)
     }
   }
 
+  // Autosave: a second after the last change, once nothing above needs
+  // fixing. Leaving the page saves what's waiting right away.
+  const latestDraft = useRef(draft)
+  latestDraft.current = draft
+  const dirty = draftKey(draft, today) !== draftKey(toDraft(saved), today)
+  const blocked = hasDayProblem || hasLinkProblem || editing !== null
+  const pendingSave = useRef<(() => void) | null>(null)
+  pendingSave.current = dirty && !blocked && !saving && draftKey(draft, today) !== failedKey ? () => void save(draft) : null
+  useEffect(() => {
+    if (!dirty || blocked || saving || draftKey(draft, today) === failedKey) return
+    const timer = window.setTimeout(() => pendingSave.current?.(), AUTOSAVE_DELAY_MS)
+    return () => window.clearTimeout(timer)
+    // draft covers every change; save is read through pendingSave.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft, dirty, blocked, saving, failedKey])
+  useEffect(() => () => pendingSave.current?.(), [])
+
   return (
     <form
       className="space-y-4"
       onSubmit={(event) => {
         event.preventDefault()
-        void save()
+        pendingSave.current?.()
       }}
     >
       <p className="text-sm leading-relaxed text-muted-foreground">
         Set up what customers can book and when you&apos;re open. Customers see your services and open times once
-        you turn on online booking below.
+        you turn on online booking below. Changes save automatically.
       </p>
 
       <section className={cn(cardClass, "space-y-3")}>
@@ -567,6 +599,11 @@ export function BookingSetupForm({
             })}
           </ul>
         ) : null}
+        {hoursOpen && !hasDayProblem ? (
+          <Button type="button" variant="outline" className="h-10 w-full rounded-full" onClick={() => setHoursOpen(false)}>
+            Done
+          </Button>
+        ) : null}
       </section>
 
       <section className={cn(cardClass, "space-y-3")}>
@@ -663,8 +700,12 @@ export function BookingSetupForm({
         ) : (
           <Button
             type="button"
-            variant="outline"
-            className="h-10 w-full rounded-full border-card-border bg-card font-semibold"
+            // Green once dates are picked, so it's clear what to tap next.
+            variant={newDaysOff.length > 0 && dayOffError === null ? "default" : "outline"}
+            className={cn(
+              "h-10 w-full rounded-full font-semibold",
+              !(newDaysOff.length > 0 && dayOffError === null) && "border-card-border bg-card"
+            )}
             disabled={newDaysOff.length === 0 || dayOffError !== null}
             onClick={() => setConfirmingDaysOff(true)}
           >
@@ -940,15 +981,27 @@ export function BookingSetupForm({
         <WebsiteButtonSection slug={saved.bookingSlug} accentColor={invoiceSettings?.accentColor ?? ""} />
       ) : null}
 
-      {saveError ? <p className="text-sm text-destructive">{saveError}</p> : null}
-      {editing ? <p className="text-sm text-muted-foreground">Finish the service you&apos;re editing first.</p> : null}
-      <Button
-        type="submit"
-        disabled={saving || hasDayProblem || hasLinkProblem || editing !== null}
-        className="h-[52px] w-full rounded-full text-base font-semibold"
-      >
-        {saving ? "Saving..." : "Save"}
-      </Button>
+      {/* Where the Save button was: what autosave is doing, and why it's waiting. */}
+      <div role="status" aria-live="polite" className="sticky bottom-3 z-10 flex justify-center">
+        <span
+          className={cn(
+            "rounded-full border border-card-border bg-card px-3.5 py-1.5 text-xs font-medium shadow-sm",
+            saveError ? "text-destructive" : blocked && dirty ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground"
+          )}
+        >
+          {saveError
+            ? saveError
+            : saving || (dirty && !blocked)
+              ? "Saving…"
+              : blocked && dirty
+                ? editing
+                  ? "Finish the service you're editing to save"
+                  : "Fix the problem above to save"
+                : savedOnce
+                  ? "All changes saved"
+                  : "Changes save automatically"}
+        </span>
+      </div>
     </form>
   )
 }

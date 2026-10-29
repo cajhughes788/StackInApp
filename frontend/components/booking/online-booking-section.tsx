@@ -13,7 +13,9 @@ import { PUBLIC_BOOKING_BASE_URL, bookingSlugFrom, bookingSlugProblem, publicBoo
 
 // Booking setup's "Online booking": the public booking page's on/off switch
 // and link name, and — once saved and on — the link to copy, share or show
-// as a QR code.
+// as a QR code. Booking setup saves itself as you go, but the link name only
+// changes when confirmed: a half-typed name saved on a pause would become the
+// live link and let go of the old one (and any printed QR code).
 export function OnlineBookingSection({
   enabled,
   slug,
@@ -35,7 +37,15 @@ export function OnlineBookingSection({
   const [qr, setQr] = useState<string | null>(null)
   const [showQr, setShowQr] = useState(false)
   const [note, setNote] = useState<string | null>(null)
-  const problem = slug ? bookingSlugProblem(slug) : enabled ? "Pick a link." : null
+  // What's typed; it becomes the link only on "Change link".
+  const [text, setText] = useState(slug)
+  const [confirmingChange, setConfirmingChange] = useState(false)
+  useEffect(() => {
+    setText(slug)
+    setConfirmingChange(false)
+  }, [slug])
+  const problem = text ? bookingSlugProblem(text) : enabled ? "Pick a link." : null
+  const typedNew = text !== slug
   const live = savedEnabled && !!savedSlug && savedSlug === slug && enabled
   const url = live ? publicBookingUrl(savedSlug) : null
 
@@ -93,8 +103,11 @@ export function OnlineBookingSection({
           <span className="shrink-0 text-muted-foreground">{PUBLIC_BOOKING_BASE_URL.replace(/^https:\/\//, "")}</span>
           <input
             className="min-w-0 flex-1 bg-transparent text-foreground outline-none"
-            value={slug}
-            onChange={(event) => onChange({ bookingSlug: event.target.value.toLowerCase().replace(/\s+/g, "-").slice(0, 40) })}
+            value={text}
+            onChange={(event) => {
+              setText(event.target.value.toLowerCase().replace(/\s+/g, "-").slice(0, 40))
+              setConfirmingChange(false)
+            }}
             placeholder={bookingSlugFrom(businessName) || "your-name"}
             autoCapitalize="none"
             autoCorrect="off"
@@ -105,8 +118,49 @@ export function OnlineBookingSection({
       </label>
       {problem ? (
         <p className="text-xs text-destructive">{problem}</p>
+      ) : typedNew && confirmingChange ? (
+        <div className="space-y-2 rounded-[14px] bg-muted p-3">
+          <p className="text-sm text-foreground">
+            Change your link to <span className="font-semibold break-all">{PUBLIC_BOOKING_BASE_URL.replace(/^https:\/\//, "")}{text}</span>?
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Your old link and any printed QR code stop working, and someone else could take the old name.
+          </p>
+          <div className="flex gap-2">
+            <Button type="button" className="h-10 flex-1 rounded-full" onClick={() => onChange({ bookingSlug: text })}>
+              Yes, change it
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 flex-1 rounded-full"
+              onClick={() => {
+                setText(slug)
+                setConfirmingChange(false)
+              }}
+            >
+              Keep the old one
+            </Button>
+          </div>
+        </div>
+      ) : typedNew ? (
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            className="h-10 flex-1 rounded-full"
+            // The first link needs no warning: nothing points at it yet.
+            onClick={() => (slug ? setConfirmingChange(true) : onChange({ bookingSlug: text }))}
+          >
+            {slug ? "Change link" : "Use this link"}
+          </Button>
+          {slug ? (
+            <Button type="button" variant="outline" className="h-10 flex-1 rounded-full" onClick={() => setText(slug)}>
+              Cancel
+            </Button>
+          ) : null}
+        </div>
       ) : savedSlug && slug !== savedSlug ? (
-        <p className="text-xs text-muted-foreground">Save to switch to the new link. The old one stops working.</p>
+        <p className="text-xs text-muted-foreground">Switching to the new link… The old one stops working.</p>
       ) : null}
       {url ? (
         <div className="space-y-2">
@@ -133,7 +187,7 @@ export function OnlineBookingSection({
           ) : null}
         </div>
       ) : enabled && !problem ? (
-        <p className="text-xs text-muted-foreground">Save to turn on your link.</p>
+        <p className="text-xs text-muted-foreground">Turning on your link…</p>
       ) : null}
     </section>
   )

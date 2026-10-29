@@ -1,7 +1,6 @@
 "use client"
 
 import { Suspense, useEffect, useRef, useState } from "react"
-import { useRouter } from "next/navigation"
 import { Check } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -14,7 +13,6 @@ import {
   InvoicesPage,
   cardClass,
   fieldLabelClass,
-  useQueryParam,
   softInputClass,
   useInvoicesWorkspace,
 } from "@/components/invoices/invoice-ui"
@@ -63,17 +61,21 @@ export default function InvoiceSettingsPageRoute() {
   )
 }
 
+// Changes save themselves a moment after the last one, like Settings and
+// Booking setup; leaving the page saves what's waiting at once.
+const AUTOSAVE_DELAY_MS = 1000
+
 function InvoiceSettingsPage() {
-  const router = useRouter()
   const { toast } = useToast()
   const { ready, workspaceId, settings, loadStatus } = useInvoicesWorkspace()
   const [draft, setDraft] = useState<Draft>(() => toDraft(null))
   const [hexText, setHexText] = useState(DEFAULT_INVOICE_ACCENT_COLOR)
   const [logoBusy, setLogoBusy] = useState(false)
   const initialized = useRef(false)
-  const stripeParam = useQueryParam("stripe")
-  // Arrived from Stripe's sign-up redirect: "back" would return to Stripe.
-  const [fromStripe] = useState(() => stripeParam !== null)
+  const [loaded, setLoaded] = useState(false)
+  // The last thing saved (as sent), to tell whether anything changed since.
+  const [savedKey, setSavedKey] = useState<string | null>(null)
+  const [savedOnce, setSavedOnce] = useState(false)
   const fileInput = useRef<HTMLInputElement | null>(null)
 
   // Typed as text so "12." isn't rewritten mid-typing; parsed on save.
@@ -86,6 +88,7 @@ function InvoiceSettingsPage() {
     setDraft(next)
     setHexText(next.accentColor)
     if (next.defaultDeposit.type !== "none") setDepositText(String(next.defaultDeposit.value))
+    setLoaded(true)
   }, [loadStatus, settings])
 
   const depositValue = (() => {
@@ -127,25 +130,44 @@ function InvoiceSettingsPage() {
     }
   }
 
-  // Saved in the background (invoiceService): the screen closes at once.
-  function save() {
-    if (!workspaceId || emailInvalid || depositError) return
-    saveInvoiceSettingsInBackground(workspaceId, {
-      ...draft,
-      defaultDeposit:
-        draft.defaultDeposit.type === "none" || depositValue === null
-          ? { ...draft.defaultDeposit, type: "none", value: 0 }
-          : { ...draft.defaultDeposit, value: depositValue },
-      businessName: draft.businessName.trim(),
-      businessEmail: draft.businessEmail.trim(),
-      businessPhone: draft.businessPhone.trim(),
-      businessAddress: draft.businessAddress.trim(),
-      defaultNote: draft.defaultNote.trim(),
-      defaultPolicies: draft.defaultPolicies.trim(),
-    })
-    if (fromStripe) router.replace("/app/invoices")
-    else router.back()
+  // What a save sends: typed text trimmed, the deposit as entered.
+  const payload = {
+    ...draft,
+    defaultDeposit:
+      draft.defaultDeposit.type === "none" || depositValue === null
+        ? { ...draft.defaultDeposit, type: "none" as const, value: 0 }
+        : { ...draft.defaultDeposit, value: depositValue },
+    businessName: draft.businessName.trim(),
+    businessEmail: draft.businessEmail.trim(),
+    businessPhone: draft.businessPhone.trim(),
+    businessAddress: draft.businessAddress.trim(),
+    defaultNote: draft.defaultNote.trim(),
+    defaultPolicies: draft.defaultPolicies.trim(),
   }
+  const payloadKey = JSON.stringify(payload)
+  useEffect(() => {
+    if (loaded && savedKey === null) setSavedKey(payloadKey)
+  }, [loaded, savedKey, payloadKey])
+  const dirty = savedKey !== null && payloadKey !== savedKey
+  const blocked = emailInvalid || depositError !== null
+
+  // Saved in the background (invoiceService), which reverts and says so if
+  // it fails.
+  const pendingSave = useRef<(() => void) | null>(null)
+  pendingSave.current =
+    workspaceId && dirty && !blocked
+      ? () => {
+          saveInvoiceSettingsInBackground(workspaceId, payload)
+          setSavedKey(payloadKey)
+          setSavedOnce(true)
+        }
+      : null
+  useEffect(() => {
+    if (!dirty || blocked) return
+    const timer = window.setTimeout(() => pendingSave.current?.(), AUTOSAVE_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [payloadKey, dirty, blocked])
+  useEffect(() => () => pendingSave.current?.(), [])
 
   const previewSettings = { ...draft, updatedAt: undefined }
 
@@ -161,7 +183,7 @@ function InvoiceSettingsPage() {
           className="space-y-4"
           onSubmit={(event) => {
             event.preventDefault()
-            save()
+            pendingSave.current?.()
           }}
         >
           <section aria-label="Preview" className="overflow-hidden rounded-[18px] border border-card-border bg-white text-[#161B1E]">
@@ -188,7 +210,7 @@ function InvoiceSettingsPage() {
             <div className="px-4 pb-3.5 text-xs text-[#5F6864]">How your invoices look to clients</div>
           </section>
 
-          {/* Acts on its own (Stripe), not through this form's Save. */}
+          {/* Acts on its own (Stripe), apart from this form's autosave. */}
           {workspaceId ? <OnlinePaymentsCard workspaceId={workspaceId} /> : null}
 
           <section className={cn(cardClass, "space-y-3")}>
@@ -463,9 +485,23 @@ function InvoiceSettingsPage() {
             </p>
           </section>
 
-          <Button type="submit" disabled={emailInvalid} className="h-[52px] w-full rounded-full text-base font-semibold">
-            Save
-          </Button>
+          {/* What autosave is doing, and why it's waiting. */}
+          <div role="status" aria-live="polite" className="sticky bottom-3 z-10 flex justify-center">
+            <span
+              className={cn(
+                "rounded-full border border-card-border bg-card px-3.5 py-1.5 text-xs font-medium shadow-sm",
+                blocked && dirty ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground"
+              )}
+            >
+              {blocked && dirty
+                ? "Fix the problem above to save"
+                : dirty
+                  ? "Saving…"
+                  : savedOnce
+                    ? "All changes saved"
+                    : "Changes save automatically"}
+            </span>
+          </div>
         </form>
       )}
     </InvoicesPage>
