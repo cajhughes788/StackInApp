@@ -9,6 +9,10 @@ workflows:
         script: |
           cd $BUILD_DIR
           npm install
+      - name: Run tests
+        script: |
+          npm install
+          node scripts/run-tests.cjs
       - name: Build Next.js web assets
         script: |
           cd $BUILD_DIR

@@ -21,8 +21,9 @@
       // only lint (a no-op) ran here, so `firebase deploy --only functions`
       // silently deployed whatever was already sitting in lib/ from the
       // last manual `npm run build`, which is exactly how this mismatch
-      // went unnoticed.
-      "predeploy": ["npm --prefix backend/functions run build", "npm --prefix backend/functions run lint"]
+      // went unnoticed. The tests (scripts/run-tests.cjs, ~15 s) run first,
+      // so a failing check stops the deploy before anything goes live.
+      "predeploy": ["node scripts/run-tests.cjs", "npm --prefix backend/functions run build", "npm --prefix backend/functions run lint"]
     }
   ],
   "firestore": {
@@ -35,6 +36,9 @@
   "hosting": {
     "target": "stackin",
     "public": "frontend/out",
+    // The web app shares its logic with the backend (shared/), so the same
+    // tests guard its deploys too.
+    "predeploy": ["node scripts/run-tests.cjs"],
     "cleanUrls": true,
     "ignore": [
       "firebase.json",
