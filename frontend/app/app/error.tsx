@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 
 import { clearAllLocalDomainData } from "@/lib/domain"
 import { debugError } from "@/lib/debugLoop"
+import { reportCrash } from "@/lib/crashReports"
 
 export default function AppError({
   error,
@@ -15,6 +16,7 @@ export default function AppError({
   const [resettingCache, setResettingCache] = useState(false)
 
   useEffect(() => {
+    reportCrash("error_screen", error)
     debugError("app-error-boundary", "segment_error", {
       message: error.message,
       stack: error.stack ?? null,

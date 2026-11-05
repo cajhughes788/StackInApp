@@ -39,6 +39,9 @@ target 'App' do
   # Same reasoning as Firebase/Messaging above for living outside
   # capacitor_pods.
   pod 'Firebase/AppCheck'
+  # Crash and error reports (see CrashReportsPlugin.swift). Same reasoning
+  # as Firebase/Messaging above for living outside capacitor_pods.
+  pod 'Firebase/Crashlytics'
 end
 
 post_install do |installer|

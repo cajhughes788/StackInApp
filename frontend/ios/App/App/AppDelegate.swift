@@ -3,6 +3,7 @@ import Capacitor
 import FirebaseCore
 import FirebaseMessaging
 import FirebaseAppCheck
+import FirebaseCrashlytics
 
 
 @UIApplicationMain
@@ -17,6 +18,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, MessagingDelegate {
         // any later (see AppCheckPlugin.swift).
         AppCheck.setAppCheckProviderFactory(StackInAppCheckProviderFactory())
         FirebaseApp.configure()
+        CrashReports.start()
         Messaging.messaging().delegate = self
         // Deliberately NOT setting UNUserNotificationCenter.current().delegate
         // here. Capacitor's own bridge (CapacitorBridge.swift) claims that

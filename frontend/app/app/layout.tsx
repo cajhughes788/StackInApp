@@ -16,6 +16,7 @@ import { useNotificationWorkspaceOpen } from "@/hooks/useNotificationWorkspaceOp
 import { useAuxiliaryWorkspaceRefresh } from "@/hooks/useAuxiliaryWorkspaceRefresh"
 import { useAppOpenRefresh } from "@/hooks/useAppOpenRefresh"
 import { debugError, debugLog } from "@/lib/debugLoop"
+import { reportCrash } from "@/lib/crashReports"
 import { useAppBootstrap } from "@/hooks/useAppBootstrap"
 import { AppBootstrapProvider } from "@/contexts/app-bootstrap-context"
 import DeepLinkHandler from "@/components/deep-link-handler"
@@ -71,6 +72,7 @@ export default function AppLayout({
 
   useEffect(() => {
     const handleError = (event: ErrorEvent) => {
+      reportCrash("window_error", event.error ?? event.message)
       debugError("app-layout", "window_error", {
         message: event.message,
         filename: event.filename,
@@ -90,6 +92,7 @@ export default function AppLayout({
 
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
       const reason = event.reason
+      reportCrash("unhandled_rejection", reason)
       debugError("app-layout", "unhandled_rejection", {
         message:
           reason instanceof Error

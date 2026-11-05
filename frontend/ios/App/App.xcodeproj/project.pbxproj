@@ -18,6 +18,7 @@
 		5A1D0C3E9B7F4E21A0C4D102 /* NativePlaidLinkPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A1D0C3E9B7F4E21A0C4D101 /* NativePlaidLinkPlugin.swift */; };
 		5A1D0C3E9B7F4E21A0C4D105 /* LinkKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5A1D0C3E9B7F4E21A0C4D104 /* LinkKit */; };
 		70ADCACFAF0B328A8A83CF8E /* AppCheckPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = F53E5711B333EB5A2A0879C0 /* AppCheckPlugin.swift */; };
+		955D9F22056A0AC49D411813 /* CrashReportsPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2529FE579E19FE73B291EB7 /* CrashReportsPlugin.swift */; };
 		A084ECDBA7D38E1E42DFC39D /* Pods_App.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AF277DCFFFF123FFC6DF26C7 /* Pods_App.framework */; };
 		A0DB4A00A6964C9D8565B96C /* NativePlacePickerPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBC521538E8C4DC0A50E91AB /* NativePlacePickerPlugin.swift */; };
 		A7B9D0E4D9F54B359C35A10A /* NativePrintPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6E5DFA640EE427AA028C9ED /* NativePrintPlugin.swift */; };
@@ -48,6 +49,7 @@
 		D52691A11967DFF9E7EE595B /* FcmTokenPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FcmTokenPlugin.swift; sourceTree = "<group>"; };
 		EBC521538E8C4DC0A50E91AB /* NativePlacePickerPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePlacePickerPlugin.swift; sourceTree = "<group>"; };
 		F53E5711B333EB5A2A0879C0 /* AppCheckPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppCheckPlugin.swift; sourceTree = "<group>"; };
+		A2529FE579E19FE73B291EB7 /* CrashReportsPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CrashReportsPlugin.swift; sourceTree = "<group>"; };
 		FC68EB0AF532CFC21C3344DD /* Pods-App.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-App.debug.xcconfig"; path = "Pods/Target Support Files/Pods-App/Pods-App.debug.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -109,6 +111,7 @@
 				2FAD9762203C412B000D30F8 /* config.xml */,
 				50B271D01FEDC1A000F3C39B /* public */,
 				F53E5711B333EB5A2A0879C0 /* AppCheckPlugin.swift */,
+				A2529FE579E19FE73B291EB7 /* CrashReportsPlugin.swift */,
 				5A1D0C3E9B7F4E21A0C4D101 /* NativePlaidLinkPlugin.swift */,
 			);
 			path = App;
@@ -135,6 +138,7 @@
 				504EC3011FED79650016851F /* Frameworks */,
 				504EC3021FED79650016851F /* Resources */,
 				9592DBEFFC6D2A0C8D5DEB22 /* [CP] Embed Pods Frameworks */,
+				6ABA2FC32DBD977983893264 /* Upload Crashlytics symbols */,
 			);
 			buildRules = (
 			);
@@ -237,6 +241,27 @@
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-App/Pods-App-frameworks.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
+		6ABA2FC32DBD977983893264 /* Upload Crashlytics symbols */ = {
+			alwaysOutOfDate = 1;
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}",
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Resources/DWARF/${PRODUCT_NAME}",
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Info.plist",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/GoogleService-Info.plist",
+				"$(TARGET_BUILD_DIR)/$(EXECUTABLE_PATH)",
+			);
+			name = "Upload Crashlytics symbols";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/FirebaseCrashlytics/run\"\n";
+			showEnvVarsInLog = 0;
+		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -251,6 +276,7 @@
 				A7B9D0E4D9F54B359C35A10A /* NativePrintPlugin.swift in Sources */,
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				70ADCACFAF0B328A8A83CF8E /* AppCheckPlugin.swift in Sources */,
+				955D9F22056A0AC49D411813 /* CrashReportsPlugin.swift in Sources */,
 				5A1D0C3E9B7F4E21A0C4D102 /* NativePlaidLinkPlugin.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -391,7 +417,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 20;
+				CURRENT_PROJECT_VERSION = 25;
 				DEVELOPMENT_TEAM = S9H39QCPR7;
 				INFOPLIST_FILE = App/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
@@ -400,7 +426,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1.9;
+				MARKETING_VERSION = 2.2.3;
 				OTHER_SWIFT_FLAGS = "$(inherited) \"-D\" \"COCOAPODS\" \"-DDEBUG\"";
 				PRODUCT_BUNDLE_IDENTIFIER = com.cajetanhughes.stackin;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -417,7 +443,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 20;
+				CURRENT_PROJECT_VERSION = 25;
 				DEVELOPMENT_TEAM = S9H39QCPR7;
 				INFOPLIST_FILE = App/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
@@ -426,7 +452,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1.9;
+				MARKETING_VERSION = 2.2.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.cajetanhughes.stackin;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";

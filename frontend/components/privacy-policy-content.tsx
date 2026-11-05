@@ -58,6 +58,7 @@ const PRIVACY_SECTIONS: Array<{ title: string; paragraphs: string[] }> = [
       "Cloud infrastructure providers (including Google Cloud Platform and Firebase) — for hosting, databases, authentication, file storage, and push notification delivery.",
       "Optical character recognition and document-processing providers (including Amazon Web Services) — to extract information from receipt images you upload.",
       "AI service providers (including Anthropic) — to suggest expense categories for bank transactions, using only the merchant's business name and the bank's category label.",
+      "Crash reporting providers (Firebase Crashlytics, provided by Google) — to learn when the 521 iPhone app crashes or hits an error, using your device model, system and app version, the screen you were on, and a description of the error with personal details removed. These reports are not linked to your account.",
       "Email delivery providers (including SendGrid) — to send account, billing, and support-related emails, and to deliver invoices, payment reminders, appointment confirmations, appointment reminders, and appointment updates to your clients on your behalf.",
       "Calendar providers you choose (such as Google, Apple, or Microsoft) — we request the private calendar links you add, to read when you are busy; we do not send them your information.",
       "We may also disclose information when required by law, to respond to valid legal requests, to enforce our terms, or to protect the rights, safety, and security of 521, our users, or others.",
@@ -129,7 +130,7 @@ export default function PrivacyPolicyContent() {
           <strong className="text-foreground">Effective Date:</strong> 09/06/2026
         </p>
         <p>
-          <strong className="text-foreground">Last Updated:</strong> 10/29/2026
+          <strong className="text-foreground">Last Updated:</strong> 11/05/2026
         </p>
       </section>
 
