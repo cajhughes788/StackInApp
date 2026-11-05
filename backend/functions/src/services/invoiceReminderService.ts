@@ -3,7 +3,8 @@ import { db } from "../admin"
 import { InvoiceSchema, type InvoiceSettings, type InvoiceType } from "@shared/schemas/invoice"
 import { buildInvoiceReminderEmail } from "@shared/invoiceEmail"
 import { formatInvoiceDate, formatInvoiceMoney, publicInvoiceUrl } from "@shared/invoiceDisplay"
-import { invoiceReminderDue, type InvoiceReminder } from "@shared/invoiceReminders"
+import { invoiceDueNow } from "@shared/invoicePayments"
+import { MAX_REMINDER_SENDS_KEPT, invoiceReminderDue, type InvoiceReminder } from "@shared/invoiceReminders"
 import {
   DAY_MS,
   MAX_SENDS_PER_INVOICE_PER_DAY,
@@ -24,18 +25,21 @@ import { invoicesCol, readInvoiceSettings } from "./invoicesService"
 // ---------------------------------------------------------------------------
 
 const DEFAULT_TIME_ZONE = "America/Los_Angeles"
-// Plenty for five steps per amount owed; older ones are for past due dates.
-const MAX_REMINDER_SENDS_KEPT = 20
 
 type ClaimResult = { claimed: InvoiceType; reminder: InvoiceReminder } | "skip" | "workspace_capped"
+
+// Today in the business's time zone (YYYY-MM-DD).
+async function businessToday(workspaceId: string, now: number): Promise<string> {
+  const settingsSnap = await db.doc(`workspaces/${workspaceId}/settings/current`).get()
+  const timeZone = (settingsSnap.get("common.timeZone") as string | undefined) || DEFAULT_TIME_ZONE
+  return DateTime.fromMillis(now).setZone(timeZone).toISODate() ?? new Date(now).toISOString().slice(0, 10)
+}
 
 // Sends every reminder due today in one workspace that has reminders on.
 export async function sendDueInvoiceReminders(workspaceId: string, ownerId: string, now = Date.now()): Promise<number> {
   const settings = await readInvoiceSettings(workspaceId)
   if (!settings.autoReminders) return 0
-  const settingsSnap = await db.doc(`workspaces/${workspaceId}/settings/current`).get()
-  const timeZone = (settingsSnap.get("common.timeZone") as string | undefined) || DEFAULT_TIME_ZONE
-  const today = DateTime.fromMillis(now).setZone(timeZone).toISODate() ?? new Date(now).toISOString().slice(0, 10)
+  const today = await businessToday(workspaceId, now)
 
   const openSnap = await invoicesCol(workspaceId).where("status", "==", "sent").get()
   let sent = 0
@@ -114,6 +118,64 @@ async function sendInvoiceReminder(
     data: { deepLink: `stackin://invoices/${invoice.id}`, workspaceId },
   }).catch((error) => console.error("invoiceReminders: owner notification failed", error))
   return "sent"
+}
+
+// Only invoices that went overdue in the last few days: older ones (say,
+// everything already late when this shipped) don't all ping at once.
+const OVERDUE_NOTICE_WINDOW_DAYS = 3
+
+/**
+ * Tells the owner, once, that an invoice went overdue — whether or not
+ * automatic reminders are on, so a late invoice is never only found by
+ * opening the app. The push opens the invoice (Send reminder, Text, Call);
+ * several on one day become one push that opens the Overdue list.
+ */
+export async function notifyOverdueInvoices(workspaceId: string, ownerId: string, now = Date.now()): Promise<number> {
+  const today = await businessToday(workspaceId, now)
+  const earliest = DateTime.fromISO(today).minus({ days: OVERDUE_NOTICE_WINDOW_DAYS }).toISODate() ?? today
+
+  const openSnap = await invoicesCol(workspaceId).where("status", "==", "sent").get()
+  const newlyOverdue: { invoice: InvoiceType; amount: number }[] = []
+  for (const doc of openSnap.docs) {
+    const parsed = InvoiceSchema.safeParse(doc.data())
+    if (!parsed.success || parsed.data.pendingPayment) continue
+    const dueNow = invoiceDueNow(parsed.data)
+    if (!dueNow || dueNow.dueDate >= today || dueNow.dueDate < earliest) continue
+    const key = `${dueNow.purpose}:${dueNow.dueDate}`
+    if (parsed.data.overdueNoticeKey === key) continue
+    // Claimed first, so a retried run never pings twice.
+    const claimed = await db.runTransaction(async (txn) => {
+      const current = InvoiceSchema.safeParse((await txn.get(doc.ref)).data())
+      if (!current.success || current.data.status !== "sent" || current.data.overdueNoticeKey === key) return false
+      txn.set(doc.ref, InvoiceSchema.parse({ ...current.data, overdueNoticeKey: key }))
+      return true
+    })
+    if (claimed) newlyOverdue.push({ invoice: parsed.data, amount: dueNow.amount })
+  }
+  if (newlyOverdue.length === 0) return 0
+
+  // With automatic reminders off, nothing else follows up: say so. The
+  // invoice screen links to the setting.
+  const { autoReminders } = await readInvoiceSettings(workspaceId)
+  const tail = autoReminders ? "" : " Or turn on automatic reminders so 521 follows up for you."
+  const { sendTransactionNotification } = await import("./pushNotificationService.js")
+  const [first] = newlyOverdue
+  const payload =
+    newlyOverdue.length === 1
+      ? {
+          title: `${first.invoice.clientName}'s invoice is overdue`,
+          body: `Invoice #${first.invoice.number}: ${formatInvoiceMoney(first.amount)} was due ${formatInvoiceDate(invoiceDueNow(first.invoice)!.dueDate)}. Tap to send a reminder.${tail}`,
+          data: { deepLink: `stackin://invoices/${first.invoice.id}`, workspaceId },
+        }
+      : {
+          title: `${newlyOverdue.length} invoices are overdue`,
+          body: `${formatInvoiceMoney(newlyOverdue.reduce((sum, item) => sum + item.amount, 0))} in all. Tap to see them and send reminders.${tail}`,
+          data: { deepLink: "stackin://invoices/?filter=overdue", workspaceId },
+        }
+  await sendTransactionNotification(ownerId, payload).catch((error) =>
+    console.error("invoiceReminders: overdue notification failed", { workspaceId, error })
+  )
+  return newlyOverdue.length
 }
 
 // The email didn't go out: the step can be tried again on the next run.

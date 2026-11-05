@@ -80,6 +80,7 @@ async function upsertSubscriptionDoc(uid: string, subscription: Partial<Subscrip
         pendingCheckoutSessionId: FieldValue.delete(),
         pendingCheckoutUrl: FieldValue.delete(),
         pendingCheckoutExpiresAt: FieldValue.delete(),
+        pendingCheckoutTier: FieldValue.delete(),
         ...(isPendingDeletion
             ? {
                 pendingAccountDeletion: true,

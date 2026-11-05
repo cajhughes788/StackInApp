@@ -1,10 +1,11 @@
 import { onSchedule } from "firebase-functions/v2/scheduler"
 import { db } from "../admin"
 import { SENDGRID_API_KEY } from "../secrets"
-import { sendDueInvoiceReminders } from "../services/invoiceReminderService"
+import { notifyOverdueInvoices, sendDueInvoiceReminders } from "../services/invoiceReminderService"
 
 // Emails clients the invoice reminders due today (shared/invoiceReminders.ts)
-// for every workspace with Invoice settings → Automatic reminders on.
+// for every workspace with Invoice settings → Automatic reminders on, and
+// tells owners about invoices that just went overdue (reminders on or off).
 // Invoicing is independent-only. Mornings Pacific, so reminders land during
 // the US business day.
 export const sendInvoiceRemindersDaily = onSchedule(
@@ -32,6 +33,11 @@ export const sendInvoiceRemindersDaily = onSchedule(
         if (sent > 0) console.info("sendInvoiceRemindersDaily: sent", { workspaceId: workspaceDoc.id, sent })
       } catch (error) {
         console.error("sendInvoiceRemindersDaily: workspace failed", { workspaceId: workspaceDoc.id, error })
+      }
+      try {
+        await notifyOverdueInvoices(workspaceDoc.id, ownerId)
+      } catch (error) {
+        console.error("sendInvoiceRemindersDaily: overdue notice failed", { workspaceId: workspaceDoc.id, error })
       }
     }
   }

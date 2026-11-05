@@ -42,6 +42,7 @@ import AllRecordsSection from "@/components/all-records-section";
 import { getActiveProfileTrace } from "@/lib/observability/profileTrace";
 import { useAppBootstrapState } from "@/contexts/app-bootstrap-context";
 import { useHomepageLayoutShiftDiagnostics } from "@/hooks/useHomepageLayoutShiftDiagnostics";
+import { useWarmChargeServers } from "@/hooks/useWarmChargeServers";
 import { useWarmClientsAndBooking } from "@/hooks/useWarmClientsAndBooking";
 import HomeTour from "@/components/onboarding/home-tour";
 import AllIncomeCard from "@/components/all-income-card";
@@ -132,6 +133,8 @@ export default function HomePage() {
         supportsExpenses ? activeWorkspaceId : null,
         entriesState.status === "ready" && !entriesState.isRevalidating
     );
+    // Charge now only exists in independent workspaces too.
+    useWarmChargeServers(supportsExpenses ? activeWorkspaceId : null);
 
     // Kick off settings load as soon as workspace is known — runs in parallel
     // with bootstrap so settings are ready from cache before bootstrap settles.

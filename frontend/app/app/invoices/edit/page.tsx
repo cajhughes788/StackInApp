@@ -18,6 +18,7 @@ import {
   softInputClass,
   useInvoicesWorkspace,
 } from "@/components/invoices/invoice-ui"
+import { wakeInvoiceServers } from "@/lib/api/invoicesApi"
 import { createInvoiceInBackground, currentInvoiceId, editInvoiceInBackground } from "@/lib/domain/invoiceService"
 import { useClientsStore } from "@/lib/stores/useClientsStore"
 import { buildClientKeyIndex } from "@shared/clients"
@@ -86,6 +87,10 @@ export default function InvoiceFormPageRoute() {
 function InvoiceFormPage() {
   const router = useRouter()
   const { ready, workspaceId, invoices, settings, loadStatus } = useInvoicesWorkspace()
+  // Sending, sharing and marking paid wait on these; wake them now.
+  useEffect(() => {
+    if (workspaceId) wakeInvoiceServers()
+  }, [workspaceId])
   const invoiceId = useQueryParam("id")
   // "New invoice for <client>" from a client's page.
   const prefillClient = useQueryParam("client")

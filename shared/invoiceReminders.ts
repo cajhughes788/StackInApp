@@ -9,6 +9,12 @@ import type { InvoiceType } from "./schemas/invoice"
 // while it's outstanding, then the balance. Each step is sent once
 // (InvoiceType.reminderSends), keyed by what was owed and its due date, so
 // paying the deposit or moving the due date starts the steps over.
+//
+// A reminder the user sends by hand (Send reminder on an overdue invoice) is
+// kept in reminderSends too, keyed "manual:<purpose>:<dueDate>". It takes
+// the place of the next automatic step if that's within 3 days, and no
+// automatic one goes out within 2 days of it — so the client never gets a
+// hand-sent and an automatic reminder close together.
 // ---------------------------------------------------------------------------
 
 export const INVOICE_REMINDER_STEPS = [
@@ -34,8 +40,47 @@ export type InvoiceReminder = {
 // A missed daily run still sends the next day; anything older is skipped,
 // so turning reminders on never emails a backlog of old steps.
 const GRACE_DAYS = 1
-// An invoice the user emailed this recently gets no reminder on top.
+// An invoice the user emailed (or reminded by hand) this recently gets no
+// automatic reminder on top.
 const MANUAL_EMAIL_QUIET_MS = 2 * 86_400_000
+// A hand-sent reminder this many days before an automatic step replaces it.
+const MANUAL_REPLACES_DAYS = 3
+// Plenty for five steps per amount owed plus hand-sent ones; older entries
+// are for past due dates.
+export const MAX_REMINDER_SENDS_KEPT = 20
+
+/** The reminderSends key for a reminder the user sends by hand. */
+export function manualReminderKey(dueNow: { purpose: "deposit" | "balance"; dueDate: string }): string {
+  return `manual:${dueNow.purpose}:${dueNow.dueDate}`
+}
+
+export function isManualReminderSend(send: { key: string }): boolean {
+  return send.key.startsWith("manual:")
+}
+
+/** The latest reminder emailed, automatic or by hand. */
+export function invoiceLastReminder(invoice: Pick<InvoiceType, "reminderSends">): { sentAt: string; manual: boolean } | null {
+  const latest = [...invoice.reminderSends].sort((a, b) => Date.parse(b.sentAt) - Date.parse(a.sentAt))[0]
+  return latest ? { sentAt: latest.sentAt, manual: isManualReminderSend(latest) } : null
+}
+
+// Whether a hand-sent reminder took this step's place.
+function replacedByManual(invoice: ReminderInvoice, reminder: InvoiceReminder): boolean {
+  const key = manualReminderKey(reminder)
+  const from = addDays(reminder.sendOn, -MANUAL_REPLACES_DAYS)
+  return invoice.reminderSends.some(
+    (send) => send.key === key && send.sentAt.slice(0, 10) >= from && send.sentAt.slice(0, 10) <= reminder.sendOn
+  )
+}
+
+// When the user last emailed this client themselves: the invoice, or a reminder.
+function lastManualEmailAt(invoice: ReminderInvoice): number {
+  const times = [
+    invoice.lastEmailedAt ? Date.parse(invoice.lastEmailedAt) : 0,
+    ...invoice.reminderSends.filter(isManualReminderSend).map((send) => Date.parse(send.sentAt)),
+  ]
+  return Math.max(...times)
+}
 
 type ReminderInvoice = Pick<
   InvoiceType,
@@ -94,11 +139,12 @@ export function invoiceReminderSchedule(invoice: ReminderInvoice): InvoiceRemind
 // the business's time zone; `now` is epoch ms.
 export function invoiceReminderDue(invoice: ReminderInvoice, today: string, now: number): InvoiceReminder | null {
   if (!invoiceRemindersApply(invoice)) return null
-  if (invoice.lastEmailedAt && now - Date.parse(invoice.lastEmailedAt) < MANUAL_EMAIL_QUIET_MS) return null
+  if (now - lastManualEmailAt(invoice) < MANUAL_EMAIL_QUIET_MS) return null
   const sent = new Set(invoice.reminderSends.map((send) => send.key))
   const earliest = addDays(today, -GRACE_DAYS)
   const due = invoiceReminderSchedule(invoice).filter(
-    (reminder) => reminder.sendOn <= today && reminder.sendOn >= earliest && !sent.has(reminder.key)
+    (reminder) =>
+      reminder.sendOn <= today && reminder.sendOn >= earliest && !sent.has(reminder.key) && !replacedByManual(invoice, reminder)
   )
   return due.length > 0 ? due[due.length - 1] : null
 }
@@ -108,5 +154,9 @@ export function invoiceReminderDue(invoice: ReminderInvoice, today: string, now:
 export function invoiceNextReminder(invoice: ReminderInvoice, today: string): InvoiceReminder | null {
   if (!invoiceRemindersApply(invoice)) return null
   const sent = new Set(invoice.reminderSends.map((send) => send.key))
-  return invoiceReminderSchedule(invoice).find((reminder) => reminder.sendOn >= today && !sent.has(reminder.key)) ?? null
+  return (
+    invoiceReminderSchedule(invoice).find(
+      (reminder) => reminder.sendOn >= today && !sent.has(reminder.key) && !replacedByManual(invoice, reminder)
+    ) ?? null
+  )
 }

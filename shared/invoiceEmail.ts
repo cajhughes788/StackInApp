@@ -29,7 +29,7 @@ export function buildInvoiceEmail(params: InvoiceEmailParams): InvoiceEmail {
 
 // An automatic reminder (sendInvoiceRemindersDaily): the same email, with a
 // subject and opening line for where the client is relative to the due date.
-export function buildInvoiceReminderEmail(params: Omit<InvoiceEmailParams, "message"> & { step: InvoiceReminderStep }): InvoiceEmail {
+export function buildInvoiceReminderEmail(params: InvoiceEmailParams & { step: InvoiceReminderStep }): InvoiceEmail {
   return buildEmail(params, params.step)
 }
 

@@ -177,6 +177,9 @@ export const InvoiceSchema = z
     // so it fires once, and the user's "stop reminders" for this invoice.
     reminderSends: z.array(InvoiceReminderSendSchema).default([]),
     remindersPaused: z.boolean().default(false),
+    // The owner's "this is overdue" push (invoiceReminderService.ts), keyed
+    // "<purpose>:<dueDate>" like reminders, so each amount owed sends one.
+    overdueNoticeKey: z.string().nullable().default(null),
     lines: z.array(InvoiceLineSchema).min(1),
     // Derived from lines, stored so open invoices can be matched by amount
     // without reading every line.
@@ -413,6 +416,9 @@ export const InvoiceStatusActionSchema = z.discriminatedUnion("action", [
     action: z.literal("email"),
     to: z.string().trim().email().max(254),
     message: z.string().trim().max(1000).optional(),
+    // A reminder from an overdue invoice: the "Past due" email the automatic
+    // reminders send, instead of the invoice email.
+    reminder: z.boolean().optional(),
   }),
   // Money back on one payment: through Stripe for an online payment,
   // otherwise just recorded (the user sent it themselves). Without

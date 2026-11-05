@@ -3,8 +3,10 @@ import { db } from "../admin"
 import { SENDGRID_API_KEY } from "../secrets"
 import { ConflictError, NotFoundError, TooManyRequestsError } from "../lib/httpErrors"
 import { InvoiceSchema, type InvoiceSettings, type InvoiceType } from "@shared/schemas/invoice"
-import { buildInvoiceEmail, type InvoiceEmail } from "@shared/invoiceEmail"
+import { buildInvoiceEmail, buildInvoiceReminderEmail, type InvoiceEmail } from "@shared/invoiceEmail"
 import { publicInvoiceUrl } from "@shared/invoiceDisplay"
+import { invoiceDueNow } from "@shared/invoicePayments"
+import { MAX_REMINDER_SENDS_KEPT, manualReminderKey, type InvoiceReminderStep } from "@shared/invoiceReminders"
 import { readInvoiceSettings, shareInvoice } from "./invoicesService"
 
 // ---------------------------------------------------------------------------
@@ -34,7 +36,7 @@ export function emailCounterDoc(workspaceId: string) {
 export async function emailInvoice(
   workspaceId: string,
   ref: FirebaseFirestore.DocumentReference,
-  request: { to: string; message?: string }
+  request: { to: string; message?: string; reminder?: boolean }
 ): Promise<{ invoice: InvoiceType; shareUrl: string }> {
   const snap = await ref.get()
   if (!snap.exists) throw new NotFoundError("Invoice not found")
@@ -63,30 +65,49 @@ export async function emailInvoice(
   const settings = await readInvoiceSettings(workspaceId)
   const { invoiceOnlinePayment } = await import("./invoicePaymentsService.js")
   const online = await invoiceOnlinePayment(workspaceId, shared).catch(() => ({ payable: false, bankTransfer: false }))
-  const email = buildInvoiceEmail({
+  const params = {
     invoice: shared,
     settings,
     link: shareUrl || publicInvoiceUrl(shared.shareToken!),
     message: request.message,
     payableOnline: online.payable,
-  })
+  }
+  const email = request.reminder ? buildInvoiceReminderEmail({ ...params, step: manualReminderStep(shared) }) : buildInvoiceEmail(params)
 
-  await sendInvoiceEmailMessage(request.to, settings, email, "invoice")
+  await sendInvoiceEmailMessage(request.to, settings, email, request.reminder ? "invoice_reminder" : "invoice")
 
   const sentAt = new Date().toISOString()
   return db.runTransaction(async (txn) => {
     const fresh = InvoiceSchema.parse((await txn.get(ref)).data())
+    const dueNow = invoiceDueNow(fresh)
     const next = InvoiceSchema.parse({
       ...fresh,
       clientEmail: request.to,
-      lastEmailedAt: sentAt,
-      lastEmailedTo: request.to,
+      // A reminder is kept with the automatic ones (shared/invoiceReminders.ts),
+      // which then hold off; the invoice email stays as last sent.
+      ...(request.reminder
+        ? {
+            reminderSends: [
+              ...fresh.reminderSends,
+              { key: manualReminderKey(dueNow ?? { purpose: "balance", dueDate: fresh.dueDate }), sentAt },
+            ].slice(-MAX_REMINDER_SENDS_KEPT),
+          }
+        : { lastEmailedAt: sentAt, lastEmailedTo: request.to }),
       recentEmailSends: [...fresh.recentEmailSends.filter((at) => now - Date.parse(at) < DAY_MS), sentAt].slice(-10),
       updatedAt: sentAt,
     })
     txn.set(ref, next)
     return { invoice: next, shareUrl }
   })
+}
+
+// A reminder sent by hand reads like the automatic one for where the invoice
+// stands. The app offers it once it's overdue, and every past-due step reads
+// the same.
+function manualReminderStep(invoice: InvoiceType): InvoiceReminderStep {
+  const dueDate = invoiceDueNow(invoice)?.dueDate ?? invoice.dueDate
+  const today = new Date().toISOString().slice(0, 10)
+  return dueDate < today ? "overdue_3" : dueDate === today ? "due" : "before_3"
 }
 
 // Sends one invoice email (an invoice or a reminder) from the business.

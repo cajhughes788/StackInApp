@@ -50,6 +50,24 @@ function logWorkspaceDeleteError(
   }))
 }
 
+// Top-level lookups that point back at a workspace by { workspaceId }:
+// the booking link slug, the calendar sync link, and each appointment's
+// client link. recursiveDelete doesn't reach them, so account and
+// workspace deletion clear them here. (invoiceShares, stripeAccounts and
+// plaidItemIndex are cleared by their own services.)
+const WORKSPACE_INDEX_COLLECTIONS = ["bookingLinks", "calendarFeeds", "appointmentShares"]
+
+export async function deleteWorkspaceIndexes(workspaceId: string): Promise<void> {
+  for (const name of WORKSPACE_INDEX_COLLECTIONS) {
+    const snap = await db.collection(name).where("workspaceId", "==", workspaceId).get()
+    for (let i = 0; i < snap.docs.length; i += 400) {
+      const batch = db.batch()
+      for (const doc of snap.docs.slice(i, i + 400)) batch.delete(doc.ref)
+      await batch.commit()
+    }
+  }
+}
+
 export async function deleteWorkspaceStorage(workspaceId: string): Promise<void> {
   const prefix = `workspaces/${workspaceId}/`
   logWorkspaceDeleteInfo("storage_delete_start", {
@@ -175,6 +193,7 @@ export async function purgeWorkspace(
     // load for every storage cleanup.
     const { deleteInvoiceSharesForWorkspace } = await import("./invoicesService.js")
     await deleteInvoiceSharesForWorkspace(workspaceId)
+    await deleteWorkspaceIndexes(workspaceId)
     const { deletePaymentAccountForWorkspace } = await import("./paymentAccountsService.js")
     await deletePaymentAccountForWorkspace(workspaceId)
     await db.recursiveDelete(workspaceRef)

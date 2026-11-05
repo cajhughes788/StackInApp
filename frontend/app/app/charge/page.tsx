@@ -9,7 +9,14 @@ import QRCode from "qrcode"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { InvoicesPage, cardClass, localToday, useInvoicesWorkspace } from "@/components/invoices/invoice-ui"
-import { createQuickCharge, updateInvoiceStatus } from "@/lib/api/invoicesApi"
+import {
+  createQuickCharge,
+  updateInvoiceStatus,
+  updatePaymentAccount,
+  wakeChargeServers,
+  wakePaymentSetupServer,
+} from "@/lib/api/invoicesApi"
+import { isAbortError } from "@/lib/api/core/errors"
 import { shareLink } from "@/lib/documentExport"
 import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
 import { cn } from "@/lib/utils"
@@ -68,6 +75,7 @@ function ChargePage() {
   const { ready, workspaceId, invoices, loadStatus } = useInvoicesWorkspace()
   const paymentAccount = useInvoicesStore((s) => (workspaceId ? s.byWorkspaceId[workspaceId]?.paymentAccount : null))
   const load = useInvoicesStore((s) => s.load)
+  const setPaymentAccount = useInvoicesStore((s) => s.setPaymentAccount)
 
   const [amountText, setAmountText] = useState("")
   const [description, setDescription] = useState("")
@@ -85,7 +93,18 @@ function ChargePage() {
   const [laterSendEmail, setLaterSendEmail] = useState(true)
 
   const canTakePayments = !!paymentAccount?.chargesEnabled && !!paymentAccount.acceptOnline
+  // Stripe is ready but the Pay button is off: turn it on right here.
+  const canTurnOn = !!paymentAccount?.chargesEnabled && !paymentAccount.acceptOnline
+  const [turningOn, setTurningOn] = useState(false)
+  const [turnOnError, setTurnOnError] = useState<string | null>(null)
   const amount = parseAmount(amountText)
+
+  // Wake the servers now, while the amount is typed in. Not set up yet: wake
+  // the Stripe setup server instead, for the Invoice settings link below.
+  useEffect(() => {
+    if (canTakePayments) wakeChargeServers()
+    else if (loadStatus === "ready") wakePaymentSetupServer()
+  }, [canTakePayments, loadStatus])
 
   // While the QR code is up, check for the payment every few seconds.
   // (Also while filling in "pay later" — they might pay after all.)
@@ -123,7 +142,11 @@ function ChargePage() {
       const qr = await QRCode.toDataURL(shareUrl, { errorCorrectionLevel: "M", margin: 1, width: 640 })
       setStage({ kind: "showing", invoiceId: invoice.id, url: shareUrl, qr, amount: invoice.total })
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't start the charge. Try again.")
+      setError(
+        isAbortError(err)
+          ? "The connection was too slow. Tap Show QR to try again."
+          : err instanceof Error ? err.message : "Couldn't start the charge. Try again."
+      )
     } finally {
       setBusy(false)
     }
@@ -207,13 +230,43 @@ function ChargePage() {
     setStage({ kind: "form" })
   }
 
+  async function turnOnPayments() {
+    if (!workspaceId) return
+    setTurningOn(true)
+    setTurnOnError(null)
+    try {
+      const result = await updatePaymentAccount(workspaceId, { action: "set_accept_online", acceptOnline: true })
+      setPaymentAccount(workspaceId, result.paymentAccount)
+    } catch (err) {
+      setTurnOnError(err instanceof Error ? err.message : "Couldn't turn on card payments. Try again.")
+    } finally {
+      setTurningOn(false)
+    }
+  }
+
   const inputClass =
     "w-full rounded-xl border border-card-border bg-background px-3 py-2.5 text-base text-foreground placeholder:text-muted-foreground"
 
   return (
     <InvoicesPage ready={ready} loadingLabel="Loading..." title="Charge" backHref="/app/home" backLabel="Back to Home">
       {stage.kind === "form" ? (
-        loadStatus === "ready" && !canTakePayments ? (
+        loadStatus === "ready" && canTurnOn ? (
+          <div className={cn(cardClass, "space-y-3 text-sm")}>
+            <p className="font-semibold text-foreground">Card payments are off</p>
+            <p className="text-muted-foreground">
+              Your Stripe account is ready. Turn on card payments to take them here and on your invoices.
+            </p>
+            <Button
+              type="button"
+              className="h-11 rounded-full px-5 font-semibold"
+              disabled={turningOn}
+              onClick={() => void turnOnPayments()}
+            >
+              {turningOn ? "Turning on..." : "Turn on card payments"}
+            </Button>
+            {turnOnError ? <p className="text-destructive">{turnOnError}</p> : null}
+          </div>
+        ) : loadStatus === "ready" && !canTakePayments ? (
           <div className={cn(cardClass, "space-y-3 text-sm")}>
             <p className="font-semibold text-foreground">Turn on card payments first</p>
             <p className="text-muted-foreground">

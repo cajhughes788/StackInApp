@@ -88,11 +88,19 @@ export function deepLinkRequestFromPushData(data: Record<string, unknown> | unde
     return { workspaceId, route: "/app/home", review: null }
   }
   if (deepLink.startsWith("stackin://invoices/")) {
-    // A bank payment on an invoice failed (invoicePaymentsService.ts).
-    const invoiceId = deepLink.slice("stackin://invoices/".length).split(/[/?#]/)[0]
+    // A bank payment on an invoice failed (invoicePaymentsService.ts), or
+    // one or more went overdue (invoiceReminderService.ts): ?filter=overdue
+    // opens the Overdue list.
+    const rest = deepLink.slice("stackin://invoices/".length)
+    const invoiceId = rest.split(/[/?#]/)[0]
+    const overdueList = /[?&]filter=overdue\b/.test(rest)
     return {
       workspaceId,
-      route: invoiceId ? `/app/invoices/view?id=${encodeURIComponent(invoiceId)}` : "/app/invoices",
+      route: invoiceId
+        ? `/app/invoices/view?id=${encodeURIComponent(invoiceId)}`
+        : overdueList
+          ? "/app/invoices?filter=overdue"
+          : "/app/invoices",
       review: null,
     }
   }

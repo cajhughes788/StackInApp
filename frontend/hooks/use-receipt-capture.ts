@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 
+import { API_ENDPOINTS } from "@/lib/api/core/endpoints"
+import { wakeServer } from "@/lib/api/core/wake"
 import { createReceiptAsset, updateReceiptAssetUploadStatus } from "@/lib/api/receiptAssetsApi"
 import { analyzeReceiptImageQuality } from "@/lib/receipts/imageQuality"
 import { loadReceiptImage, normalizeExifOrientation } from "@/lib/receipts/imagePipeline"
@@ -25,6 +27,10 @@ export function useReceiptCapture(workspaceId: string | null) {
   const [attachedReceiptAsset, setAttachedReceiptAsset] = useState<ReceiptAsset | null>(null)
   const [receiptUploading, setReceiptUploading] = useState(false)
   const [receiptError, setReceiptError] = useState<string | null>(null)
+  // Attaching a photo waits on this server, so wake it while the form is up.
+  useEffect(() => {
+    if (workspaceId) wakeServer(API_ENDPOINTS.receiptAssets.post)
+  }, [workspaceId])
   // Local blob: preview of the picked/captured image, shown while
   // processReceiptFile is still decoding/checking/creating the doc so the
   // field can show the photo immediately instead of a blank gap. On success

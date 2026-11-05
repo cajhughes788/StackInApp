@@ -91,6 +91,12 @@ function InvoiceSettingsPage() {
     setLoaded(true)
   }, [loadStatus, settings])
 
+  // #auto-reminders (from an overdue invoice): scroll there once the form shows.
+  useEffect(() => {
+    if (!loaded || !window.location.hash) return
+    document.getElementById(window.location.hash.slice(1))?.scrollIntoView({ block: "center" })
+  }, [loaded])
+
   const depositValue = (() => {
     const cleaned = depositText.replace(/[$,%\s]/g, "")
     if (!/^\d+(\.\d{0,2})?$/.test(cleaned)) return null
@@ -438,7 +444,8 @@ function InvoiceSettingsPage() {
               </span>
               <Switch checked={draft.offerTips} onCheckedChange={(offerTips) => update({ offerTips })} aria-label="Ask for a tip" />
             </label>
-            <label className="flex items-center justify-between gap-3">
+            {/* Linked from an overdue invoice when reminders are off. */}
+            <label id="auto-reminders" className="flex scroll-mt-24 items-center justify-between gap-3">
               <span>
                 <span className="block text-sm font-medium text-foreground">Send payment reminders automatically</span>
                 <span className="block text-xs text-muted-foreground">

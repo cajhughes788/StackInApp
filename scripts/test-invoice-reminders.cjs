@@ -15,6 +15,7 @@ const {
   invoiceReminderDue,
   invoiceReminderSchedule,
   invoiceRemindersApply,
+  invoiceLastReminder,
 } = require("../shared/invoiceReminders.ts");
 const { buildInvoiceEmail, buildInvoiceReminderEmail } = require("../shared/invoiceEmail.ts");
 
@@ -229,6 +230,55 @@ run("the invoice email itself is unchanged", () => {
   assert.equal(email.subject, "Invoice #0012 from Ink & Co — $800.00 due Oct 31");
   assert.ok(email.text.startsWith("Ink & Co sent you Invoice #0012."));
   assert.ok(email.html.includes("sent you Invoice #0012"));
+});
+
+/* --------------------------------------------------------
+ * Reminders sent by hand (Send reminder on an overdue invoice)
+ * -------------------------------------------------------- */
+
+const at = (day, time = "16:00") => Date.parse(`${day}T${time}:00.000Z`);
+function manual(sentAt) {
+  return { key: "manual:balance:2026-10-31", sentAt };
+}
+
+run("a reminder sent by hand takes the place of the next automatic one", () => {
+  // Due Oct 31; reminded by hand Nov 1, so Nov 3's (3 days overdue) is skipped.
+  const reminded = invoice({ reminderSends: [manual("2026-11-01T18:00:00.000Z")] });
+  assert.equal(invoiceReminderDue(reminded, "2026-11-03", at("2026-11-03")), null);
+  assert.equal(invoiceReminderDue(reminded, "2026-11-04", at("2026-11-04")), null);
+  assert.equal(invoiceNextReminder(reminded, "2026-11-03").step, "overdue_7");
+  assert.equal(invoiceReminderDue(reminded, "2026-11-07", at("2026-11-07")).step, "overdue_7");
+});
+
+run("one sent by hand well before the next step doesn't replace it", () => {
+  // Reminded Nov 8; the 14-day one (Nov 14) still goes out.
+  const reminded = invoice({ reminderSends: [...sentKeys("balance:2026-10-31:overdue_7"), manual("2026-11-08T18:00:00.000Z")] });
+  assert.equal(invoiceReminderDue(reminded, "2026-11-14", at("2026-11-14")).step, "overdue_14");
+});
+
+run("no automatic reminder within 2 days of one sent by hand", () => {
+  // The 7-day step was missed on Nov 7; its catch-up day (Nov 8) falls
+  // right after a hand-sent reminder that morning, so it's held back.
+  const reminded = invoice({ reminderSends: [...sentKeys("balance:2026-10-31:overdue_3"), manual("2026-11-08T15:00:00.000Z")] });
+  assert.equal(invoiceReminderDue(reminded, "2026-11-08", at("2026-11-08")), null);
+});
+
+run("a reminder sent by hand doesn't change the invoice's emailed date", () => {
+  const reminded = invoice({ reminderSends: [manual("2026-11-01T18:00:00.000Z")] });
+  assert.equal(reminded.lastEmailedAt, "2026-10-01T10:00:00.000Z");
+});
+
+run("the last reminder is the latest, automatic or by hand", () => {
+  const auto = invoice({ reminderSends: sentKeys("balance:2026-10-31:overdue_3") });
+  assert.deepEqual(invoiceLastReminder(auto), { sentAt: "2026-10-28T15:00:00.000Z", manual: false });
+  const both = invoice({ reminderSends: [...sentKeys("balance:2026-10-31:overdue_3"), manual("2026-11-05T18:00:00.000Z")] });
+  assert.deepEqual(invoiceLastReminder(both), { sentAt: "2026-11-05T18:00:00.000Z", manual: true });
+  assert.equal(invoiceLastReminder(invoice()), null);
+});
+
+run("the email action takes a reminder flag", () => {
+  const parsed = InvoiceStatusActionSchema.parse({ action: "email", to: "pat@example.com", reminder: true });
+  assert.equal(parsed.reminder, true);
 });
 
 process.stdout.write("invoice reminder checks passed\n");

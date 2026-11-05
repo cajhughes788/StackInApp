@@ -1,4 +1,5 @@
 import { apiFetch } from "@/lib/api/core/client"
+import { wakeServer } from "@/lib/api/core/wake"
 import { API_ENDPOINTS } from "@/lib/api/core/endpoints"
 import {
   InvoiceSchema,
@@ -99,6 +100,11 @@ export async function createInvoice(workspaceId: string, input: InvoiceCreateInp
   return requireInvoice(res.invoice)
 }
 
+// A quick charge happens with the customer standing there, so it waits out
+// even a slow cold start (one measured 36s) rather than failing. The server
+// gives it 60s too, and the client mutation id makes a retry safe.
+const QUICK_CHARGE_TIMEOUT_MS = 60_000
+
 /** Makes a quick charge (a one-line invoice, shared at once) and returns its pay link. */
 export async function createQuickCharge(
   workspaceId: string,
@@ -106,9 +112,32 @@ export async function createQuickCharge(
 ): Promise<{ invoice: InvoiceType; shareUrl: string }> {
   const res = await apiFetch<{ invoice: InvoiceType; shareUrl: string }>(
     `${API_ENDPOINTS.invoices.quickCharge}?${query(workspaceId)}`,
-    { timeout: INVOICE_TIMEOUT_MS, method: "POST", body: JSON.stringify(input) }
+    { timeout: QUICK_CHARGE_TIMEOUT_MS, method: "POST", body: JSON.stringify(input) }
   )
   return { invoice: requireInvoice(res.invoice), shareUrl: res.shareUrl }
+}
+
+/**
+ * Wakes the servers a charge waits on, so neither "Show QR" nor the
+ * customer's scan pays for a cold start: quick charge, its cancel and "pay
+ * later" (the status server), and the pay page. A HEAD of a pay link returns
+ * before any lookup (see publicInvoice).
+ */
+export function wakeChargeServers(): void {
+  wakeServer(API_ENDPOINTS.invoices.quickCharge)
+  wakeServer(API_ENDPOINTS.invoices.status)
+  wakeServer(`${API_ENDPOINTS.invoices.publicPage}/i/wake/pay`, { method: "HEAD", mode: "no-cors" })
+}
+
+/** Wakes the server "Set up with Stripe" and "Continue setup" wait on. */
+export function wakePaymentSetupServer(): void {
+  wakeServer(API_ENDPOINTS.invoices.paymentAccount)
+}
+
+/** Wakes the servers that sending, sharing or marking an invoice paid waits on. */
+export function wakeInvoiceServers(): void {
+  wakeServer(API_ENDPOINTS.invoices.post)
+  wakeServer(API_ENDPOINTS.invoices.status)
 }
 
 export async function editInvoice(workspaceId: string, invoiceId: string, patch: InvoicePatch): Promise<InvoiceType> {

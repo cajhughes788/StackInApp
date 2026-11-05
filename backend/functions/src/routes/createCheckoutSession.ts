@@ -45,6 +45,9 @@ type BillingSubscriptionDoc = SubscriptionDoc & {
     pendingCheckoutExpiresAt?: number;
     pendingCheckoutUrl?: string;
     pendingCheckoutSource?: CheckoutSource;
+    // The plan the pending checkout is for: it's only handed back for that
+    // plan, so switching plans never opens the old plan's checkout.
+    pendingCheckoutTier?: SubscriptionTier;
 };
 
 function getStripeClient(): Stripe {
@@ -57,7 +60,7 @@ function getStripeClient(): Stripe {
 function hasStripeSubscriptionHistory(subscription: SubscriptionDoc | null): boolean {
     return Boolean(subscription?.stripeSubscriptionId || subscription?.stripeCustomerId);
 }
-function isReusablePendingCheckout(subscription: BillingSubscriptionDoc | null, now: number, source?: CheckoutSource): subscription is BillingSubscriptionDoc & {
+function isReusablePendingCheckout(subscription: BillingSubscriptionDoc | null, now: number, tier: SubscriptionTier, source?: CheckoutSource): subscription is BillingSubscriptionDoc & {
     pendingCheckoutSessionId: string;
     pendingCheckoutExpiresAt: number;
     pendingCheckoutUrl: string;
@@ -67,6 +70,7 @@ function isReusablePendingCheckout(subscription: BillingSubscriptionDoc | null, 
         typeof subscription.pendingCheckoutUrl === "string" &&
         typeof subscription.pendingCheckoutExpiresAt === "number" &&
         subscription.pendingCheckoutSource === source &&
+        subscription.pendingCheckoutTier === tier &&
         subscription.pendingCheckoutExpiresAt > now + REUSABLE_CHECKOUT_BUFFER_MS);
 }
 function hasBlockingLocalSubscription(subscription: BillingSubscriptionDoc | null): boolean {
@@ -101,8 +105,24 @@ async function clearPendingCheckout(subscriptionRef: FirebaseFirestore.DocumentR
         pendingCheckoutUrl: FieldValue.delete(),
         pendingCheckoutExpiresAt: FieldValue.delete(),
         pendingCheckoutSource: FieldValue.delete(),
+        pendingCheckoutTier: FieldValue.delete(),
         updatedAt: Date.now(),
     }, { merge: true });
+}
+
+// Closes the checkout for a plan they switched away from, so it can't still
+// be paid. One that was already paid means the account is subscribed.
+async function expireReplacedCheckout(stripe: Stripe, sessionId: string): Promise<void> {
+    try {
+        await stripe.checkout.sessions.expire(sessionId);
+    }
+    catch {
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+        if (session.status === "complete") {
+            throw createHttpError(409, "This account already has an active subscription.");
+        }
+        // Already expired: nothing to close.
+    }
 }
 
 // Checkout started in the iOS app runs in Safari; it comes back through the
@@ -169,16 +189,22 @@ export async function createCheckoutSessionHandler(req: Request, res: Response):
             if (hasBlockingLocalSubscription(existingSubscription)) {
                 throw createHttpError(409, "This account already has an active subscription.");
             }
-            if (isReusablePendingCheckout(existingSubscription, now, source)) {
+            if (isReusablePendingCheckout(existingSubscription, now, tier, source)) {
                 return {
                     kind: "reuse" as const,
                     sessionId: existingSubscription.pendingCheckoutSessionId,
                     url: existingSubscription.pendingCheckoutUrl,
                 };
             }
-            if (typeof existingSubscription?.pendingCheckoutExpiresAt === "number" &&
+            const pendingIsLive = typeof existingSubscription?.pendingCheckoutExpiresAt === "number" &&
                 existingSubscription.pendingCheckoutExpiresAt > now &&
-                existingSubscription.pendingCheckoutSource === source) {
+                existingSubscription.pendingCheckoutSource === source;
+            // A live checkout for another plan is replaced; one with no link
+            // yet is another request still creating it.
+            const replacedSessionId = pendingIsLive && typeof existingSubscription?.pendingCheckoutSessionId === "string"
+                ? existingSubscription.pendingCheckoutSessionId
+                : undefined;
+            if (pendingIsLive && !replacedSessionId) {
                 throw createHttpError(409, "A checkout session is already in progress for this account.");
             }
             transaction.set(currentSubscriptionRef, {
@@ -187,11 +213,13 @@ export async function createCheckoutSessionHandler(req: Request, res: Response):
                 pendingCheckoutSessionId: FieldValue.delete(),
                 pendingCheckoutUrl: FieldValue.delete(),
                 pendingCheckoutSource: FieldValue.delete(),
+                pendingCheckoutTier: FieldValue.delete(),
                 pendingCheckoutExpiresAt: now + PENDING_CHECKOUT_LOCK_MS,
             }, { merge: true });
             return {
                 kind: "create" as const,
                 existingSubscription,
+                replacedSessionId,
             };
         });
         if (checkoutReservation.kind === "reuse") {
@@ -203,6 +231,9 @@ export async function createCheckoutSessionHandler(req: Request, res: Response):
             return;
         }
         shouldReleasePendingCheckout = true;
+        if (checkoutReservation.replacedSessionId) {
+            await expireReplacedCheckout(stripe, checkoutReservation.replacedSessionId);
+        }
         const existingSubscription = checkoutReservation.existingSubscription;
         const email = userRecord.email;
         if (!email) {
@@ -281,6 +312,7 @@ export async function createCheckoutSessionHandler(req: Request, res: Response):
             pendingCheckoutSessionId: session.id,
             pendingCheckoutUrl: session.url,
             ...(source ? { pendingCheckoutSource: source } : {}),
+            pendingCheckoutTier: tier,
             pendingCheckoutExpiresAt: typeof session.expires_at === "number"
                 ? session.expires_at * 1000
                 : Date.now() + PENDING_CHECKOUT_LOCK_MS,

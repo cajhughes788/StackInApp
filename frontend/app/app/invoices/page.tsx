@@ -1,10 +1,11 @@
 "use client"
 
-import { Suspense, useMemo, useState } from "react"
+import { Suspense, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { FileText, Plus, Settings2, Users } from "lucide-react"
+import { BellOff, FileText, Plus, Settings2, Users } from "lucide-react"
 
+import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   InvoiceRow,
@@ -15,6 +16,8 @@ import {
   useQueryParam,
 } from "@/components/invoices/invoice-ui"
 import ClientList from "@/components/clients/client-list"
+import { wakePaymentSetupServer } from "@/lib/api/invoicesApi"
+import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
 import { cn } from "@/lib/utils"
 import { formatInvoiceMoney } from "@shared/invoiceDisplay"
 import { invoiceBalanceDue, invoiceDueNow, invoicePaymentsReceivedIn } from "@shared/invoicePayments"
@@ -69,8 +72,18 @@ export default function InvoicesListPageRoute() {
 }
 
 function InvoicesListPage() {
-  const { ready, workspaceId, invoices, loadStatus } = useInvoicesWorkspace()
+  const { ready, workspaceId, invoices, settings, loadStatus } = useInvoicesWorkspace()
   const router = useRouter()
+  const takesPayments = useInvoicesStore((s) => {
+    const account = workspaceId ? s.byWorkspaceId[workspaceId]?.paymentAccount : null
+    return !!account?.chargesEnabled && !!account.acceptOnline
+  })
+
+  // Not taking card payments yet: wake the Stripe setup server, so it's up
+  // if they head to Invoice settings to set it up.
+  useEffect(() => {
+    if (loadStatus === "ready" && !takesPayments) wakePaymentSetupServer()
+  }, [loadStatus, takesPayments])
   // ?filter=overdue opens straight on that filter (the Needs you row).
   const filterParam = useQueryParam("filter")
   const [filter, setFilter] = useState<Filter>(() =>
@@ -224,6 +237,17 @@ function InvoicesListPage() {
                   )
                 })}
               </nav>
+
+              {/* The "several overdue" push opens here; nothing follows up while reminders are off. */}
+              {filter === "overdue" && visible.length > 0 && settings && !settings.autoReminders ? (
+                <div className="flex items-center gap-2.5 rounded-[14px] bg-muted px-3.5 py-3 text-sm text-foreground">
+                  <BellOff className="size-[18px] shrink-0 text-muted-foreground" aria-hidden="true" />
+                  <span className="min-w-0 flex-1">Automatic reminders are off. Turn them on and 521 follows up for you.</span>
+                  <Button asChild size="sm" variant="outline" className="shrink-0 rounded-full bg-card">
+                    <Link href="/app/invoices/settings#auto-reminders">Turn on</Link>
+                  </Button>
+                </div>
+              ) : null}
 
               {visible.length === 0 ? (
                 <div className={cn(cardClass, "text-sm text-muted-foreground")}>

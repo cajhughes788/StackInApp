@@ -348,7 +348,7 @@ export async function updateInvoiceStatus(
   }
   if (action.action === "email") {
     const { emailInvoice } = await import("./invoiceEmailService.js")
-    return emailInvoice(workspaceId, ref, { to: action.to, message: action.message })
+    return emailInvoice(workspaceId, ref, { to: action.to, message: action.message, reminder: action.reminder })
   }
   if (action.action === "refund") {
     const { refundInvoice } = await import("./refundsService.js")

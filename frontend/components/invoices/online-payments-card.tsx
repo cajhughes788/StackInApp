@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/hooks/use-toast"
 import { cardClass, useQueryParam } from "@/components/invoices/invoice-ui"
-import { updatePaymentAccount } from "@/lib/api/invoicesApi"
+import { updatePaymentAccount, wakePaymentSetupServer } from "@/lib/api/invoicesApi"
 import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
 import { cn } from "@/lib/utils"
 import type { PaymentAccount } from "@shared/schemas/paymentAccount"
@@ -19,6 +19,12 @@ import type { PaymentAccount } from "@shared/schemas/paymentAccount"
 // to ?stripe=done|refresh here).
 
 type Busy = null | "onboard" | "refresh" | "dashboard" | "toggle"
+
+type OnboardResult = Awaited<ReturnType<typeof updatePaymentAccount>>
+
+// Stripe's sign-up links are single-use and expire after about 5 minutes; an
+// early one older than this is dropped for a fresh one.
+const EARLY_LINK_MAX_AGE_MS = 4 * 60 * 1000
 
 function StatusLine({ account }: { account: PaymentAccount }) {
   const copy: Record<PaymentAccount["status"], { text: string; tone: string }> = {
@@ -44,6 +50,28 @@ export default function OnlinePaymentsCard({ workspaceId }: { workspaceId: strin
   const [busy, setBusy] = useState<Busy>(null)
   const handledReturn = useRef(false)
   const stripeReturn = useQueryParam("stripe")
+  // A "Continue setup" link fetched when the card opens, so the tap opens
+  // Stripe at once. Only for an account that already exists: fetching a link
+  // creates the Stripe account, which "Set up with Stripe" must do.
+  const earlyLink = useRef<{ at: number; result: Promise<OnboardResult | null> } | null>(null)
+  const unfinished = account?.status === "onboarding" || account?.status === "restricted"
+
+  function fetchEarlyLink() {
+    const client = Capacitor.isNativePlatform() ? "native" : "browser"
+    earlyLink.current = {
+      at: Date.now(),
+      result: updatePaymentAccount(workspaceId, { action: "onboard", client }).catch(() => null),
+    }
+  }
+
+  // Hands over the early link once, if it's still fresh and came back.
+  async function takeEarlyLink(): Promise<OnboardResult | null> {
+    const early = earlyLink.current
+    earlyLink.current = null
+    if (!early || Date.now() - early.at > EARLY_LINK_MAX_AGE_MS) return null
+    const result = await early.result
+    return result?.url ? result : null
+  }
 
   function fail(title: string, error: unknown) {
     toast({
@@ -70,7 +98,9 @@ export default function OnlinePaymentsCard({ workspaceId }: { workspaceId: strin
     setBusy("onboard")
     try {
       const native = Capacitor.isNativePlatform()
-      const result = await updatePaymentAccount(workspaceId, { action: "onboard", client: native ? "native" : "browser" })
+      const result =
+        (await takeEarlyLink()) ??
+        (await updatePaymentAccount(workspaceId, { action: "onboard", client: native ? "native" : "browser" }))
       setPaymentAccount(workspaceId, result.paymentAccount)
       if (!result.url) throw new Error("Stripe didn't return a sign-up link.")
       if (!native) {
@@ -82,6 +112,8 @@ export default function OnlinePaymentsCard({ workspaceId }: { workspaceId: strin
       setBusy(null)
       // Closed early or finished: either way, see where Stripe got to.
       await refresh(outcome !== "done")
+      // Closed before finishing: have the next link ready too.
+      if (outcome !== "done") fetchEarlyLink()
       if (outcome === "refresh") toast({ title: "That link expired", description: "Tap Continue setup to pick up where you left off." })
     } catch (error) {
       fail("Couldn't open Stripe", error)
@@ -118,6 +150,17 @@ export default function OnlinePaymentsCard({ workspaceId }: { workspaceId: strin
       setBusy(null)
     }
   }
+
+  // Not set up yet: wake the server the Stripe button waits on, or, for an
+  // unfinished setup, fetch the link itself.
+  useEffect(() => {
+    if (unfinished) {
+      if (!earlyLink.current) fetchEarlyLink()
+    } else if (!account?.chargesEnabled || !account.acceptOnline) {
+      wakePaymentSetupServer()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unfinished, account?.chargesEnabled, account?.acceptOnline])
 
   // Back from Stripe on the web (app/stripe-return → ?stripe=done|refresh).
   useEffect(() => {

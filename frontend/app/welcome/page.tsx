@@ -13,6 +13,7 @@ import { useAccountAuthorityState } from "@/contexts/account-authority-context"
 import { useToast } from "@/hooks/use-toast"
 import { FieldError } from "@/components/ui/field-error"
 import { API_ENDPOINTS, apiFetch, createWorkspaceAPI } from "@/lib/api"
+import { wakeServer } from "@/lib/api/core/wake"
 import { detectNativeSignupCountryEligibility } from "@/lib/mobile/nativeSignupEligibility"
 import { useAuth } from "@/contexts/auth-context"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
@@ -242,6 +243,8 @@ export default function WelcomePage() {
       const result = await apiFetch<{ ok: boolean; url?: string; error?: string }>(
         API_ENDPOINTS.subscription.createCheckoutSession,
         {
+          // A cold start plus three Stripe calls can run past the 12s default.
+          timeout: 30_000,
           method: "POST",
           body: JSON.stringify({ tier: selectedTier, source: "ios-app" }),
         }
@@ -294,6 +297,12 @@ export default function WelcomePage() {
       : authority?.isSubscriptionActive
         ? "Your current subscription does not allow additional workspace creation."
         : "We couldn't find an active subscription for this account yet."
+
+  // Wake the checkout server while a plan is picked, so the tap doesn't wait
+  // out its cold start (see lib/api/core/wake).
+  useEffect(() => {
+    if (showNativePlanPicker) wakeServer(API_ENDPOINTS.subscription.createCheckoutSession)
+  }, [showNativePlanPicker])
 
   useEffect(() => {
     if (hasSingleWorkspaceType) {

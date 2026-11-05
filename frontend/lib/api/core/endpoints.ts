@@ -24,6 +24,8 @@ export const API_ENDPOINTS = {
     status: "https://updateinvoicestatus-3lc2fwdgwq-uc.a.run.app",
     saveSettings: "https://saveinvoicesettings-3lc2fwdgwq-uc.a.run.app",
     paymentAccount: "https://updatepaymentaccount-3lc2fwdgwq-uc.a.run.app",
+    // The customer's pay page (served at /i/… through Hosting); only woken here.
+    publicPage: "https://publicinvoice-3lc2fwdgwq-uc.a.run.app",
   },
 
   recurringRules: {

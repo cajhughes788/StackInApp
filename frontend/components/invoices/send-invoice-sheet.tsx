@@ -14,14 +14,35 @@ import { emailInvoiceInBackground, invoiceSaved, latestInvoice } from "@/lib/dom
 import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
 import { smsHref } from "@/lib/smsLink"
 import { formatInvoiceDate, formatInvoiceMoney, publicInvoiceUrl } from "@shared/invoiceDisplay"
-import { invoiceBalanceDue } from "@shared/invoicePayments"
+import { invoiceBalanceDue, invoiceDueNow } from "@shared/invoicePayments"
+import { invoiceLastReminder } from "@shared/invoiceReminders"
 import type { InvoiceSettings, InvoiceType } from "@shared/schemas/invoice"
 
 // Getting an invoice to the client: 521 emails it (from "<Business> via 521",
 // replies to the business email), or a pre-filled text in Messages. Both
-// share the invoice first, which sends a draft.
+// share the invoice first, which sends a draft. With `reminder` (an overdue
+// invoice), both nudge instead: the "Past due" email and a reminder text.
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+/**
+ * The text a reminder opens Messages with, for an overdue invoice. It says
+ * "pay" only when the client can pay by card from the link.
+ */
+export function invoiceReminderText(
+  invoice: InvoiceType,
+  settings: InvoiceSettings | null,
+  url: string,
+  payableOnline: boolean
+): string {
+  const firstName = invoice.clientName.trim().split(/\s+/)[0]
+  const business = settings?.businessName || "me"
+  const dueNow = invoiceDueNow(invoice)
+  const what = dueNow?.purpose === "deposit" ? `the ${formatInvoiceMoney(dueNow.amount)} deposit for invoice #${invoice.number}` : `invoice #${invoice.number}`
+  const amount = dueNow?.purpose === "deposit" ? "" : ` for ${formatInvoiceMoney(invoiceBalanceDue(invoice))}`
+  const due = formatInvoiceDate(dueNow?.dueDate ?? invoice.dueDate).replace(/, \d{4}$/, "")
+  return `Hi ${firstName}, a friendly reminder from ${business}: ${what}${amount} was due ${due}. ${payableOnline ? "You can view and pay it here" : "You can view it here"}: ${url}`
+}
 
 export default function SendInvoiceSheet({
   open,
@@ -29,15 +50,21 @@ export default function SendInvoiceSheet({
   invoice,
   settings,
   workspaceId,
+  reminder = false,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   invoice: InvoiceType
   settings: InvoiceSettings | null
   workspaceId: string
+  reminder?: boolean
 }) {
   const { toast } = useToast()
   const upsertInvoice = useInvoicesStore((state) => state.upsertInvoice)
+  const payableOnline = useInvoicesStore((state) => {
+    const account = state.byWorkspaceId[workspaceId]?.paymentAccount
+    return !!account?.chargesEnabled && !!account.acceptOnline
+  })
   const [to, setTo] = useState("")
   const [message, setMessage] = useState("")
   const [phone, setPhone] = useState("")
@@ -52,6 +79,11 @@ export default function SendInvoiceSheet({
   }, [open, invoice.clientEmail, invoice.clientPhone])
 
   const emailValid = EMAIL_RE.test(to.trim())
+  // A reminder emailed in the last 2 days, automatic or by hand: say so
+  // before another goes out on top of it.
+  const lastReminder = reminder ? invoiceLastReminder(invoice) : null
+  const recentReminder =
+    lastReminder && Date.now() - Date.parse(lastReminder.sentAt) < 2 * 86_400_000 ? lastReminder : null
   const business = settings?.businessName || "me"
   const amount = formatInvoiceMoney(invoiceBalanceDue(invoice))
   const due = formatInvoiceDate(invoice.dueDate).replace(/, \d{4}$/, "")
@@ -60,7 +92,12 @@ export default function SendInvoiceSheet({
   // at once, and a new one still saving is emailed once it's saved.
   function sendEmail() {
     if (!emailValid) return
-    emailInvoiceInBackground(workspaceId, invoice, { to: to.trim(), ...(message.trim() ? { message: message.trim() } : {}) })
+    emailInvoiceInBackground(workspaceId, invoice, {
+      to: to.trim(),
+      ...(message.trim() ? { message: message.trim() } : {}),
+      ...(reminder ? { reminder: true } : {}),
+    })
+    if (reminder) toast({ title: "Reminder sent", description: `Emailed to ${to.trim()}.` })
     onOpenChange(false)
   }
 
@@ -77,7 +114,10 @@ export default function SendInvoiceSheet({
         upsertInvoice(workspaceId, result.invoice)
         url = result.shareUrl ?? publicInvoiceUrl(result.invoice.shareToken!)
       }
-      window.location.href = smsHref(phone, `Invoice #${invoice.number} from ${business}: ${amount} due ${due}. ${url}`)
+      window.location.href = smsHref(
+        phone,
+        reminder ? invoiceReminderText(invoice, settings, url, payableOnline) : `Invoice #${invoice.number} from ${business}: ${amount} due ${due}. ${url}`
+      )
       onOpenChange(false)
     } catch (error) {
       toast({
@@ -100,9 +140,9 @@ export default function SendInvoiceSheet({
       >
         <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-muted" aria-hidden="true" />
         <SheetHeader className="px-0 pb-4 pt-1 text-left">
-          <SheetTitle className="text-xl">Send invoice #{invoice.number}</SheetTitle>
+          <SheetTitle className="text-xl">{reminder ? `Remind ${invoice.clientName}` : `Send invoice #${invoice.number}`}</SheetTitle>
           <SheetDescription>
-            {invoice.clientName} · {amount} due {due}
+            {reminder ? `Invoice #${invoice.number} · ${amount} was due ${due}` : `${invoice.clientName} · ${amount} due ${due}`}
           </SheetDescription>
         </SheetHeader>
 
@@ -127,10 +167,17 @@ export default function SendInvoiceSheet({
               value={message}
               onChange={(event) => setMessage(event.target.value)}
               maxLength={1000}
-              placeholder="Thanks for your business!"
+              placeholder={reminder ? "If you've already paid, thank you!" : "Thanks for your business!"}
               className="resize-none rounded-xl border-0 bg-muted text-[15px] text-foreground shadow-none"
             />
           </label>
+          {recentReminder ? (
+            <p className="rounded-xl bg-muted px-3 py-2.5 text-sm text-foreground">
+              {recentReminder.manual ? "You emailed a reminder" : "521 emailed an automatic reminder"}{" "}
+              {new Date(recentReminder.sentAt).toDateString() === new Date().toDateString() ? "today" : "in the last 2 days"}.
+              Another email this soon may be too much — a text or call could work better.
+            </p>
+          ) : null}
           <Button
             type="button"
             className="h-[52px] w-full rounded-full text-base font-semibold"
@@ -138,10 +185,11 @@ export default function SendInvoiceSheet({
             onClick={() => sendEmail()}
           >
             <Mail className="size-[18px]" aria-hidden="true" />
-            Email invoice
+            {reminder ? "Email reminder" : "Email invoice"}
           </Button>
           <p className="text-xs leading-relaxed text-muted-foreground">
-            Sent from &ldquo;{settings?.businessName || "521"} via 521&rdquo; with a link to the invoice.{" "}
+            Sent from &ldquo;{settings?.businessName || "521"} via 521&rdquo;{" "}
+            {reminder ? "as a past-due reminder with a link to pay." : "with a link to the invoice."}{" "}
             {settings?.businessEmail ? (
               <>Replies go to {settings.businessEmail}.</>
             ) : (

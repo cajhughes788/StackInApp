@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { BellOff, BellRing, Check, FileText, Landmark, Link2, Mail, MoreHorizontal } from "lucide-react"
+import { BellOff, BellRing, Check, FileText, Landmark, Link2, Mail, MessageSquare, MoreHorizontal, Phone } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -27,7 +27,7 @@ import { useToast } from "@/hooks/use-toast"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import RecordPaymentSheet from "@/components/invoices/record-payment-sheet"
 import RefundSheet from "@/components/invoices/refund-sheet"
-import SendInvoiceSheet from "@/components/invoices/send-invoice-sheet"
+import SendInvoiceSheet, { invoiceReminderText } from "@/components/invoices/send-invoice-sheet"
 import {
   InvoiceDisputeCard,
   InvoiceMoneyBreakdown,
@@ -44,7 +44,7 @@ import {
   useQueryParam,
   useInvoicesWorkspace,
 } from "@/components/invoices/invoice-ui"
-import { updateInvoiceStatus } from "@/lib/api/invoicesApi"
+import { updateInvoiceStatus, wakeInvoiceServers } from "@/lib/api/invoicesApi"
 import {
   currentInvoiceId,
   deleteInvoiceInBackground,
@@ -57,6 +57,7 @@ import {
   setRemindersPausedInBackground,
 } from "@/lib/domain/invoiceService"
 import { shareLink } from "@/lib/documentExport"
+import { smsHref } from "@/lib/smsLink"
 import { shareInvoicePdf } from "@/lib/invoicePdf"
 import { isTempInvoiceId, useInvoicesStore } from "@/lib/stores/useInvoicesStore"
 import { cn } from "@/lib/utils"
@@ -71,13 +72,24 @@ import {
   invoiceAmountPaid,
   invoiceBalanceDue,
   invoiceDepositOutstanding,
+  invoiceDueNow,
   invoiceHasPayments,
   invoiceLatestPayment,
   invoiceRefundable,
   invoiceRefundTarget,
 } from "@shared/invoicePayments"
-import { invoiceNextReminder, type InvoiceReminder } from "@shared/invoiceReminders"
+import {
+  invoiceLastReminder,
+  invoiceNextReminder,
+  isManualReminderSend,
+  type InvoiceReminder,
+} from "@shared/invoiceReminders"
 import type { InvoiceTerms, InvoiceType } from "@shared/schemas/invoice"
+
+function shortDate(iso: string, today: string): string {
+  const day = iso.slice(0, 10)
+  return day === today ? "today" : formatInvoiceDate(day).replace(/, \d{4}$/, "")
+}
 
 function nextReminderLabel(reminder: InvoiceReminder, today: string): string {
   const when = reminder.sendOn === today ? "today" : formatInvoiceDate(reminder.sendOn)
@@ -102,7 +114,14 @@ function termsLabel(invoice: InvoiceType): string | null {
   return terms ? INVOICE_TERMS_LABELS[terms] : null
 }
 
-function metaLine(invoice: InvoiceType): string {
+// Sent and past what's due next (the deposit, or the rest).
+function invoiceOverdue(invoice: InvoiceType, today: string): boolean {
+  if (invoice.status !== "sent" || invoice.pendingPayment) return false
+  const dueNow = invoiceDueNow(invoice)
+  return !!dueNow && dueNow.dueDate < today
+}
+
+function metaLine(invoice: InvoiceType, today: string): string {
   switch (invoice.status) {
     case "draft":
       return "Draft · not shared yet"
@@ -130,7 +149,10 @@ function metaLine(invoice: InvoiceType): string {
       if (invoiceHasPayments(invoice)) {
         return `${formatInvoiceMoney(invoiceAmountPaid(invoice))} paid · ${formatInvoiceMoney(invoiceBalanceDue(invoice))} due`
       }
-      return [invoice.sharedAt ? `Shared ${formatInvoiceDate(invoice.sharedAt.slice(0, 10))}` : "Sent", termsLabel(invoice)]
+      return [
+        invoice.sharedAt ? `Shared ${formatInvoiceDate(invoice.sharedAt.slice(0, 10))}` : "Sent",
+        invoiceOverdue(invoice, today) ? `was due ${formatInvoiceDate(invoice.dueDate)}` : termsLabel(invoice),
+      ]
         .filter(Boolean)
         .join(" · ")
   }
@@ -148,6 +170,10 @@ function InvoiceDetailPage() {
   const router = useRouter()
   const { toast } = useToast()
   const { ready, workspaceId, invoices, settings, loadStatus } = useInvoicesWorkspace()
+  // Sending, sharing and marking paid wait on these; wake them now.
+  useEffect(() => {
+    if (workspaceId) wakeInvoiceServers()
+  }, [workspaceId])
   const paymentAccount = useInvoicesStore((state) => (workspaceId ? state.byWorkspaceId[workspaceId]?.paymentAccount ?? null : null))
   const payableOnline = !!paymentAccount?.chargesEnabled && !!paymentAccount.acceptOnline
   const upsertInvoice = useInvoicesStore((state) => state.upsertInvoice)
@@ -156,7 +182,7 @@ function InvoiceDetailPage() {
   // A just-created invoice is found under its real id as soon as it has one.
   const invoice = invoiceId ? invoices.find((i) => i.id === currentInvoiceId(invoiceId)) ?? null : null
   const saving = useInvoiceSaving(invoice?.id ?? null)
-  const [busy, setBusy] = useState<null | "link" | "pdf">(null)
+  const [busy, setBusy] = useState<null | "link" | "pdf" | "text">(null)
   const [paymentOpen, setPaymentOpen] = useState(false)
   const [refundOpen, setRefundOpen] = useState(false)
   // The payment a refund comes off; null means the latest with anything left.
@@ -164,7 +190,7 @@ function InvoiceDetailPage() {
   const [sendOpen, setSendOpen] = useState(false)
   // The link, when neither a share sheet nor the clipboard was available.
   const [manualLink, setManualLink] = useState<string | null>(null)
-  const [confirm, setConfirm] = useState<null | "void" | "delete" | "close">(null)
+  const [confirm, setConfirm] = useState<null | "void" | "delete" | "close" | "writeoff">(null)
   // Deleted here: it's gone from the store before the list page opens.
   const [leaving, setLeaving] = useState(false)
   const today = localToday()
@@ -246,6 +272,24 @@ function InvoiceDetailPage() {
     }
   }
 
+  // Overdue: Messages opens with a reminder and the pay link.
+  async function onTextReminder() {
+    if (!invoice?.clientPhone || !workspaceId) return
+    setBusy("text")
+    try {
+      const { invoice: current, url } = await ensureShared(invoice)
+      window.location.href = smsHref(invoice.clientPhone, invoiceReminderText(current, settings, url, payableOnline))
+    } catch (error) {
+      toast({
+        title: "Couldn't open Messages",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setBusy(null)
+    }
+  }
+
   function onWaiveDeposit() {
     if (!invoice || !workspaceId) return
     // The deposit line and amount due change on screen; no message needed.
@@ -257,9 +301,11 @@ function InvoiceDetailPage() {
     setRefundOpen(true)
   }
 
-  function onConfirmAction(action: "void" | "delete" | "close") {
+  function onConfirmAction(chosen: "void" | "delete" | "close" | "writeoff") {
     if (!invoice || !workspaceId) return
     setConfirm(null)
+    // Writing off is closing what's left, or voiding one with nothing paid.
+    const action = chosen === "writeoff" ? (invoiceHasPayments(invoice) ? "close" : "void") : chosen
     // Saved in the background (invoiceService).
     if (action === "void") {
       voidInvoiceInBackground(workspaceId, invoice)
@@ -279,9 +325,40 @@ function InvoiceDetailPage() {
   // invoice would get one (or the user stopped them here).
   const remindersOn = !!settings?.autoReminders && invoice?.status === "sent" && !!invoice.clientEmail && !!invoice.sharedAt
   const nextReminder = invoice && remindersOn ? invoiceNextReminder(invoice, today) : null
+  const lastReminder = invoice ? invoiceLastReminder(invoice) : null
 
   // Not while a bank payment clears: it would land against a changed invoice.
   const editable = (invoice?.status === "draft" || invoice?.status === "sent") && !invoice?.pendingPayment
+
+  // Overdue: chasing payment comes first (remind, text, call); sharing the
+  // invoice moves down.
+  const overdue = !!invoice && invoiceOverdue(invoice, today)
+  const phoneDigits = invoice?.clientPhone?.replace(/[^\d+]/g, "") ?? ""
+
+  const shareButtons = (
+    <div className="grid grid-cols-2 gap-2.5">
+      <Button
+        type="button"
+        variant="outline"
+        className="h-[52px] rounded-full border-card-border bg-card font-semibold"
+        disabled={busy !== null}
+        onClick={() => void onShareLink()}
+      >
+        <Link2 className="size-[18px]" aria-hidden="true" />
+        {busy === "link" ? "Sharing..." : "Share link"}
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        className="h-[52px] rounded-full border-card-border bg-card font-semibold"
+        disabled={busy !== null || !settings}
+        onClick={() => void onSharePdf()}
+      >
+        <FileText className="size-[18px]" aria-hidden="true" />
+        {busy === "pdf" ? "Preparing..." : "Share PDF"}
+      </Button>
+    </div>
+  )
 
   return (
     <InvoicesPage
@@ -308,6 +385,13 @@ function InvoiceDetailPage() {
                   <Link href={`/app/invoices/edit?id=${encodeURIComponent(invoice.id)}`}>Edit</Link>
                 </DropdownMenuItem>
               ) : null}
+              {overdue && editable ? (
+                // The due date is on the edit screen.
+                <DropdownMenuItem asChild>
+                  <Link href={`/app/invoices/edit?id=${encodeURIComponent(invoice.id)}`}>Change due date</Link>
+                </DropdownMenuItem>
+              ) : null}
+              {overdue ? <DropdownMenuItem onSelect={() => setConfirm("writeoff")}>Write off</DropdownMenuItem> : null}
               {(invoice.status === "sent" || invoice.status === "draft") && !invoiceHasPayments(invoice) ? (
                 <DropdownMenuItem onSelect={() => setConfirm("void")}>Void invoice</DropdownMenuItem>
               ) : null}
@@ -375,7 +459,7 @@ function InvoiceDetailPage() {
               )}
             </div>
             <div className="text-sm text-muted-foreground">
-              {metaLine(invoice)}
+              {metaLine(invoice, today)}
               {saving ? <span className="ml-1.5 text-xs">· Saving…</span> : null}
             </div>
           </section>
@@ -387,35 +471,44 @@ function InvoiceDetailPage() {
               disabled={busy !== null || !workspaceId}
               onClick={() => setSendOpen(true)}
             >
-              <Mail className="size-[18px]" aria-hidden="true" />
-              {invoice.lastEmailedAt ? "Send again" : "Send invoice"}
+              {overdue ? (
+                <BellRing className="size-[18px]" aria-hidden="true" />
+              ) : (
+                <Mail className="size-[18px]" aria-hidden="true" />
+              )}
+              {overdue ? "Send reminder" : invoice.lastEmailedAt ? "Send again" : "Send invoice"}
             </Button>
           ) : null}
 
-          {invoice.status !== "void" ? (
+          {overdue && phoneDigits ? (
             <div className="grid grid-cols-2 gap-2.5">
               <Button
                 type="button"
                 variant="outline"
                 className="h-[52px] rounded-full border-card-border bg-card font-semibold"
                 disabled={busy !== null}
-                onClick={() => void onShareLink()}
+                onClick={() => void onTextReminder()}
               >
-                <Link2 className="size-[18px]" aria-hidden="true" />
-                {busy === "link" ? "Sharing..." : "Share link"}
+                <MessageSquare className="size-[18px]" aria-hidden="true" />
+                {busy === "text" ? "Opening..." : "Text"}
               </Button>
-              <Button
-                type="button"
-                variant="outline"
-                className="h-[52px] rounded-full border-card-border bg-card font-semibold"
-                disabled={busy !== null || !settings}
-                onClick={() => void onSharePdf()}
-              >
-                <FileText className="size-[18px]" aria-hidden="true" />
-                {busy === "pdf" ? "Preparing..." : "Share PDF"}
+              <Button asChild variant="outline" className="h-[52px] rounded-full border-card-border bg-card font-semibold">
+                <a href={`tel:${phoneDigits}`}>
+                  <Phone className="size-[18px]" aria-hidden="true" />
+                  Call
+                </a>
               </Button>
             </div>
+          ) : overdue && editable ? (
+            <Link
+              href={`/app/invoices/edit?id=${encodeURIComponent(invoice.id)}`}
+              className="block text-center text-sm font-medium text-primary"
+            >
+              Add {invoice.clientName}&apos;s phone number to text or call
+            </Link>
           ) : null}
+
+          {invoice.status !== "void" && !overdue ? shareButtons : null}
 
           {workspaceId && invoice.dispute ? (
             <InvoiceDisputeCard invoice={invoice} workspaceId={workspaceId} onSharePdf={() => void onSharePdf()} />
@@ -485,6 +578,8 @@ function InvoiceDetailPage() {
             </Button>
           ) : null}
 
+          {overdue ? shareButtons : null}
+
           {invoice.status === "sent" && !invoice.pendingPayment ? (
             <div className="flex items-start gap-2.5 rounded-[14px] bg-accent px-3.5 py-3 text-sm leading-relaxed text-foreground">
               <Landmark className="mt-0.5 size-[18px] shrink-0 text-emerald-700 dark:text-emerald-400" aria-hidden="true" />
@@ -496,7 +591,7 @@ function InvoiceDetailPage() {
             </div>
           ) : null}
 
-          {workspaceId && remindersOn && (invoice.remindersPaused || nextReminder) ? (
+          {workspaceId && remindersOn && (invoice.remindersPaused || nextReminder || lastReminder) ? (
             <div className="flex items-center gap-2.5 rounded-[14px] bg-muted px-3.5 py-3 text-sm text-foreground">
               {invoice.remindersPaused ? (
                 <BellOff className="size-[18px] shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -504,9 +599,17 @@ function InvoiceDetailPage() {
                 <BellRing className="size-[18px] shrink-0 text-muted-foreground" aria-hidden="true" />
               )}
               <span className="min-w-0 flex-1">
-                {invoice.remindersPaused || !nextReminder
-                  ? `Reminders stopped for this invoice`
-                  : nextReminderLabel(nextReminder, today)}
+                {lastReminder ? (
+                  <span className="block text-muted-foreground">
+                    Last reminder {shortDate(lastReminder.sentAt, today)}
+                    {lastReminder.manual ? " · sent by you" : ""}
+                  </span>
+                ) : null}
+                {invoice.remindersPaused
+                  ? "Automatic reminders stopped for this invoice"
+                  : nextReminder
+                    ? nextReminderLabel(nextReminder, today)
+                    : "No more automatic reminders scheduled"}
               </span>
               <Button
                 type="button"
@@ -516,6 +619,16 @@ function InvoiceDetailPage() {
                 onClick={() => setRemindersPausedInBackground(workspaceId, invoice, !invoice.remindersPaused)}
               >
                 {invoice.remindersPaused ? "Resume" : "Stop"}
+              </Button>
+            </div>
+          ) : null}
+
+          {overdue && settings && !settings.autoReminders ? (
+            <div className="flex items-center gap-2.5 rounded-[14px] bg-muted px-3.5 py-3 text-sm text-foreground">
+              <BellOff className="size-[18px] shrink-0 text-muted-foreground" aria-hidden="true" />
+              <span className="min-w-0 flex-1">Automatic reminders are off. Turn them on and 521 follows up for you.</span>
+              <Button asChild size="sm" variant="outline" className="shrink-0 rounded-full bg-card">
+                <Link href="/app/invoices/settings#auto-reminders">Turn on</Link>
               </Button>
             </div>
           ) : null}
@@ -548,7 +661,8 @@ function InvoiceDetailPage() {
             {[...invoice.reminderSends].reverse().map((send) => (
               <div key={`${send.key}_${send.sentAt}`} className="flex items-center gap-2.5">
                 <span className="size-2 rounded-full bg-input" aria-hidden="true" />
-                Reminder emailed · {formatMoment(send.sentAt)}
+                {isManualReminderSend(send) ? "Reminder emailed by you" : "Automatic reminder emailed"} ·{" "}
+                {formatMoment(send.sentAt)}
               </div>
             ))}
             {invoice.lastEmailedAt ? (
@@ -584,6 +698,7 @@ function InvoiceDetailPage() {
               invoice={invoice}
               settings={settings}
               workspaceId={workspaceId}
+              reminder={overdue}
             />
           ) : null}
           {workspaceId && invoiceHasPayments(invoice) ? (
@@ -642,14 +757,20 @@ function InvoiceDetailPage() {
                 <AlertDialogTitle>
                   {confirm === "delete"
                     ? `Delete draft #${invoice.number}?`
-                    : confirm === "close"
+                    : confirm === "writeoff"
+                      ? `Write off invoice #${invoice.number}?`
+                      : confirm === "close"
                       ? `Close invoice #${invoice.number}?`
                       : `Void invoice #${invoice.number}?`}
                 </AlertDialogTitle>
                 <AlertDialogDescription>
                   {confirm === "delete"
                     ? "The draft is removed for good."
-                    : confirm === "close"
+                    : confirm === "writeoff"
+                      ? invoiceHasPayments(invoice)
+                        ? `Stop chasing the ${formatInvoiceMoney(invoiceBalanceDue(invoice))} left. The ${formatInvoiceMoney(invoiceAmountPaid(invoice))} already paid stays in your income, the invoice is marked Closed, and its link tells ${invoice.clientName} nothing more is due. This can't be undone.`
+                        : `Stop chasing the ${formatInvoiceMoney(invoiceBalanceDue(invoice))}. The invoice is marked Void, reminders stop, and its link tells ${invoice.clientName} nothing is owed. This can't be undone.`
+                      : confirm === "close"
                       ? `The ${formatInvoiceMoney(invoiceAmountPaid(invoice))} already paid stays in your income, and the ${formatInvoiceMoney(invoiceBalanceDue(invoice))} left is no longer owed. Its link tells the client nothing more is due. This can't be undone.`
                       : "It stays in your list marked Void, and its link tells the client nothing is owed. This can't be undone."}
                 </AlertDialogDescription>
@@ -657,7 +778,13 @@ function InvoiceDetailPage() {
               <AlertDialogFooter>
                 <AlertDialogCancel>Keep it</AlertDialogCancel>
                 <AlertDialogAction onClick={() => confirm && onConfirmAction(confirm)}>
-                  {confirm === "delete" ? "Delete draft" : confirm === "close" ? "Close invoice" : "Void invoice"}
+                  {confirm === "delete"
+                    ? "Delete draft"
+                    : confirm === "writeoff"
+                      ? "Write off"
+                      : confirm === "close"
+                        ? "Close invoice"
+                        : "Void invoice"}
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>

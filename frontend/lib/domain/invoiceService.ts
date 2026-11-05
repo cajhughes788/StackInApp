@@ -30,7 +30,8 @@ import { toast } from "@/hooks/use-toast"
 import { createInvoice, deleteInvoice, editInvoice, saveInvoiceSettings, updateInvoiceStatus } from "@/lib/api/invoicesApi"
 import { useEntriesStore } from "@/lib/stores/useEntriesStore"
 import { isTempInvoiceId, useInvoicesStore } from "@/lib/stores/useInvoicesStore"
-import { invoicePaymentPurposeFor, invoiceWithPayments } from "@shared/invoicePayments"
+import { invoiceDueNow, invoicePaymentPurposeFor, invoiceWithPayments } from "@shared/invoicePayments"
+import { manualReminderKey } from "@shared/invoiceReminders"
 import {
   InvoiceSettingsSchema,
   invoiceTotalFromLines,
@@ -156,6 +157,7 @@ export function createInvoiceInBackground(workspaceId: string, input: CreateInpu
     recentEmailSends: [],
     reminderSends: [],
     remindersPaused: false,
+    overdueNoticeKey: null,
     lines: input.lines,
     total: invoiceTotalFromLines(input.lines),
     issueDate: input.issueDate,
@@ -308,15 +310,27 @@ export function closeInvoiceInBackground(workspaceId: string, invoice: InvoiceTy
  * shows as sent and emailed now; a failure (a send cap, no connection) puts
  * the invoice back and says so.
  */
-export function emailInvoiceInBackground(workspaceId: string, invoice: InvoiceType, request: { to: string; message?: string }) {
+export function emailInvoiceInBackground(
+  workspaceId: string,
+  invoice: InvoiceType,
+  request: { to: string; message?: string; reminder?: boolean }
+) {
   const previous = latestInvoice(workspaceId, invoice.id) ?? invoice
   const now = new Date().toISOString()
+  const dueNow = invoiceDueNow(previous)
   store().upsertInvoice(workspaceId, {
     ...previous,
     status: previous.status === "draft" ? "sent" : previous.status,
     clientEmail: request.to,
-    lastEmailedAt: now,
-    lastEmailedTo: request.to,
+    // A reminder shows with the automatic ones (as the server keeps it).
+    ...(request.reminder
+      ? {
+          reminderSends: [
+            ...previous.reminderSends,
+            { key: manualReminderKey(dueNow ?? { purpose: "balance", dueDate: previous.dueDate }), sentAt: now },
+          ],
+        }
+      : { lastEmailedAt: now, lastEmailedTo: request.to }),
     sharedAt: previous.sharedAt ?? now,
     updatedAt: now,
   })
@@ -327,9 +341,17 @@ export function emailInvoiceInBackground(workspaceId: string, invoice: InvoiceTy
       action: "email",
       to: request.to,
       ...(request.message ? { message: request.message } : {}),
+      ...(request.reminder ? { reminder: true } : {}),
     })
     applyServerCopy(workspaceId, invoice.id, sent)
-  }).catch((error) => onFailure(workspaceId, `Couldn't email invoice #${previous.number}`, error, previous))
+  }).catch((error) =>
+    onFailure(
+      workspaceId,
+      request.reminder ? `Couldn't email the reminder for #${previous.number}` : `Couldn't email invoice #${previous.number}`,
+      error,
+      previous
+    )
+  )
 }
 
 /* --------------------------------------------------------
