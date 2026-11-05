@@ -318,7 +318,8 @@ export const calendarFeed = onRequest(async (req, res) => {
   await calendarFeedHandler(req as any, res as any)
 })
 
-export const publicBooking = onRequest({ secrets: [SECRETS.STRIPE_SECRET_KEY, SECRETS.SENDGRID_API_KEY] }, async (req, res) => {
+// maxInstances caps what a flood of requests can cost.
+export const publicBooking = onRequest({ secrets: [SECRETS.STRIPE_SECRET_KEY, SECRETS.SENDGRID_API_KEY, SECRETS.BOOKING_FORM_SECRET], maxInstances: 10 }, async (req, res) => {
   const { publicBookingHandler } = await import("./routes/publicBooking.js")
   await publicBookingHandler(req as any, res as any)
 })

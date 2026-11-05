@@ -23,6 +23,10 @@ export const STRIPE_CONNECT_WEBHOOK_SECRET = defineSecret("STRIPE_CONNECT_WEBHOO
 // SendGrid
 export const SENDGRID_API_KEY = defineSecret("SENDGRID_API_KEY")
 
+// Signs the public booking form's stamp (shared/bookingSpamGuard.ts) — any
+// long random string, generated with `openssl rand -base64 32`.
+export const BOOKING_FORM_SECRET = defineSecret("BOOKING_FORM_SECRET")
+
 // Slack
 export const SLACK_SUPPORT_WEBHOOK_URL = defineSecret("SLACK_SUPPORT_WEBHOOK_URL")
 

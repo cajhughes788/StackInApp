@@ -210,12 +210,14 @@ export type AppointmentAction = z.infer<typeof AppointmentActionSchema>
 export type AppointmentResponse = z.infer<typeof AppointmentResponseSchema>
 
 // What the public booking page posts (step 4). `key` is made fresh for each
-// form, so a double tap books once; `website` is a hidden field only bots fill.
+// form, so a double tap books once; `stamp` is when the form was shown,
+// signed (shared/bookingSpamGuard.ts); `website` is a hidden field only bots fill.
 export const OnlineBookingInputSchema = z.object({
   service: z.string().trim().min(1).max(40),
   date: DateSchema,
   time: TimeSchema,
   key: z.string().regex(/^[A-Za-z0-9_-]{16,64}$/),
+  stamp: z.string().max(100).optional().default(""),
   name: z.string().trim().min(1, "Enter your name.").max(80),
   email: z.string().trim().email("Enter a valid email.").max(254),
   phone: z.string().trim().max(40).optional().default(""),

@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto"
 import { db } from "../admin"
+import { BOOKING_FORM_SECRET } from "../secrets"
 import { appointmentsCol, overlapQuery, parseAppointment } from "./appointmentsService"
 import { bookingLinkDoc, readBookingSettings } from "./bookingService"
 import { resolveClientByContact } from "./clientsService"
@@ -9,6 +10,17 @@ import { MIN_CHECKOUT_MINUTES, appointmentDepositOnline } from "@shared/appointm
 import { APPOINTMENT_LOOKBACK_MS, appointmentTimes } from "@shared/appointments"
 import { BOOKING_VIA_WEBSITE, bookingDateRange, bookingOpenDays, bookingOpenTimes } from "@shared/onlineBooking"
 import { busyAsAppointments } from "@shared/busyTimes"
+import {
+  BOOKING_LIMITS,
+  BOOKING_LIMIT_MESSAGES,
+  bookingFormStampProblem,
+  bookingLimitId,
+  currentBookingCount,
+  nextBookingCount,
+  signBookingFormStamp,
+  type BookingLimitCount,
+  type BookingLimitKind,
+} from "@shared/bookingSpamGuard"
 import { AppointmentSchema, OnlineBookingInputSchema, type AppointmentType } from "@shared/schemas/appointment"
 import type { BookingService, BookingSettings } from "@shared/schemas/booking"
 import type { InvoiceSettings } from "@shared/schemas/invoice"
@@ -101,25 +113,89 @@ export async function openTimes(page: BookingPage, service: BookingService, date
   return bookingOpenTimes({ settings: page.booking, service, date, appointments, nowIso })
 }
 
-export function newFormKey(): string {
-  return randomBytes(16).toString("base64url")
+export type BookingForm = { formKey: string; formStamp: string }
+
+/** A fresh booking form: a key so a double tap books once, and a signed stamp of when it was shown. */
+export function newBookingForm(slug: string): BookingForm {
+  const formKey = randomBytes(16).toString("base64url")
+  return { formKey, formStamp: signBookingFormStamp(BOOKING_FORM_SECRET.value(), slug, formKey, Date.now()) }
 }
 
 export type OnlineBookingResult =
   | { kind: "booked"; shareToken: string }
   | { kind: "pay"; url: string }
   | { kind: "taken" }
-  | { kind: "invalid"; message: string }
+  // `form`: show the form again with the one they sent (sent too fast — a second tap goes through).
+  | { kind: "invalid"; message: string; form?: BookingForm }
+  | { kind: "limited"; message: string }
   | { kind: "not_found" }
 
-export async function bookOnline(slug: string, raw: unknown): Promise<OnlineBookingResult> {
+// ---------------------------------------------------------------------------
+// Limits (shared/bookingSpamGuard.ts). Counts live in bookingLimits docs,
+// cleared daily by cleanupBookingLimitsDaily.
+// ---------------------------------------------------------------------------
+
+const limitDoc = (kind: BookingLimitKind, workspaceId: string, value: string) =>
+  db.collection("bookingLimits").doc(bookingLimitId(kind, workspaceId, value))
+
+function savedCount(data: FirebaseFirestore.DocumentData | undefined): BookingLimitCount | null {
+  return data && typeof data.count === "number" && typeof data.windowEndsAt === "string"
+    ? { count: data.count, windowEndsAt: data.windowEndsAt }
+    : null
+}
+
+/** Uses one of the visitor's tries; false when they're out of them. */
+async function takeVisitorTry(workspaceId: string, visitor: string): Promise<boolean> {
+  const ref = limitDoc("visitor", workspaceId, visitor)
+  return db.runTransaction(async (txn) => {
+    const nowIso = new Date().toISOString()
+    const saved = savedCount((await txn.get(ref)).data())
+    if (currentBookingCount(saved, nowIso) >= BOOKING_LIMITS.visitor.max) return false
+    txn.set(ref, nextBookingCount("visitor", saved, nowIso))
+    return true
+  })
+}
+
+/** The limit a new booking would go over (email first), or null. */
+async function bookingLimitReached(workspaceId: string, email: string): Promise<BookingLimitKind | null> {
+  const nowIso = new Date().toISOString()
+  const [byEmail, byBusiness] = await Promise.all([
+    limitDoc("email", workspaceId, email).get(),
+    limitDoc("business", workspaceId, workspaceId).get(),
+  ])
+  if (currentBookingCount(savedCount(byEmail.data()), nowIso) >= BOOKING_LIMITS.email.max) return "email"
+  if (currentBookingCount(savedCount(byBusiness.data()), nowIso) >= BOOKING_LIMITS.business.max) return "business"
+  return null
+}
+
+/** Counts a booking just made against its email and its business. */
+async function countBooking(workspaceId: string, email: string): Promise<void> {
+  const refs = [
+    { kind: "email" as const, ref: limitDoc("email", workspaceId, email) },
+    { kind: "business" as const, ref: limitDoc("business", workspaceId, workspaceId) },
+  ]
+  await db.runTransaction(async (txn) => {
+    const nowIso = new Date().toISOString()
+    const snaps = await Promise.all(refs.map(({ ref }) => txn.get(ref)))
+    refs.forEach(({ kind, ref }, i) => txn.set(ref, nextBookingCount(kind, savedCount(snaps[i].data()), nowIso)))
+  })
+}
+
+/** `visitor`: who's booking (their address), for the tries limit; "" when unknown. */
+export async function bookOnline(slug: string, raw: unknown, visitor: string): Promise<OnlineBookingResult> {
   const page = await findBookingPage(slug)
   if (!page) return { kind: "not_found" }
+  if (visitor && !(await takeVisitorTry(page.workspaceId, visitor))) return { kind: "limited", message: BOOKING_LIMIT_MESSAGES.visitor }
   const parsed = OnlineBookingInputSchema.safeParse(raw)
   if (!parsed.success) return { kind: "invalid", message: parsed.error.issues[0]?.message ?? "Check your details and try again." }
   const input = parsed.data
   // Only bots fill the hidden field.
   if (input.website) return { kind: "invalid", message: "Couldn't book that. Try again." }
+  const stampProblem = bookingFormStampProblem(BOOKING_FORM_SECRET.value(), page.slug, input.key, input.stamp, Date.now())
+  if (stampProblem === "too_fast") {
+    return { kind: "invalid", message: "Couldn't book that. Try again.", form: { formKey: input.key, formStamp: input.stamp } }
+  }
+  if (stampProblem) return { kind: "invalid", message: "This form timed out. Check your details and book again." }
   const service = bookableService(page, input.service)
   if (!service) return { kind: "invalid", message: "That service isn't available anymore." }
   const times = appointmentTimes({ date: input.date, startTime: input.time, timeZone: page.booking.timeZone, ...service })
@@ -134,6 +210,8 @@ export async function bookOnline(slug: string, raw: unknown): Promise<OnlineBook
     // A quick check before saving a client for a time that's already gone.
     const quick = bookingOpenTimes({ settings: page.booking, service, date: input.date, appointments: await appointmentsAhead(page, new Date().toISOString()), nowIso: new Date().toISOString() })
     if (!quick.includes(input.time)) return { kind: "taken" }
+    const limit = await bookingLimitReached(page.workspaceId, input.email)
+    if (limit) return { kind: "limited", message: BOOKING_LIMIT_MESSAGES[limit] }
   }
   const client = existing.exists
     ? null
@@ -188,6 +266,10 @@ export async function bookOnline(slug: string, raw: unknown): Promise<OnlineBook
   })
   if (!outcome) return { kind: "taken" }
   const { appointment } = outcome
+  if (outcome.created) {
+    // A missed count only loosens the limits; never fail the booking for it.
+    await countBooking(page.workspaceId, input.email).catch((error) => console.error("bookOnline: count failed", error))
+  }
   const token = appointment.shareToken!
 
   if (appointment.status === "requested") {

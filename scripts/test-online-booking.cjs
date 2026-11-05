@@ -239,7 +239,7 @@ test("times show in the business's zone; a taken time says so", () => {
 });
 
 test("details: posts name, email, phone and the form key; pays the deposit by card", () => {
-  const html = renderPublicBookingPage(context(), { step: "details", service: services[0], date: "2026-12-02", time: "10:00", formKey: "KEY1234567890abcdef" });
+  const html = renderPublicBookingPage(context(), { step: "details", service: services[0], date: "2026-12-02", time: "10:00", formKey: "KEY1234567890abcdef", formStamp: "STAMP" });
   assert.match(html, /action="\/book\/fresh-cuts\/book"/);
   assert.match(html, /name="key" value="KEY1234567890abcdef"/);
   assert.match(html, /name="name"[^>]*required/);
@@ -252,10 +252,10 @@ test("details: posts name, email, phone and the form key; pays the deposit by ca
 
 test("details: no deposit, or no card payments, books without paying", () => {
   assert.match(
-    renderPublicBookingPage(context(), { step: "details", service: services[1], date: "2026-12-02", time: "10:00", formKey: "KEY1234567890abcdef" }),
+    renderPublicBookingPage(context(), { step: "details", service: services[1], date: "2026-12-02", time: "10:00", formKey: "KEY1234567890abcdef", formStamp: "STAMP" }),
     />Book appointment</
   );
-  const off = renderPublicBookingPage(context({ onlinePayments: false }), { step: "details", service: services[0], date: "2026-12-02", time: "10:00", formKey: "KEY1234567890abcdef" });
+  const off = renderPublicBookingPage(context({ onlinePayments: false }), { step: "details", service: services[0], date: "2026-12-02", time: "10:00", formKey: "KEY1234567890abcdef", formStamp: "STAMP" });
   assert.match(off, />Book appointment</);
   assert.match(off, /deposit is paid at your appointment/);
 });
@@ -267,6 +267,7 @@ test("a form error shows above the form with what they typed, escaped", () => {
     date: "2026-12-02",
     time: "10:00",
     formKey: "KEY1234567890abcdef",
+    formStamp: "STAMP",
     error: "Enter a valid email.",
     values: { name: '"><script>', email: "bad", phone: "" },
   });

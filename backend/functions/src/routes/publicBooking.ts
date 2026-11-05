@@ -3,7 +3,7 @@ import {
   bookableService,
   bookOnline,
   findBookingPage,
-  newFormKey,
+  newBookingForm,
   openDays,
   openTimes,
   type BookingPage,
@@ -60,6 +60,13 @@ async function sendLogo(slug: string, res: Response): Promise<void> {
   res.status(200).send(Buffer.from(match[2], "base64"))
 }
 
+// Who's booking, for the tries limit (services/publicBookingService.ts).
+function visitorOf(req: Request): string {
+  const forwarded = req.headers["x-forwarded-for"]
+  const first = (Array.isArray(forwarded) ? forwarded[0] : forwarded)?.split(",")[0]?.trim()
+  return (req.ip || first || "").slice(0, 64)
+}
+
 function query(req: Request, name: string): string {
   const value = req.query[name]
   return typeof value === "string" ? value.slice(0, 64) : ""
@@ -88,7 +95,7 @@ async function viewFor(page: BookingPage, req: Request): Promise<PublicBookingVi
   }
   const times = await openTimes(page, service, date)
   const time = query(req, "time")
-  if (TIME.test(time) && times.includes(time)) return { step: "details", service, date, time, formKey: newFormKey() }
+  if (TIME.test(time) && times.includes(time)) return { step: "details", service, date, time, ...newBookingForm(page.slug) }
   return { step: "times", service, date, times, taken: query(req, "taken") === "1" || TIME.test(time) }
 }
 
@@ -129,7 +136,8 @@ export async function publicBookingHandler(req: Request, res: Response): Promise
         phone: field("phone"),
         website: field("website"),
         via: field("via"),
-      })
+        stamp: field("stamp"),
+      }, visitorOf(req))
       if (result.kind === "not_found") {
         res.status(404).send(renderPublicBookingUnavailable())
         return
@@ -156,13 +164,13 @@ export async function publicBookingHandler(req: Request, res: Response): Promise
         res.redirect(303, pagePath)
         return
       }
-      res.status(400).send(
+      res.status(result.kind === "limited" ? 429 : 400).send(
         renderPublicBookingPage(context(page, field("via")), {
           step: "details",
           service,
           date: field("date"),
           time: field("time"),
-          formKey: newFormKey(),
+          ...(result.kind === "invalid" && result.form ? result.form : newBookingForm(page.slug)),
           error: result.message,
           values: { name: field("name"), email: field("email"), phone: field("phone") },
         })

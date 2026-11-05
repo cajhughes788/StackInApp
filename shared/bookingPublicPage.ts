@@ -27,6 +27,8 @@ export type PublicBookingView =
       time: string
       // A fresh key per form, so a double tap books once.
       formKey: string
+      // When the form was shown, signed (shared/bookingSpamGuard.ts).
+      formStamp: string
       error?: string
       values?: { name: string; email: string; phone: string }
     }
@@ -156,6 +158,7 @@ function renderStep(context: PublicBookingContext, view: PublicBookingView): str
       <input type="hidden" name="date" value="${escapeHtml(view.date)}">
       <input type="hidden" name="time" value="${escapeHtml(view.time)}">
       <input type="hidden" name="key" value="${escapeHtml(view.formKey)}">
+      <input type="hidden" name="stamp" value="${escapeHtml(view.formStamp)}">
       ${context.fromWebsite ? `<input type="hidden" name="via" value="${BOOKING_VIA_WEBSITE}">` : ""}
       ${input("name", "Your name", "text", values.name, 'required maxlength="80" autocomplete="name"')}
       ${input("email", "Email", "email", values.email, 'required maxlength="254" autocomplete="email"')}
