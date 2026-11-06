@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { AlertTriangle, Banknote, CheckCircle2, ChevronRight, Clock, EyeOff, ReceiptText } from "lucide-react"
+import { AlertTriangle, Banknote, CheckCircle2, ChevronRight, Clock, EyeOff, FileCheck, ReceiptText } from "lucide-react"
 
 import { getPlaidItems } from "@/lib/api/plaidApi"
 
@@ -18,6 +18,8 @@ import * as settingsService from "@/lib/domain/settingsService"
 import { useToast } from "@/hooks/use-toast"
 import { computeReceiptCoverage } from "@shared/receiptRequirements"
 import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
+import { useWorkspaceQuotes } from "@/lib/stores/useQuotesStore"
+import { quoteNumberLabel, quotesToInvoice } from "@shared/quotes"
 import { localToday } from "@/components/invoices/invoice-ui"
 import { formatInvoiceMoney } from "@shared/invoiceDisplay"
 import { invoiceBalanceDue, invoiceDueNow } from "@shared/invoicePayments"
@@ -118,6 +120,9 @@ export default function NeedsYouPanel() {
       return [{ appointment, left }]
     })
   }, [appointments, invoices])
+  // Quotes the client accepted that don't have their invoice yet.
+  const { quotes } = useWorkspaceQuotes(activeWorkspaceId)
+  const acceptedQuotes = useMemo(() => quotesToInvoice(quotes), [quotes])
   const unpaidAppointmentsTotal = unpaidAppointments.reduce((sum, item) => sum + Math.round(item.left * 100), 0) / 100
   const overdueTotal = overdue.reduce((sum, invoice) => sum + Math.round(invoiceBalanceDue(invoice) * 100), 0) / 100
   const total =
@@ -127,6 +132,7 @@ export default function NeedsYouPanel() {
     openDisputes.length +
     failedPayments.length +
     overdueDeposits.length +
+    acceptedQuotes.length +
     (overdue.length > 0 ? 1 : 0) +
     (unpaidAppointments.length > 0 ? 1 : 0)
 
@@ -249,6 +255,25 @@ export default function NeedsYouPanel() {
             <span className="block font-medium text-foreground">{invoice.clientName}&apos;s deposit is overdue</span>
             <span className="block text-sm text-muted-foreground">
               Invoice #{invoice.number} · {formatInvoiceMoney(invoiceDueNow(invoice)?.amount ?? 0)} · waive it or cancel
+            </span>
+          </span>
+          <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        </Link>
+      ))}
+
+      {acceptedQuotes.map((quote) => (
+        <Link
+          key={quote.id}
+          href={`/app/invoices/quote?id=${encodeURIComponent(quote.id)}`}
+          className="flex items-center gap-3 rounded-[18px] border border-card-border bg-card p-4 hover:bg-muted/40"
+        >
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-accent text-emerald-700 dark:text-emerald-400">
+            <FileCheck className="size-5" aria-hidden="true" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-medium text-foreground">{quote.clientName} accepted your quote</span>
+            <span className="block text-sm text-muted-foreground">
+              {quoteNumberLabel(quote.number)} · {formatInvoiceMoney(quote.total)} · turn it into an invoice
             </span>
           </span>
           <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />

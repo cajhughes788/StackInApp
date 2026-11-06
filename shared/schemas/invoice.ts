@@ -213,6 +213,8 @@ export const InvoiceSchema = z
     // Set on the invoice behind a booked appointment (made when its deposit
     // arrives — shared/appointmentDeposits.ts). Otherwise a regular invoice.
     appointmentId: z.string().nullable().default(null),
+    // The quote it was made from ("Turn into invoice" — shared/schemas/quote.ts).
+    quoteId: z.string().nullable().default(null),
 
     // --- Payment ledger -------------------------------------------------
     // Oldest first. A payment's processor fee, method and links live on it.
@@ -370,6 +372,8 @@ export const InvoiceCreateInputSchema = InvoiceFieldsSchema.extend({
   send: z.boolean().optional(),
   // Same retry-safety scheme as createEntry: a deterministic doc id.
   clientMutationId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).optional(),
+  // Made from this quote, which is marked invoiced with it.
+  quoteId: z.string().trim().min(1).max(128).optional(),
 })
   .refine(dueOnOrAfterIssue, { path: ["dueDate"], message: "Due date can't be before the issue date." })
   .refine(depositFits, { path: ["deposit"], message: DEPOSIT_FITS_MESSAGE })

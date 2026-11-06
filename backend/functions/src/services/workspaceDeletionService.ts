@@ -193,6 +193,8 @@ export async function purgeWorkspace(
     // load for every storage cleanup.
     const { deleteInvoiceSharesForWorkspace } = await import("./invoicesService.js")
     await deleteInvoiceSharesForWorkspace(workspaceId)
+    const { deleteQuoteSharesForWorkspace } = await import("./quotesService.js")
+    await deleteQuoteSharesForWorkspace(workspaceId)
     await deleteWorkspaceIndexes(workspaceId)
     const { deletePaymentAccountForWorkspace } = await import("./paymentAccountsService.js")
     await deletePaymentAccountForWorkspace(workspaceId)

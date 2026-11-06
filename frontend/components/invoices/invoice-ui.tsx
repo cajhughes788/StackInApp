@@ -27,6 +27,8 @@ import {
   type InvoiceSettings,
   type InvoiceType,
 } from "@shared/schemas/invoice"
+import { quoteDisplayStatus, quoteNumberLabel } from "@shared/quotes"
+import type { QuoteType } from "@shared/schemas/quote"
 
 // Shared pieces of the invoice screens (app/app/invoices/*).
 
@@ -242,6 +244,49 @@ export function InvoiceRow({ invoice, title, today }: { invoice: InvoiceType; ti
           </div>
           <div className="mt-0.5">
             <InvoiceStatusPill invoice={invoice} today={today} short />
+          </div>
+        </div>
+      </Link>
+    </li>
+  )
+}
+
+export function QuoteStatusPill({ quote, today, short }: { quote: QuoteType; today: string; short?: boolean }) {
+  const status = quoteDisplayStatus(quote, today, { short })
+  return (
+    <span className={cn("inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold", TONE_CLASSES[status.tone])}>
+      {status.label}
+    </span>
+  )
+}
+
+// "Q-0003 · Sent Oct 2", "Q-0004 · Accepted Oct 9"
+function quoteRowDetail(quote: QuoteType): string {
+  const parts = [quoteNumberLabel(quote.number)]
+  if (quote.status === "draft") parts.push("Not sent")
+  else if (quote.status === "accepted" && quote.acceptedAt) parts.push(`Accepted ${shortDate(quote.acceptedAt.slice(0, 10))}`)
+  else if (quote.status === "declined" && quote.declinedAt) parts.push(`Declined ${shortDate(quote.declinedAt.slice(0, 10))}`)
+  else if (quote.status === "invoiced") parts.push("Invoice made")
+  else if (quote.status === "withdrawn") parts.push("Withdrawn")
+  else if (quote.lastEmailedAt) parts.push(`Emailed ${shortDate(quote.lastEmailedAt.slice(0, 10))}`)
+  else parts.push(`Sent ${shortDate((quote.sharedAt ?? quote.createdAt).slice(0, 10))}`)
+  return parts.join(" · ")
+}
+
+// One quote in a list, laid out like InvoiceRow.
+export function QuoteRow({ quote, title, today }: { quote: QuoteType; title: string; today: string }) {
+  const muted = quote.status === "draft" || quote.status === "declined" || quote.status === "withdrawn"
+  return (
+    <li className="border-b border-border last:border-0">
+      <Link href={`/app/invoices/quote?id=${encodeURIComponent(quote.id)}`} className="flex items-center gap-3 px-4 py-3.5 hover:bg-muted/50">
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-semibold text-foreground">{title}</div>
+          <div className="truncate text-sm text-muted-foreground">{quoteRowDetail(quote)}</div>
+        </div>
+        <div className="shrink-0 text-right">
+          <div className={cn("font-semibold tabular-nums", muted ? "text-muted-foreground" : "text-foreground")}>{formatInvoiceMoney(quote.total)}</div>
+          <div className="mt-0.5">
+            <QuoteStatusPill quote={quote} today={today} short />
           </div>
         </div>
       </Link>

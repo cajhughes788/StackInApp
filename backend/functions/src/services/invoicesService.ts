@@ -34,6 +34,8 @@ import {
 import { publicInvoiceUrl } from "@shared/invoiceDisplay"
 import { payLaterBlocker, quickChargeAsInvoice } from "@shared/quickCharge"
 import { invoiceDepositOutstanding, invoicePaymentPurposeFor } from "@shared/invoicePayments"
+import { quoteInvoiced, quoteReleased } from "@shared/quotes"
+import { QuoteSchema } from "@shared/schemas/quote"
 
 export function invoicesCol(workspaceId: string) {
   return db.collection("workspaces").doc(workspaceId).collection("invoices")
@@ -179,8 +181,11 @@ export async function createInvoice(workspaceId: string, uid: string, raw: unkno
   // The number is taken in the same transaction as the write, so two
   // invoices created at once can't share one, and a retry of the same
   // clientMutationId returns the invoice it already made.
+  const { readQuoteToInvoice } = await import("./quotesService.js")
   return db.runTransaction(async (txn) => {
     const [existingSnap, counterSnap] = await txn.getAll(ref, counterDoc(workspaceId))
+    // Made from a quote: it's marked invoiced in the same write.
+    const fromQuote = input.quoteId ? await readQuoteToInvoice(txn, workspaceId, input.quoteId, ref.id) : null
     if (existingSnap.exists) return InvoiceSchema.parse(existingSnap.data())
     const lastNumber = Number(counterSnap.data()?.lastNumber ?? 0)
     const nowIso = new Date().toISOString()
@@ -201,10 +206,12 @@ export async function createInvoice(workspaceId: string, uid: string, raw: unkno
       policies,
       deposit: input.deposit ? { ...input.deposit, waivedAt: null } : null,
       status: input.send ? "sent" : "draft",
+      quoteId: fromQuote?.quote.id ?? null,
       createdAt: nowIso,
       updatedAt: nowIso,
     })
     txn.create(ref, invoice)
+    if (fromQuote) txn.set(fromQuote.ref, quoteInvoiced(fromQuote.quote, ref.id, nowIso))
     txn.set(counterDoc(workspaceId), { lastNumber: lastNumber + 1, updatedAt: nowIso }, { merge: true })
     return invoice
   })
@@ -303,15 +310,22 @@ function nextDeposit(current: InvoiceType, requested: InvoicePatch["deposit"]): 
 
 // Drafts only — anything that was sent is kept and voided instead, so the
 // numbering a client has seen never has holes.
+// One made from a quote hands the quote back (it can be invoiced again).
 export async function deleteInvoice(workspaceId: string, uid: string, invoiceId: string): Promise<{ deleted: boolean }> {
   await assertWorkspaceMembership(workspaceId, uid)
   const ref = invoicesCol(workspaceId).doc(invoiceId)
+  const { quotesCol } = await import("./quotesService.js")
   return db.runTransaction(async (txn) => {
     const snap = await txn.get(ref)
     if (!snap.exists) return { deleted: false }
     const current = InvoiceSchema.parse(snap.data())
     if (current.status !== "draft") throw new ConflictError("Only a draft can be deleted — void a sent invoice instead.")
+    const quoteRef = current.quoteId ? quotesCol(workspaceId).doc(current.quoteId) : null
+    const quote = quoteRef ? QuoteSchema.safeParse((await txn.get(quoteRef)).data()) : null
     txn.delete(ref)
+    if (quoteRef && quote?.success && quote.data.invoiceId === invoiceId) {
+      txn.set(quoteRef, quoteReleased(quote.data, new Date().toISOString()))
+    }
     return { deleted: true }
   })
 }

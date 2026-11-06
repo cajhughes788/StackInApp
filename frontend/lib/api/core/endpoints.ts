@@ -28,6 +28,13 @@ export const API_ENDPOINTS = {
     publicPage: "https://publicinvoice-3lc2fwdgwq-uc.a.run.app",
   },
 
+  quotes: {
+    get: "https://getquotes-3lc2fwdgwq-uc.a.run.app",
+    // POST creates, PATCH edits, DELETE removes a draft.
+    save: "https://savequote-3lc2fwdgwq-uc.a.run.app",
+    status: "https://updatequotestatus-3lc2fwdgwq-uc.a.run.app",
+  },
+
   recurringRules: {
     get: "https://getrecurringrules-3lc2fwdgwq-uc.a.run.app",
     post: "https://createrecurringrule-3lc2fwdgwq-uc.a.run.app",

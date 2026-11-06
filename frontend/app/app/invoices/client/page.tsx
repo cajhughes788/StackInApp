@@ -19,6 +19,7 @@ import {
 import {
   InvoiceRow,
   InvoicesPage,
+  QuoteRow,
   cardClass,
   localToday,
   useInvoicesWorkspace,
@@ -27,6 +28,7 @@ import {
 import { getClientDetail, mergeClients } from "@/lib/api/clientsApi"
 import { createClientInBackground, updateClientInBackground } from "@/lib/domain/clientService"
 import { currentYear, useClientsStore } from "@/lib/stores/useClientsStore"
+import { useWorkspaceQuotes } from "@/lib/stores/useQuotesStore"
 import { cn } from "@/lib/utils"
 import { buildClientRows, clientKey } from "@shared/clients"
 import { formatInvoiceDate, formatInvoiceMoney } from "@shared/invoiceDisplay"
@@ -80,6 +82,15 @@ function InvoiceClientPage() {
     [rows, id, name]
   )
   const client = row?.client ?? null
+  // Their quotes: linked to the saved client, or by name before one is saved.
+  const { quotes } = useWorkspaceQuotes(workspaceId)
+  const clientQuotes = useMemo(
+    () =>
+      row
+        ? quotes.filter((quote) => (client ? quote.clientId === client.id : clientKey(quote.clientName) === clientKey(row.name)))
+        : [],
+    [client, quotes, row]
+  )
 
   const loadPayments = useCallback(async () => {
     if (!workspaceId || !client) return
@@ -382,6 +393,19 @@ function InvoiceClientPage() {
             ) : null}
           </section>
 
+          {clientQuotes.length > 0 ? (
+            <section className="space-y-2">
+              <h2 className="px-1 text-sm font-semibold text-muted-foreground">
+                {clientQuotes.length} quote{clientQuotes.length === 1 ? "" : "s"}
+              </h2>
+              <ul className="overflow-hidden rounded-[18px] border border-card-border bg-card">
+                {clientQuotes.map((quote) => (
+                  <QuoteRow key={quote.id} quote={quote} title={formatInvoiceDate(quote.issueDate)} today={today} />
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
           {client && otherClients.length > 0 ? (
             <section className={cn(cardClass, "space-y-2")}>
               <h2 className="text-sm font-semibold text-foreground">Duplicate?</h2>
@@ -420,13 +444,20 @@ function InvoiceClientPage() {
       )}
 
       {row ? (
-        <div className="sticky bottom-[calc(1rem+var(--safe-area-inset-bottom))] pt-2">
+        <div className="sticky bottom-[calc(1rem+var(--safe-area-inset-bottom))] flex gap-2.5 pt-2">
           <Link
             href={`/app/invoices/edit?client=${encodeURIComponent(row.name)}${client ? `&clientId=${encodeURIComponent(client.id)}` : ""}`}
-            className="flex h-[52px] items-center justify-center gap-2 rounded-full bg-primary px-5 text-base font-semibold text-primary-foreground shadow-sm"
+            className="flex h-[52px] min-w-0 flex-1 items-center justify-center gap-2 rounded-full bg-primary px-5 text-base font-semibold text-primary-foreground shadow-sm"
           >
             <Plus className="size-5 shrink-0" aria-hidden="true" />
             <span className="truncate">New invoice for {row.name}</span>
+          </Link>
+          <Link
+            href={`/app/invoices/edit?kind=quote&client=${encodeURIComponent(row.name)}${client ? `&clientId=${encodeURIComponent(client.id)}` : ""}`}
+            className="flex h-[52px] shrink-0 items-center justify-center gap-2 rounded-full border border-card-border bg-card px-5 text-base font-semibold text-foreground shadow-sm"
+          >
+            <Plus className="size-5 shrink-0" aria-hidden="true" />
+            Quote
           </Link>
         </div>
       ) : null}

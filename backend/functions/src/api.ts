@@ -206,6 +206,38 @@ export const updateInvoiceStatus = withCorsAuth(
 )
 
 // ---------------------------------------------------------------------------
+// Quotes (shared/schemas/quote.ts)
+// ---------------------------------------------------------------------------
+
+export const getQuotes = withCorsAuth(async (req, res) => {
+  const { getQuotesHandler } = await import("./routes/getQuotes.js")
+  await getQuotesHandler(req, res)
+})
+
+// Create (POST), edit (PATCH) and delete a draft (DELETE).
+export const saveQuote = withCorsAuth(async (req, res) => {
+  const { saveQuoteHandler } = await import("./routes/saveQuote.js")
+  await saveQuoteHandler(req, res)
+})
+
+// Share, withdraw, and email (SendGrid) a quote.
+export const updateQuoteStatus = withCorsAuth(
+  async (req, res) => {
+    const { updateQuoteStatusHandler } = await import("./routes/updateQuoteStatus.js")
+    await updateQuoteStatusHandler(req, res)
+  },
+  true,
+  { secrets: [SECRETS.SENDGRID_API_KEY] }
+)
+
+// Bare onRequest: the public page behind a shared quote link, where the
+// client accepts or declines. Hosting rewrites /q/** here.
+export const publicQuote = onRequest(async (req, res) => {
+  const { publicQuoteHandler } = await import("./routes/publicQuote.js")
+  await publicQuoteHandler(req as any, res as any)
+})
+
+// ---------------------------------------------------------------------------
 // Clients (shared/schemas/client.ts)
 // ---------------------------------------------------------------------------
 

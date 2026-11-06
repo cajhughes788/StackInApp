@@ -110,12 +110,12 @@ function manualReminderStep(invoice: InvoiceType): InvoiceReminderStep {
   return dueDate < today ? "overdue_3" : dueDate === today ? "due" : "before_3"
 }
 
-// Sends one invoice email (an invoice or a reminder) from the business.
+// Sends one email (an invoice, a reminder or a quote) from the business.
 export async function sendInvoiceEmailMessage(
   to: string,
   settings: InvoiceSettings,
   email: InvoiceEmail,
-  category: "invoice" | "invoice_reminder"
+  category: "invoice" | "invoice_reminder" | "quote"
 ): Promise<void> {
   sgMail.setApiKey(SENDGRID_API_KEY.value())
   await sgMail.send({

@@ -18,7 +18,10 @@ import {
   softInputClass,
   useInvoicesWorkspace,
 } from "@/components/invoices/invoice-ui"
+import { useToast } from "@/hooks/use-toast"
 import { wakeInvoiceServers } from "@/lib/api/invoicesApi"
+import { createQuote, editQuote } from "@/lib/api/quotesApi"
+import { useQuotesStore, useWorkspaceQuotes } from "@/lib/stores/useQuotesStore"
 import { createInvoiceInBackground, currentInvoiceId, editInvoiceInBackground } from "@/lib/domain/invoiceService"
 import { useClientsStore } from "@/lib/stores/useClientsStore"
 import { buildClientKeyIndex } from "@shared/clients"
@@ -28,6 +31,7 @@ import { dueDateForTerms, formatInvoiceDate, formatInvoiceMoney, INVOICE_TERMS_L
 import type { IncomeCategory } from "@shared/schemas/entry"
 import { invoiceDepositOutstanding } from "@shared/invoicePayments"
 import type { InvoiceTerms, InvoiceType } from "@shared/schemas/invoice"
+import { DEFAULT_QUOTE_VALID_DAYS, addQuoteDays, quoteInvoicePrefill, quoteNumberLabel } from "@shared/quotes"
 
 // A line as typed: quantity × rate (the rate as dollars and cents).
 type DraftLine = { key: number; description: string; quantity: string; rate: string; category: IncomeCategory }
@@ -40,6 +44,8 @@ const CATEGORY_OPTIONS: Array<{ value: IncomeCategory; label: string }> = [
 ]
 const TERMS: InvoiceTerms[] = ["due_on_receipt", "net_15", "net_30"]
 const TERMS_SHORT: Record<InvoiceTerms, string> = { due_on_receipt: "Due now", net_15: "15 days", net_30: "30 days" }
+// How long a quote is good for, as quick picks (a date picker covers the rest).
+const QUOTE_VALID_DAYS = [14, DEFAULT_QUOTE_VALID_DAYS, 60]
 
 // "$1,250.5" → 1250.5; null when it isn't a positive amount in whole cents.
 function parseAmount(text: string): number | null {
@@ -72,6 +78,20 @@ function depositSettled(invoice: InvoiceType | null): boolean {
   return !!invoice?.deposit && (invoice.deposit.waivedAt !== null || invoiceDepositOutstanding(invoice) === 0)
 }
 
+// What the form sends for a quote (its "due date" is the valid-until date).
+type QuoteFormBody = {
+  clientName: string
+  clientId: string | null
+  clientEmail: string | null
+  clientPhone: string | null
+  clientAddress: string | null
+  lines: Array<{ description: string; quantity: number; rate: number; amount: number; category: IncomeCategory }>
+  issueDate: string
+  dueDate: string
+  note: string
+  policies: string
+}
+
 function newLine(category: IncomeCategory = "services"): DraftLine {
   return { key: ++lineKey, description: "", quantity: "1", rate: "", category }
 }
@@ -92,6 +112,17 @@ function InvoiceFormPage() {
     if (workspaceId) wakeInvoiceServers()
   }, [workspaceId])
   const invoiceId = useQueryParam("id")
+  // ?kind=quote: the same form makes and edits quotes (shared/schemas/quote.ts);
+  // ?id is then the quote's.
+  const isQuote = useQueryParam("kind") === "quote"
+  // ?fromQuote=<id>: "Turn into invoice" — a new invoice filled in from the quote.
+  const fromQuoteId = useQueryParam("fromQuote")
+  const { quotes, status: quotesStatus } = useWorkspaceQuotes(isQuote || fromQuoteId ? workspaceId : null)
+  const upsertQuote = useQuotesStore((state) => state.upsertQuote)
+  const existingQuote = isQuote && invoiceId ? quotes.find((quote) => quote.id === invoiceId) ?? null : null
+  const sourceQuote = !isQuote && fromQuoteId ? quotes.find((quote) => quote.id === fromQuoteId) ?? null : null
+  const noun = isQuote ? "quote" : "invoice"
+  const { toast } = useToast()
   // "New invoice for <client>" from a client's page.
   const prefillClient = useQueryParam("client")
   const prefillClientId = useQueryParam("clientId")
@@ -102,7 +133,7 @@ function InvoiceFormPage() {
   }, [loadClients, workspaceId])
   const savedClients = useMemo(() => (clientsEntry?.clients ?? []).filter((c) => !c.archived), [clientsEntry?.clients])
   // A new invoice keeps working by its temporary id once it has a real one.
-  const existing = invoiceId ? invoices.find((invoice) => invoice.id === currentInvoiceId(invoiceId)) ?? null : null
+  const existing = invoiceId && !isQuote ? invoices.find((invoice) => invoice.id === currentInvoiceId(invoiceId)) ?? null : null
   // One id per form, so a retried create can't make a second invoice.
   const clientMutationId = useRef(
     typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -133,9 +164,34 @@ function InvoiceFormPage() {
   // Fill the form once: from the invoice being edited, or from settings.
   useEffect(() => {
     if (initialized.current || loadStatus !== "ready") return
-    if (invoiceId && !existing) return
+    if (isQuote ? invoiceId && !existingQuote : invoiceId && !existing) return
+    if (fromQuoteId && !sourceQuote && quotesStatus !== "error") return
     initialized.current = true
-    if (existing) {
+    if (existingQuote) {
+      setClientName(existingQuote.clientName)
+      setClientId(existingQuote.clientId ?? null)
+      setClientEmail(existingQuote.clientEmail ?? "")
+      setClientPhone(existingQuote.clientPhone ?? "")
+      setClientAddress(existingQuote.clientAddress ?? "")
+      setLines(
+        existingQuote.lines.map((line) => ({
+          ...newLine(line.category),
+          description: line.description,
+          quantity: String(line.quantity),
+          rate: line.rate.toFixed(2),
+        }))
+      )
+      setPolicies(existingQuote.policies)
+      setIssueDate(existingQuote.issueDate)
+      // A quote's "due date" field is the last day it can be accepted.
+      setDueDate(existingQuote.validUntil)
+      setNote(existingQuote.note)
+      if (existingQuote.deposit) {
+        setDepositOn(true)
+        setDepositMode("fixed")
+        setDepositText(existingQuote.deposit.amount.toFixed(2))
+      }
+    } else if (existing) {
       setClientName(existing.clientName)
       setClientId(existing.clientId ?? null)
       setClientEmail(existing.clientEmail ?? "")
@@ -174,8 +230,31 @@ function InvoiceFormPage() {
           setDepositDueDate(depositDue > due ? due : depositDue)
         }
       }
+      if (isQuote) {
+        setDueDate(addQuoteDays(localToday(), DEFAULT_QUOTE_VALID_DAYS))
+        // The default note says how to pay — that's for the invoice.
+        setNote("")
+      }
       const prefilled = prefillClientId ? savedClients.find((c) => c.id === prefillClientId) : undefined
-      if (prefilled) {
+      if (sourceQuote) {
+        // Everything from the quote but the dates, which start fresh today.
+        const from = quoteInvoicePrefill(sourceQuote)
+        setClientName(from.clientName)
+        setClientId(from.clientId)
+        setClientEmail(from.clientEmail)
+        setClientPhone(from.clientPhone)
+        setClientAddress(from.clientAddress)
+        setLines(from.lines.map((line) => ({ ...newLine(line.category), description: line.description, quantity: String(line.quantity), rate: line.rate.toFixed(2) })))
+        setNote([from.note, settings?.defaultNote ?? ""].filter((text) => text.trim()).join("\n\n"))
+        setPolicies(from.policies)
+        if (from.depositAmount !== null) {
+          setDepositOn(true)
+          setDepositMode("fixed")
+          setDepositText(from.depositAmount.toFixed(2))
+        } else {
+          setDepositOn(false)
+        }
+      } else if (prefilled) {
         setClientName(prefilled.name)
         setClientId(prefilled.id)
         setClientEmail(prefilled.email ?? "")
@@ -190,14 +269,17 @@ function InvoiceFormPage() {
         setClientAddress(last?.clientAddress ?? "")
       }
     }
-  }, [existing, invoiceId, invoices, loadStatus, prefillClient, prefillClientId, savedClients, settings])
+  }, [existing, existingQuote, fromQuoteId, invoiceId, invoices, isQuote, loadStatus, prefillClient, prefillClientId, quotesStatus, savedClients, settings, sourceQuote])
 
-  // Paid and void invoices can't be edited.
+  // Paid and void invoices can't be edited, nor a quote the client answered.
   useEffect(() => {
     if (existing && existing.status !== "draft" && existing.status !== "sent") {
       router.replace(`/app/invoices/view?id=${encodeURIComponent(existing.id)}`)
     }
-  }, [existing, router])
+    if (existingQuote && existingQuote.status !== "draft" && existingQuote.status !== "sent") {
+      router.replace(`/app/invoices/quote?id=${encodeURIComponent(existingQuote.id)}`)
+    }
+  }, [existing, existingQuote, router])
 
   // Typing: saved clients whose name contains it. Empty: the 3 most recently
   // invoiced saved clients.
@@ -239,6 +321,7 @@ function InvoiceFormPage() {
   })
   const total = parsedLines.reduce((sum, line) => sum + Math.round((line.value ?? 0) * 100), 0) / 100
   const selectedTerms = termsFor(issueDate, dueDate)
+  const selectedValidDays = QUOTE_VALID_DAYS.find((days) => addQuoteDays(issueDate, days) === dueDate) ?? null
   const filledLines = parsedLines.filter((line) => line.description.trim() || line.rate.trim())
   const depositLocked = depositSettled(existing)
   const depositInput = depositMode === "percent" ? Number(depositText.replace(/[%\s]/g, "")) : parseAmount(depositText)
@@ -255,18 +338,19 @@ function InvoiceFormPage() {
         ? "Enter the deposit amount."
         : Math.round(depositAmount * 100) >= Math.round(total * 100)
           ? "The deposit has to be less than the total."
-          : depositDueDate < issueDate || depositDueDate > dueDate
+          : !isQuote && (depositDueDate < issueDate || depositDueDate > dueDate)
             ? "The deposit has to be due between the invoice date and its due date."
             : null
   const errors = {
-    client: !clientName.trim() ? "Who is this invoice for?" : null,
+    client: !clientName.trim() ? `Who is this ${noun} for?` : null,
     lines:
       filledLines.length === 0
         ? "Add at least one line."
         : filledLines.some((line) => !line.description.trim() || line.value === null)
           ? "Each line needs a description, a quantity and a rate."
           : null,
-    dates: dueDate < issueDate ? "The due date can't be before the invoice date." : null,
+    dates:
+      dueDate < issueDate ? (isQuote ? "Valid until can't be before the quote date." : "The due date can't be before the invoice date.") : null,
     email:
       clientEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail.trim()) ? "That email doesn't look right." : null,
   }
@@ -304,6 +388,10 @@ function InvoiceFormPage() {
         ? {}
         : { deposit: depositOn && depositAmount !== null ? { amount: depositAmount, dueDate: depositDueDate } : null }),
     }
+    if (isQuote) {
+      void saveQuote(mode, body)
+      return
+    }
     // Saved in the background (invoiceService) — the next screen shows it now.
     setSaving(mode)
     if (existing) {
@@ -314,7 +402,13 @@ function InvoiceFormPage() {
         router.replace("/app/invoices")
       }
     } else {
-      const created = createInvoiceInBackground(workspaceId, { ...body, clientMutationId: clientMutationId.current })
+      const created = createInvoiceInBackground(workspaceId, {
+        ...body,
+        clientMutationId: clientMutationId.current,
+        ...(sourceQuote ? { quoteId: sourceQuote.id } : {}),
+      })
+      // The server marks the quote invoiced with it; show that now.
+      if (sourceQuote) upsertQuote(workspaceId, { ...sourceQuote, status: "invoiced", invoiceId: created.id })
       if (mode === "share") {
         // A new invoice lands on its send step.
         router.replace(`/app/invoices/view?id=${encodeURIComponent(created.id)}&share=1`)
@@ -324,18 +418,66 @@ function InvoiceFormPage() {
     }
   }
 
-  const title = existing ? `Edit #${existing.number}` : "New invoice"
-  const waitingForInvoice = loadStatus === "loading" || (invoiceId && !existing && loadStatus === "ready" && !initialized.current)
+  // Quotes wait for the server (no background save), then open the quote.
+  async function saveQuote(mode: "draft" | "share", body: QuoteFormBody) {
+    if (!workspaceId) return
+    const { dueDate: validUntil, ...rest } = body
+    const fields = { ...rest, validUntil, deposit: depositOn && depositAmount !== null ? { amount: depositAmount } : null }
+    setSaving(mode)
+    try {
+      const quote = existingQuote
+        ? await editQuote(workspaceId, existingQuote.id, fields)
+        : await createQuote(workspaceId, { ...fields, clientMutationId: clientMutationId.current })
+      upsertQuote(workspaceId, quote)
+      router.replace(
+        mode === "share" || existingQuote
+          ? `/app/invoices/quote?id=${encodeURIComponent(quote.id)}${mode === "share" && !existingQuote ? "&share=1" : ""}`
+          : "/app/invoices?filter=quotes"
+      )
+    } catch (error) {
+      setSaving(null)
+      toast({
+        title: "Couldn't save the quote",
+        description: error instanceof Error ? error.message : "Check your connection and try again.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const title = isQuote
+    ? existingQuote
+      ? `Edit ${quoteNumberLabel(existingQuote.number)}`
+      : "New quote"
+    : existing
+      ? `Edit #${existing.number}`
+      : sourceQuote
+        ? `Invoice from ${quoteNumberLabel(sourceQuote.number)}`
+        : "New invoice"
+  const waitingForInvoice =
+    loadStatus === "loading" ||
+    (isQuote && invoiceId && quotesStatus === "loading") ||
+    (!!fromQuoteId && quotesStatus === "loading") ||
+    (invoiceId && !(isQuote ? existingQuote : existing) && loadStatus === "ready" && !initialized.current)
+  const missing = !!invoiceId && loadStatus === "ready" && (isQuote ? quotesStatus !== "loading" && !existingQuote : !existing)
+  const backHref = isQuote
+    ? existingQuote
+      ? `/app/invoices/quote?id=${encodeURIComponent(existingQuote.id)}`
+      : "/app/invoices?filter=quotes"
+    : existing
+      ? `/app/invoices/view?id=${encodeURIComponent(existing.id)}`
+      : sourceQuote
+        ? `/app/invoices/quote?id=${encodeURIComponent(sourceQuote.id)}`
+        : "/app/invoices"
 
   return (
     <InvoicesPage
       ready={ready}
       loadingLabel="Loading invoice..."
       title={title}
-      backHref={existing ? `/app/invoices/view?id=${encodeURIComponent(existing.id)}` : "/app/invoices"}
+      backHref={backHref}
       backLabel="Cancel"
       action={
-        existing?.status === "sent" ? null : (
+        existing?.status === "sent" || existingQuote?.status === "sent" ? null : (
           <Button
             type="button"
             variant="ghost"
@@ -348,8 +490,8 @@ function InvoiceFormPage() {
         )
       }
     >
-      {invoiceId && loadStatus === "ready" && !existing ? (
-        <div className={cn(cardClass, "text-sm text-muted-foreground")}>This invoice wasn&apos;t found.</div>
+      {missing ? (
+        <div className={cn(cardClass, "text-sm text-muted-foreground")}>This {noun} wasn&apos;t found.</div>
       ) : waitingForInvoice ? (
         <div className="space-y-3" aria-hidden="true">
           <Skeleton className="h-28 w-full rounded-[18px]" />
@@ -365,7 +507,7 @@ function InvoiceFormPage() {
         >
           <section className={cn(cardClass, "space-y-3")}>
             <label className={fieldLabelClass}>
-              Bill to
+              {isQuote ? "Quote for" : "Bill to"}
               <input
                 className={softInputClass}
                 value={clientName}
@@ -406,7 +548,7 @@ function InvoiceFormPage() {
               <p className="text-xs text-muted-foreground">
                 {clientId || nameMatchesSavedClient
                   ? "Saved client — their details stay on file."
-                  : "New client — saved to your clients with this invoice."}
+                  : `New client — saved to your clients with this ${noun}.`}
               </p>
             ) : null}
             {showErrors && errors.client ? <p className="text-sm text-destructive">{errors.client}</p> : null}
@@ -418,7 +560,7 @@ function InvoiceFormPage() {
                   className={softInputClass}
                   value={clientEmail}
                   onChange={(event) => setClientEmail(event.target.value)}
-                  placeholder="For sending the invoice"
+                  placeholder={`For sending the ${noun}`}
                   maxLength={254}
                   autoComplete="off"
                   inputMode="email"
@@ -547,7 +689,7 @@ function InvoiceFormPage() {
 
           <section className={cn(cardClass, "space-y-3")}>
             <label className={fieldLabelClass}>
-              Invoice date
+              {isQuote ? "Quote date" : "Invoice date"}
               <input
                 type="date"
                 className={softInputClass}
@@ -555,16 +697,36 @@ function InvoiceFormPage() {
                 onChange={(event) => {
                   const next = event.target.value
                   if (!next) return
-                  // Keep the chosen terms when the start date moves.
-                  setDueDate(selectedTerms ? dueDateForTerms(next, selectedTerms) : dueDate)
+                  // Keep the chosen terms (or how long a quote is good for) when the start date moves.
+                  if (isQuote) setDueDate(selectedValidDays ? addQuoteDays(next, selectedValidDays) : dueDate)
+                  else setDueDate(selectedTerms ? dueDateForTerms(next, selectedTerms) : dueDate)
                   setIssueDate(next)
                 }}
               />
             </label>
             <fieldset className="space-y-1.5">
-              <legend className="mb-1.5 text-sm font-medium text-muted-foreground">When it&apos;s due</legend>
+              <legend className="mb-1.5 text-sm font-medium text-muted-foreground">{isQuote ? "Good for" : <>When it&apos;s due</>}</legend>
               <div className="grid grid-cols-3 gap-1 rounded-[14px] bg-muted p-1">
-                {TERMS.map((terms) => {
+                {isQuote
+                  ? QUOTE_VALID_DAYS.map((days) => {
+                      const active = selectedValidDays === days
+                      return (
+                        <button
+                          key={days}
+                          type="button"
+                          aria-pressed={active}
+                          aria-label={`Valid for ${days} days`}
+                          onClick={() => setDueDate(addQuoteDays(issueDate, days))}
+                          className={cn(
+                            "h-10 rounded-[10px] text-sm transition-colors",
+                            active ? "bg-card font-semibold text-foreground shadow-sm" : "text-muted-foreground"
+                          )}
+                        >
+                          {days} days
+                        </button>
+                      )
+                    })
+                  : TERMS.map((terms) => {
                   const active = selectedTerms === terms
                   return (
                     <button
@@ -584,10 +746,12 @@ function InvoiceFormPage() {
                 })}
               </div>
               <label className="flex items-center justify-between gap-3 pt-1 text-sm text-muted-foreground">
-                <span>Due {formatInvoiceDate(dueDate)}</span>
+                <span>
+                  {isQuote ? "Valid until" : "Due"} {formatInvoiceDate(dueDate)}
+                </span>
                 <input
                   type="date"
-                  aria-label="Due date"
+                  aria-label={isQuote ? "Valid until" : "Due date"}
                   className="h-9 rounded-lg border-0 bg-transparent px-1 text-sm font-medium text-emerald-700 dark:text-emerald-400"
                   value={dueDate}
                   min={issueDate}
@@ -609,7 +773,9 @@ function InvoiceFormPage() {
                 <label className="flex items-center justify-between gap-3">
                   <span>
                     <span className="block text-sm font-medium text-foreground">Ask for a deposit</span>
-                    <span className="block text-xs text-muted-foreground">Paid up front; the rest is due by the due date.</span>
+                    <span className="block text-xs text-muted-foreground">
+                      {isQuote ? "Asked for up front once it's an invoice." : "Paid up front; the rest is due by the due date."}
+                    </span>
                   </span>
                   <Switch checked={depositOn} onCheckedChange={setDepositOn} aria-label="Ask for a deposit" />
                 </label>
@@ -645,6 +811,11 @@ function InvoiceFormPage() {
                         ))}
                       </div>
                     </div>
+                    {isQuote ? (
+                      depositAmount !== null && depositMode === "percent" ? (
+                        <p className="text-sm tabular-nums text-muted-foreground">{formatInvoiceMoney(depositAmount)}</p>
+                      ) : null
+                    ) : (
                     <label className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
                       <span>
                         {depositAmount !== null && depositMode === "percent" ? (
@@ -662,6 +833,7 @@ function InvoiceFormPage() {
                         onChange={(event) => event.target.value && setDepositDueDate(event.target.value)}
                       />
                     </label>
+                    )}
                     {showErrors && depositError ? <p className="text-sm text-destructive">{depositError}</p> : null}
                   </>
                 ) : null}
@@ -677,12 +849,16 @@ function InvoiceFormPage() {
                 value={note}
                 onChange={(event) => setNote(event.target.value)}
                 maxLength={1000}
-                placeholder="How to pay you, e.g. Venmo @yourname"
+                placeholder={isQuote ? "What's included, timing, anything they should know" : "How to pay you, e.g. Venmo @yourname"}
                 className="resize-none rounded-xl border-0 bg-muted text-[15px] text-foreground shadow-none"
               />
             </label>
             <p className="text-xs text-muted-foreground">
-              {settings?.defaultNote ? "From your default note in Invoice settings" : "Set a default note in Invoice settings"}
+              {isQuote
+                ? "Shown on the quote. How to pay goes on the invoice."
+                : settings?.defaultNote
+                  ? "From your default note in Invoice settings"
+                  : "Set a default note in Invoice settings"}
             </p>
           </section>
 
@@ -700,7 +876,7 @@ function InvoiceFormPage() {
             </label>
             <p className="text-xs text-muted-foreground">
               {settings?.defaultPolicies
-                ? "From your default policies in Invoice settings. Changes here apply to this invoice only."
+                ? `From your default policies in Invoice settings. Changes here apply to this ${noun} only.`
                 : "Set default policies in Invoice settings to add them to every new invoice."}
             </p>
           </section>
@@ -711,7 +887,7 @@ function InvoiceFormPage() {
               disabled={saving !== null}
               className="h-[52px] flex-1 rounded-full text-base font-semibold"
             >
-              {saving === "share" ? "Saving..." : existing ? "Save" : "Review & send"}
+              {saving === "share" ? "Saving..." : existing || existingQuote ? "Save" : "Review & send"}
             </Button>
           </div>
         </form>

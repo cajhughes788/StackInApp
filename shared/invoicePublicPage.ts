@@ -42,7 +42,7 @@ export function telHref(phone: string): string {
   return phone.replace(/[^\d+]/g, "")
 }
 
-const TONE_COLORS: Record<InvoiceDisplayStatus["tone"], { bg: string; fg: string }> = {
+export const TONE_COLORS: Record<InvoiceDisplayStatus["tone"], { bg: string; fg: string }> = {
   paid: { bg: "#E3F4EA", fg: "#1E7A47" },
   open: { bg: "#ECEBE6", fg: "#161B1E" },
   overdue: { bg: "#FBE7E4", fg: "#A3261A" },

@@ -104,6 +104,15 @@ export function deepLinkRequestFromPushData(data: Record<string, unknown> | unde
       review: null,
     }
   }
+  if (deepLink.startsWith("stackin://quotes/")) {
+    // A client accepted or declined a quote (quotesService.ts).
+    const quoteId = deepLink.slice("stackin://quotes/".length).split(/[/?#]/)[0]
+    return {
+      workspaceId,
+      route: quoteId ? `/app/invoices/quote?id=${encodeURIComponent(quoteId)}` : "/app/invoices?filter=quotes",
+      review: null,
+    }
+  }
   if (deepLink.startsWith("stackin://appointments/")) {
     // A customer booked on the public booking page (publicBookingService.ts),
     // or ?then=remind: a client with no email for their reminder

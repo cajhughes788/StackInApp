@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import {
   InvoiceRow,
   InvoicesPage,
+  QuoteRow,
   cardClass,
   localToday,
   useInvoicesWorkspace,
@@ -18,12 +19,13 @@ import {
 import ClientList from "@/components/clients/client-list"
 import { wakePaymentSetupServer } from "@/lib/api/invoicesApi"
 import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
+import { useWorkspaceQuotes } from "@/lib/stores/useQuotesStore"
 import { cn } from "@/lib/utils"
 import { formatInvoiceMoney } from "@shared/invoiceDisplay"
 import { invoiceBalanceDue, invoiceDueNow, invoicePaymentsReceivedIn } from "@shared/invoicePayments"
 import type { InvoiceType } from "@shared/schemas/invoice"
 
-type Filter = "all" | "open" | "overdue" | "paid" | "draft" | "quick"
+type Filter = "all" | "open" | "overdue" | "paid" | "draft" | "quick" | "quotes"
 
 const FILTERS: Array<{ id: Filter; label: string }> = [
   { id: "all", label: "All" },
@@ -31,6 +33,7 @@ const FILTERS: Array<{ id: Filter; label: string }> = [
   { id: "overdue", label: "Overdue" },
   { id: "paid", label: "Paid" },
   { id: "draft", label: "Drafts" },
+  { id: "quotes", label: "Quotes" },
   { id: "quick", label: "Quick charges" },
 ]
 
@@ -38,6 +41,8 @@ function matchesFilter(invoice: InvoiceType, filter: Filter, today: string): boo
   // Quick charges (paid at the counter by QR code) have their own filter, so
   // they don't crowd the invoices list.
   if (filter === "quick") return !!invoice.quickCharge
+  // Quotes aren't invoices; the Quotes filter lists them instead.
+  if (filter === "quotes") return false
   if (invoice.quickCharge) return false
   switch (filter) {
     case "all":
@@ -73,6 +78,7 @@ export default function InvoicesListPageRoute() {
 
 function InvoicesListPage() {
   const { ready, workspaceId, invoices, settings, loadStatus } = useInvoicesWorkspace()
+  const { quotes } = useWorkspaceQuotes(workspaceId)
   const router = useRouter()
   const takesPayments = useInvoicesStore((s) => {
     const account = workspaceId ? s.byWorkspaceId[workspaceId]?.paymentAccount : null
@@ -152,7 +158,7 @@ function InvoicesListPage() {
         <div className={cn(cardClass, "text-sm text-muted-foreground")}>
           Couldn&apos;t load your invoices. Check your connection and try again.
         </div>
-      ) : invoices.length === 0 ? (
+      ) : invoices.length === 0 && quotes.length === 0 ? (
         <div className={cn(cardClass, "flex flex-col items-center gap-3 py-10 text-center")}>
           <span className="flex size-12 items-center justify-center rounded-full bg-accent text-foreground">
             <FileText className="size-6" aria-hidden="true" />
@@ -249,7 +255,19 @@ function InvoicesListPage() {
                 </div>
               ) : null}
 
-              {visible.length === 0 ? (
+              {filter === "quotes" ? (
+                quotes.length === 0 ? (
+                  <div className={cn(cardClass, "text-sm text-muted-foreground")}>
+                    No quotes yet. Send a client a price before the job — when they accept, turn it into an invoice in one tap.
+                  </div>
+                ) : (
+                  <ul className="overflow-hidden rounded-[18px] border border-card-border bg-card">
+                    {quotes.map((quote) => (
+                      <QuoteRow key={quote.id} quote={quote} title={quote.clientName} today={today} />
+                    ))}
+                  </ul>
+                )
+              ) : visible.length === 0 ? (
                 <div className={cn(cardClass, "text-sm text-muted-foreground")}>
                   {filter === "quick" ? "No quick charges yet. Tap Charge on Home to take a payment on the spot." : "No invoices here."}
                 </div>
@@ -267,13 +285,20 @@ function InvoicesListPage() {
         </>
       )}
 
-      <div className="sticky bottom-[calc(1rem+var(--safe-area-inset-bottom))] pt-2">
+      <div className="sticky bottom-[calc(1rem+var(--safe-area-inset-bottom))] flex gap-2.5 pt-2">
         <Link
           href="/app/invoices/edit"
-          className="flex h-[52px] items-center justify-center gap-2 rounded-full bg-primary text-base font-semibold text-primary-foreground shadow-sm"
+          className="flex h-[52px] flex-1 items-center justify-center gap-2 rounded-full bg-primary text-base font-semibold text-primary-foreground shadow-sm"
         >
           <Plus className="size-5" aria-hidden="true" />
           New invoice
+        </Link>
+        <Link
+          href="/app/invoices/edit?kind=quote"
+          className="flex h-[52px] items-center justify-center gap-2 rounded-full border border-card-border bg-card px-5 text-base font-semibold text-foreground shadow-sm"
+        >
+          <Plus className="size-5" aria-hidden="true" />
+          Quote
         </Link>
       </div>
     </InvoicesPage>

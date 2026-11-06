@@ -110,6 +110,8 @@
 
       // Shared invoice links (publicInvoice renders the page server-side).
       { "source": "/i/**", "function": "publicInvoice" },
+      // Shared quote links (publicQuote: the page, and Accept / Decline).
+      { "source": "/q/**", "function": "publicQuote" },
       // Appointment links (publicAppointment renders the client's confirm page).
       { "source": "/b/**", "function": "publicAppointment" },
       // Public booking pages (publicBooking: pick a service and an open time).
