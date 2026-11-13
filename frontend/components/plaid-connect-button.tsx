@@ -27,6 +27,8 @@ import {
 } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
 import { ApiError } from "@/lib/api/core/errors"
+import { API_ENDPOINTS } from "@/lib/api/core/endpoints"
+import { wakeServer } from "@/lib/api/core/wake"
 import {
   exchangePlaidPublicToken,
   getPlaidItems,
@@ -192,6 +194,16 @@ export default function PlaidConnectButton({ workspaceId }: { workspaceId: strin
   useEffect(() => {
     if (!isConnecting && !prefetchedLinkTokenRef.current) prefetchLinkToken()
   }, [isConnecting, prefetchLinkToken])
+
+  // The link token above wakes Link's own server. Also wake what runs after
+  // Plaid closes, so the bank saves without a cold start (~8s in the logs):
+  // saving the bank, the business-or-personal question that follows, and
+  // "Reconnect" (see lib/api/core/wake).
+  useEffect(() => {
+    wakeServer(API_ENDPOINTS.plaid.exchangePublicToken)
+    wakeServer(API_ENDPOINTS.plaid.updateAccountDefault)
+    wakeServer(API_ENDPOINTS.plaid.createUpdateLinkToken)
+  }, [])
 
   const loadItems = useCallback(async (): Promise<PlaidItem[]> => {
     const requestId = ++activeRequestIdRef.current
