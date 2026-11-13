@@ -34,6 +34,12 @@ PODS:
     - Capacitor
   - CapacitorShare (7.0.4):
     - Capacitor
+  - FBAEMKit (18.1.1):
+    - FBSDKCoreKit_Basics (= 18.1.1)
+  - FBSDKCoreKit (18.1.1):
+    - FBAEMKit (= 18.1.1)
+    - FBSDKCoreKit_Basics (= 18.1.1)
+  - FBSDKCoreKit_Basics (18.1.1)
   - Firebase/AppCheck (12.18.0):
     - Firebase/CoreOnly
     - FirebaseAppCheck (~> 12.18.0)
@@ -152,6 +158,7 @@ DEPENDENCIES:
   - "CapacitorPreferences (from `../../../node_modules/@capacitor/preferences`)"
   - "CapacitorPushNotifications (from `../../../node_modules/@capacitor/push-notifications`)"
   - "CapacitorShare (from `../../../node_modules/@capacitor/share`)"
+  - FBSDKCoreKit (~> 18.0)
   - Firebase/AppCheck
   - Firebase/Crashlytics
   - Firebase/Messaging
@@ -159,6 +166,9 @@ DEPENDENCIES:
 SPEC REPOS:
   trunk:
     - AppCheckCore
+    - FBAEMKit
+    - FBSDKCoreKit
+    - FBSDKCoreKit_Basics
     - Firebase
     - FirebaseAppCheck
     - FirebaseAppCheckInterop
@@ -224,6 +234,9 @@ SPEC CHECKSUMS:
   CapacitorPreferences: 65107ed7437d96ee72583df5763985e3c0ff2bc2
   CapacitorPushNotifications: 0527809a9619ed775439d5ab2c2d996122b48319
   CapacitorShare: 25f7fc5dd0e4edbde5d6801c6de5d14a8b450a41
+  FBAEMKit: fbb0a50e13109400d0615e7630a0db26ec6b8206
+  FBSDKCoreKit: 0063014b3b1f7e975e70b60232b0cf8003839746
+  FBSDKCoreKit_Basics: f4a1e0f38769eb71abaf6395b85e015318fcda49
   Firebase: 5523dd53ebe603451b4e1befcd99fa20a5c015cd
   FirebaseAppCheck: 06fc2eca9cc0499dc393f9d4320faeb373b24851
   FirebaseAppCheckInterop: 8c2fe8b563377bd948ee6acc2871fe2dfb3a034a
@@ -246,6 +259,6 @@ SPEC CHECKSUMS:
   SQLCipher: eb79c64049cb002b4e9fcb30edb7979bf4706dfc
   ZIPFoundation: dfd3d681c4053ff7e2f7350bc4e53b5dba3f5351
 
-PODFILE CHECKSUM: 65a06175d69d17a1f0e53fdb5de59fb42b45b4e4
+PODFILE CHECKSUM: 7a4af5cb0f5c2078e3fa2234879c2237bf02626d
 
 COCOAPODS: 1.16.2

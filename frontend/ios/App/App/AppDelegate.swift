@@ -4,6 +4,7 @@ import FirebaseCore
 import FirebaseMessaging
 import FirebaseAppCheck
 import FirebaseCrashlytics
+import FBSDKCoreKit
 
 
 @UIApplicationMain
@@ -31,6 +32,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, MessagingDelegate {
         // capacitor.config.ts's PushNotifications.presentationOptions for
         // how foreground push banners are preserved without this.
         application.registerForRemoteNotifications()
+        // Starts Meta's SDK. With FacebookAutoLogAppEventsEnabled in
+        // Info.plist it reports installs and app opens to Meta on its own,
+        // which is what 521's app promotion ads measure.
+        ApplicationDelegate.shared.application(application, didFinishLaunchingWithOptions: launchOptions)
         return true
     }
 
@@ -79,6 +84,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, MessagingDelegate {
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
         // Called when the app was launched with a url. Feel free to add additional processing here,
         // but if you want the App API to support tracking app url opens, make sure to keep this call
+        // Lets Meta see app opens that come from an ad's deep link. Every
+        // URL still goes on to Capacitor below, so 521's own links are unaffected.
+        _ = ApplicationDelegate.shared.application(app, open: url, options: options)
         return ApplicationDelegateProxy.shared.application(app, open: url, options: options)
     }
 

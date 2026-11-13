@@ -42,6 +42,11 @@ target 'App' do
   # Crash and error reports (see CrashReportsPlugin.swift). Same reasoning
   # as Firebase/Messaging above for living outside capacitor_pods.
   pod 'Firebase/Crashlytics'
+  # Meta (Facebook) SDK: reports installs and app opens back to Meta so
+  # 521 can run iOS 14+ app promotion ads (Aggregated Event Measurement).
+  # Same reasoning as Firebase/Messaging above for living outside
+  # capacitor_pods.
+  pod 'FBSDKCoreKit', '~> 18.0'
 end
 
 post_install do |installer|
