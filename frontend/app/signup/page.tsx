@@ -21,6 +21,8 @@ import { getAuthSafe } from "@/lib/firebase";
 import { API_ENDPOINTS, apiFetch } from "@/lib/api";
 import { ApiError } from "@/lib/api/core/errors";
 import { wakeServer } from "@/lib/api/core/wake";
+import { LegalLink } from "@/components/legal-link";
+import { suggestEmailFix } from "@/lib/emailTypo";
 
 // Must match the versions accepted by backend/functions/src/routes/signup.ts.
 const LEGAL_CONSENT_VERSION = "2026-04-27";
@@ -189,6 +191,10 @@ export default function SignupPage() {
         wakeServer(API_ENDPOINTS.subscription.get);
     }, []);
     const [email, setEmail] = useState("");
+    // Typo hints wait until the person has left the email field once, so
+    // they don't flash up mid-typing ("@gma" on the way to "@gmail.com").
+    const [emailChecked, setEmailChecked] = useState(false);
+    const emailSuggestion = emailChecked ? suggestEmailFix(email) : null;
     const [phone, setPhone] = useState("");
     const [password, setPassword] = useState("");
     const [confirmPassword, setConfirmPassword] = useState("");
@@ -268,7 +274,11 @@ export default function SignupPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" required/>
+              <Input id="email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} onBlur={() => setEmailChecked(true)} placeholder="you@example.com" aria-describedby={emailSuggestion ? "email-suggestion" : undefined} required/>
+              {/* A hint only: Continue works whether or not it's tapped. */}
+              {emailSuggestion ? (<button id="email-suggestion" type="button" onClick={() => setEmail(emailSuggestion)} aria-label={`Did you mean ${emailSuggestion}? Tap to use it.`} className="block text-left text-sm text-primary">
+                  Did you mean <span className="font-medium underline underline-offset-2">{emailSuggestion}</span>?
+                </button>) : null}
             </div>
 
             <div className="space-y-2">
@@ -307,9 +317,9 @@ export default function SignupPage() {
               <Checkbox id="agree" checked={agreed} onCheckedChange={(checked) => { setAgreed(checked === true); setAgreeError(null); }} className="mt-0.5"/>
               <label htmlFor="agree" className="leading-relaxed">
                 I have read and agree to the{" "}
-                <Link href="/terms" className="text-primary underline underline-offset-2">Terms and Conditions</Link>
+                <LegalLink href="/terms" className="text-primary underline underline-offset-2">Terms and Conditions</LegalLink>
                 {" "}and{" "}
-                <Link href="/privacy" className="text-primary underline underline-offset-2">Privacy Policy</Link>.
+                <LegalLink href="/privacy" className="text-primary underline underline-offset-2">Privacy Policy</LegalLink>.
               </label>
             </div>
             <FieldError message={agreeError} className="-mt-2"/>

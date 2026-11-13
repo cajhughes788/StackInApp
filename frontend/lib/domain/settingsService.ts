@@ -160,6 +160,8 @@ async function performSave(
     expectedVersionOverride?: number | null
     attempt?: number
     bypassOfflineCheck?: boolean
+    timeoutMs?: number
+    queueOnFailure?: boolean
   } = {}
 ): Promise<SettingsSaveResult> {
   const normalizedPatch = normalizeSettingsPatch(patch)
@@ -188,6 +190,18 @@ async function performSave(
     isOnline: getIsOnline(),
     patchSections: Object.keys(normalizedPatch),
   })
+
+  // A save that must be confirmed now (queueOnFailure: false) fails instead
+  // of being kept for later.
+  if (options.queueOnFailure === false && !getIsOnline()) {
+    saveStore.setSaveState(workspaceId, {
+      status: "error",
+      message: "You're offline.",
+      retryable: true,
+      preservedPatch: false,
+    })
+    throw new Error("You're offline.")
+  }
 
   // ── Offline fast-path ──────────────────────────────────────────
   if (!options.bypassOfflineCheck && !getIsOnline()) {
@@ -237,7 +251,7 @@ async function performSave(
           patch: normalizedPatch,
           expectedVersion,
         } satisfies SettingsSaveRequest),
-        timeout: 10000,
+        timeout: options.timeoutMs ?? 10000,
         profile: options.trace
           ? {
               traceId: options.trace.traceId,
@@ -378,6 +392,19 @@ async function performSave(
     })
 
     // ── Transient / network / 5xx → queue for later ───────────────
+    if (
+      options.queueOnFailure === false &&
+      (classification.retryable || shouldQueueOfflineMutation(error))
+    ) {
+      saveStore.setSaveState(workspaceId, {
+        status: "error",
+        message: error instanceof Error ? error.message : "Settings save failed.",
+        retryable: true,
+        preservedPatch: false,
+      })
+      throw error
+    }
+
     if (classification.retryable || shouldQueueOfflineMutation(error)) {
       await domainSettings.writePendingPatch(workspaceId, normalizedPatch)
       saveStore.setSaveState(workspaceId, {
@@ -796,6 +823,11 @@ export async function save(
       flow: string
     } | null
     bypassOfflineCheck?: boolean
+    // A save the person is waiting on can allow longer than the default 10s,
+    // e.g. the first setup save, which may wait out a server cold start.
+    timeoutMs?: number
+    // false: a failed save throws instead of being queued to retry later.
+    queueOnFailure?: boolean
   } = {}
 ): Promise<SettingsSaveResult> {
   const partialResult = safeSchemaParse(SettingsPatch, next)
@@ -830,6 +862,8 @@ export async function save(
   const task = performSave(workspaceId, partial, {
     trace: options.trace ?? undefined,
     bypassOfflineCheck: options.bypassOfflineCheck,
+    timeoutMs: options.timeoutMs,
+    queueOnFailure: options.queueOnFailure,
   })
   inFlightSaves.set(workspaceId, task)
   try {

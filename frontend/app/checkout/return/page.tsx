@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react"
 import { Unbounded } from "next/font/google"
+import { API_ENDPOINTS } from "@/lib/api/core/endpoints"
+import { wakeServer } from "@/lib/api/core/wake"
 
 // The website's headline face (the521app.com's FIVE TO ONE opener), so the
 // page reads as the same brand as the pricing page people just came from.
@@ -32,6 +34,13 @@ export default function CheckoutReturnPage() {
       // Not from the app: the web app's own setup flow picks it up.
       window.location.replace(result === "success" ? "/welcome?checkout=success" : "/welcome")
       return
+    }
+
+    // Wake what the app needs the moment it reopens (the subscription check,
+    // then creating the first workspace) while the person taps Open.
+    if (result === "success") {
+      wakeServer(API_ENDPOINTS.subscription.get)
+      wakeServer(API_ENDPOINTS.workspaces.create)
     }
 
     const url = `stackin://checkout/return?result=${result}`

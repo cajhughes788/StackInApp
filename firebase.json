@@ -43,7 +43,7 @@
     "ignore": [
       "firebase.json",
       // Narrower than "**/.*" so .well-known/apple-app-site-association
-      // (the iOS Universal Link file for Plaid's OAuth return) still deploys.
+      // (the iOS Universal Link file for the Plaid OAuth and Stripe checkout returns) still deploys.
       "**/.DS_Store",
       "**/.git/**",
       "**/node_modules/**"

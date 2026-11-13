@@ -24,6 +24,8 @@ import { useSettingsSaveStore } from "@/lib/stores/useSettingsSaveStore";
 import StackInHeader from "@/components/stackin-header";
 import AppLoader from "@/components/app-loader";
 import { cn } from "@/lib/utils";
+import { API_ENDPOINTS } from "@/lib/api";
+import { wakeServer } from "@/lib/api/core/wake";
 import CommonSettingsSection from "./CommonSettings";
 import W2SettingsSection from "./W2Settings";
 import IndependentSettingsSection from "./IndependentSettings";
@@ -149,7 +151,7 @@ export default function SettingsPage() {
     // ----------------------------------------------------------------------------------
     // First-time setup opens with the intro guide; this records that it was closed.
     const [setupIntroDone, setSetupIntroDone] = useState(false);
-    const requestHomeTour = useGuideStore((s) => s.requestHomeTour);
+    const offerHomeTour = useGuideStore((s) => s.offerHomeTour);
     // The intro and the Home tour run for the first workspace of each type only.
     const showFirstRunGuide = workspaceState.status === "ready" &&
         isFirstWorkspaceOfType(workspaceState.workspaces, workspaceState.activeWorkspace);
@@ -188,6 +190,27 @@ export default function SettingsPage() {
             return;
         ensureSettingsLoaded(activeWorkspaceId);
     }, [activeWorkspaceId, ensureSettingsLoaded]);
+    // First-time setup ends with a save the person waits on, then Home. Wake
+    // the save server and the ones Home loads from while the form is filled
+    // in, so neither waits out a cold start (see lib/api/core/wake).
+    useEffect(() => {
+        if (!isSetupMode)
+            return;
+        wakeServer(API_ENDPOINTS.settings.post("").split("?")[0]);
+        [
+            API_ENDPOINTS.entries.get,
+            API_ENDPOINTS.expenses.get,
+            API_ENDPOINTS.invoices.get,
+            API_ENDPOINTS.quotes.get,
+            API_ENDPOINTS.plaid.items,
+            API_ENDPOINTS.plaid.pendingTransactions,
+            API_ENDPOINTS.imports.batch.get,
+            API_ENDPOINTS.taxProfile.get,
+            API_ENDPOINTS.receiptAssets.post,
+            API_ENDPOINTS.clients.get,
+            API_ENDPOINTS.appointments.get,
+        ].forEach((url) => wakeServer(url));
+    }, [isSetupMode]);
     useEffect(() => {
         if (!isSetupMode || !setupWorkspaceId || workspaceState.status !== "ready") {
             return;
@@ -486,7 +509,18 @@ export default function SettingsPage() {
             optimisticSettings,
         };
     }
-    async function persistSettings(nextFormData: SettingsFormData, source: "autosave" | "manual" | "flush" = "autosave"): Promise<boolean> {
+    // firstSetup: the "Save and continue to home" save. It waits longer, is
+    // never kept for a later retry, and counts only once the server confirms
+    // it, so Home never opens before the settings exist.
+    async function persistSettings(nextFormData: SettingsFormData, source: "autosave" | "manual" | "flush" = "autosave", options: {
+        firstSetup?: boolean;
+    } = {}): Promise<boolean> {
+        const firstSetup = options.firstSetup === true;
+        const showFirstSetupSaveError = () => toast({
+            title: "Couldn't save yet",
+            description: "Check your connection and tap Save again.",
+            variant: "destructive",
+        });
         if (persistPromiseRef.current) {
             if (isAndroidPlatform()) {
                 debugLog("android-settings-save", "persist_skipped_inflight", {
@@ -584,7 +618,9 @@ export default function SettingsPage() {
                     patchSections: Object.keys(patch).length,
                     source,
                 });
-                if (optimisticSettings) {
+                // Skipped on the first save: settings in the store end setup
+                // mode, which would hide the Save button if the save fails.
+                if (optimisticSettings && !firstSetup) {
                     saveTraceRef.current.start("settings_save.store_update");
                     updateSettingsStore(activeWorkspaceId, optimisticSettings, {
                         source: "optimistic",
@@ -601,7 +637,25 @@ export default function SettingsPage() {
                             flow: saveTraceRef.current.flow,
                         }
                         : null,
+                    ...(firstSetup
+                        ? {
+                            // Long enough to wait out a server cold start.
+                            timeoutMs: 30000,
+                            queueOnFailure: false,
+                        }
+                        : {}),
                 }), { workspaceId: activeWorkspaceId });
+                // A first save the server rejected (kept as an error, not
+                // saved) must not continue to Home.
+                if (firstSetup && !(saved.source === "backend" && saved.data)) {
+                    saveTraceRef.current?.error("settings_save.first_setup_unconfirmed", new Error(saved.source));
+                    toast({
+                        title: "Couldn't save your settings",
+                        description: "Please tap Save again.",
+                        variant: "destructive",
+                    });
+                    return false;
+                }
                 if (saved.source === "backend" && saved.data) {
                     saveTraceRef.current.start("settings_save.store_update");
                     updateSettingsStore(activeWorkspaceId, saved.data, {
@@ -651,7 +705,11 @@ export default function SettingsPage() {
                     });
                 }
                 saveTraceRef.current?.error("settings_save.failed", err);
-                if (source !== "autosave" && source !== "flush") {
+                if (firstSetup) {
+                    // Timeouts and lost connections land here on the first save.
+                    showFirstSetupSaveError();
+                }
+                else if (source !== "autosave" && source !== "flush") {
                     toast({
                         title: "Couldn't save your settings",
                         description: err?.message ?? "Could not save settings.",
@@ -708,14 +766,17 @@ export default function SettingsPage() {
             debounceTimeoutRef.current = null;
         }
         setIsTransitioningToHome(true);
-        const saved = await persistSettings(latestFormDataRef.current, "manual");
+        const saved = await persistSettings(latestFormDataRef.current, "manual", {
+            firstSetup: isInitialSettingsSetup,
+        });
         if (!saved) {
             setIsTransitioningToHome(false);
             return;
         }
-        // Part two of the first-run guide: show the user around Home.
+        // Part two of the first-run guide: Home offers its tour ("Take a
+        // quick tour?") rather than starting it.
         if (activeWorkspace && showFirstRunGuide) {
-            requestHomeTour(activeWorkspace.id, activeWorkspace.type);
+            offerHomeTour(activeWorkspace.id, activeWorkspace.type);
         }
         router.replace("/app/home");
     };
@@ -979,7 +1040,13 @@ export default function SettingsPage() {
     // RENDER
     // ----------------------------------------------------------------------------------
     return (<>
-      {!isInitialSettingsSetup ? <StackInHeader /> : null}
+      {!isInitialSettingsSetup ? <StackInHeader /> : (<>
+          {/* Setup hides the header (nowhere to go yet) but keeps its
+              status-bar strip, so the page starts below the clock and
+              scrolled content doesn't show through behind it. */}
+          <div className="stackin-safe-header-status-bar fixed inset-x-0 top-0 z-[var(--stackin-z-header)]" aria-hidden="true"/>
+          <div style={{ height: "var(--safe-area-inset-top)" }} aria-hidden="true"/>
+        </>)}
 
       <div className="max-w-3xl mx-auto px-4 pb-10 pt-4 space-y-5" onFocusCapture={handleTypedFieldFocusCapture} onBlurCapture={handleTypedFieldBlurCapture}>
         <div className="flex items-center justify-between gap-3 px-1">

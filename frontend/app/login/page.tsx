@@ -16,6 +16,7 @@ import { useToast } from "@/hooks/use-toast";
 import { CENTERED_TOAST_VIEWPORT, Toaster } from "@/components/ui/toaster";
 import { Capacitor } from "@capacitor/core";
 import { detectNativeSignupCountryEligibility } from "@/lib/mobile/nativeSignupEligibility";
+import { LegalLink } from "@/components/legal-link";
 
 const STACKIN_WEBSITE_SIGNUP_URL =
     process.env.NEXT_PUBLIC_STACKIN_WEBSITE_SIGNUP_URL?.trim() ||
@@ -238,12 +239,12 @@ export default function LoginPage() {
                   Need help?
                 </button>
               ) : null}
-              <Link href="/terms" className="text-primary underline underline-offset-2 hover:opacity-80 transition">
+              <LegalLink href="/terms" className="text-primary underline underline-offset-2 hover:opacity-80 transition">
                 Terms
-              </Link>
-              <Link href="/privacy" className="text-primary underline underline-offset-2 hover:opacity-80 transition">
+              </LegalLink>
+              <LegalLink href="/privacy" className="text-primary underline underline-offset-2 hover:opacity-80 transition">
                 Privacy
-              </Link>
+              </LegalLink>
             </div>
           </form>
         </CardContent>

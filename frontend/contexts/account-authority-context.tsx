@@ -101,6 +101,10 @@ export function AccountAuthorityProvider({
   const [status, setStatus] = useState<AccountAuthorityStatus>("idle")
   const [authority, setAuthority] = useState<AccountAuthority | null>(null)
   const requestIdRef = useRef(0)
+  // The check already on its way, if any. Coming back from checkout fires
+  // several refreshes at once (the return link, the app resuming, focus);
+  // they all share this one request instead of each sending their own.
+  const inFlightRef = useRef<{ uid: string; promise: Promise<AccountAuthority> } | null>(null)
 
   const syncAccountAuthority = useCallback((nextAuthority: AccountAuthority | null) => {
     requestIdRef.current += 1
@@ -119,24 +123,43 @@ export function AccountAuthorityProvider({
         setStatus("loading")
       }
 
+      const inFlight = inFlightRef.current
+      if (inFlight && inFlight.uid === user.uid) {
+        return inFlight.promise
+      }
+
       const requestId = requestIdRef.current + 1
       requestIdRef.current = requestId
 
+      const promise = (async () => {
+        try {
+          const response = await apiFetch<AccountAuthorityResponse>(API_ENDPOINTS.subscription.get, {
+            // Room for a server cold start (often 5–10s) on top of the request.
+            timeout: 20_000,
+          })
+          const nextAuthority = buildAccountAuthorityFromSubscriptionResponse(response)
+
+          if (requestIdRef.current === requestId) {
+            setAuthority(nextAuthority)
+            setStatus("ready")
+          }
+
+          return nextAuthority
+        } catch (error) {
+          if (requestIdRef.current === requestId) {
+            setStatus("error")
+          }
+          throw error
+        }
+      })()
+
+      inFlightRef.current = { uid: user.uid, promise }
       try {
-        const response = await apiFetch<AccountAuthorityResponse>(API_ENDPOINTS.subscription.get)
-        const nextAuthority = buildAccountAuthorityFromSubscriptionResponse(response)
-
-        if (requestIdRef.current === requestId) {
-          setAuthority(nextAuthority)
-          setStatus("ready")
+        return await promise
+      } finally {
+        if (inFlightRef.current?.promise === promise) {
+          inFlightRef.current = null
         }
-
-        return nextAuthority
-      } catch (error) {
-        if (requestIdRef.current === requestId) {
-          setStatus("error")
-        }
-        throw error
       }
     },
     [status, syncAccountAuthority, user]

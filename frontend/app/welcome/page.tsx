@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { useAccountAuthorityState } from "@/contexts/account-authority-context"
 import { useToast } from "@/hooks/use-toast"
+import { CENTERED_TOAST_VIEWPORT, Toaster } from "@/components/ui/toaster"
 import { FieldError } from "@/components/ui/field-error"
 import { API_ENDPOINTS, apiFetch, createWorkspaceAPI } from "@/lib/api"
 import { wakeServer } from "@/lib/api/core/wake"
@@ -63,6 +64,8 @@ export default function WelcomePage() {
   // checkout?" panel and makes returns to the app re-check access.
   const [awaitingCheckout, setAwaitingCheckout] = useState(false)
   const [checkingSubscription, setCheckingSubscription] = useState(false)
+  // A check after checkout ran out of attempts without seeing the payment.
+  const [paymentNotSeen, setPaymentNotSeen] = useState(false)
 
   useEffect(() => {
     setNativeCheckoutAllowed(isNativeApp && detectNativeSignupCountryEligibility())
@@ -101,6 +104,7 @@ export default function WelcomePage() {
   const checkForNewSubscription = useCallback(
     async (options: { attempts?: number; announce?: boolean } = {}) => {
       const attempts = options.attempts ?? 6
+      setPaymentNotSeen(false)
       setCheckingSubscription(true)
       try {
         for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -117,12 +121,9 @@ export default function WelcomePage() {
             await new Promise((resolve) => setTimeout(resolve, 2000))
           }
         }
+        // Shown as the "We haven't seen your payment yet" panel, not a toast.
         if (options.announce) {
-          toast({
-            title: "Subscription not active yet",
-            description:
-              "If you finished checkout, give it a moment and tap “I've finished checkout” again.",
-          })
+          setPaymentNotSeen(true)
         }
         return false
       } finally {
@@ -143,7 +144,14 @@ export default function WelcomePage() {
       try {
         const { App } = await import("@capacitor/app")
         const handle = await App.addListener("appUrlOpen", (event) => {
-          if (!event.url.startsWith("stackin://checkout/return")) return
+          // Either the return page's stackin:// hand-off, or iOS opening the
+          // return page's own address in the app (a universal link, listed in
+          // public/.well-known/apple-app-site-association), which skips
+          // Safari's "Open in 521?" prompt.
+          if (
+            !event.url.startsWith("stackin://checkout/return") &&
+            !event.url.startsWith("https://app.the521app.com/checkout/return")
+          ) return
           const result = new URL(event.url).searchParams.get("result")
           if (result === "success") {
             setAwaitingCheckout(true)
@@ -286,6 +294,9 @@ export default function WelcomePage() {
   const canCreateAnotherWorkspace = canCreateWorkspace && !hasReachedWorkspaceLimit
   const hasSingleWorkspaceType = allowedWorkspaceTypes.length === 1
   const showNativePlanPicker = nativeCheckoutAllowed && !authority?.isSubscriptionActive
+  // After checkout, the payment check (or its "not seen yet" result) takes
+  // the plan cards' place, so they don't read as "pick and pay again".
+  const showPaymentCheck = showNativePlanPicker && (checkingSubscription || paymentNotSeen)
   const accessUnavailableMessage = hasReachedWorkspaceLimit
     ? isNativeApp
       ? "This 521 account has reached its current workspace limit."
@@ -304,17 +315,19 @@ export default function WelcomePage() {
     if (showNativePlanPicker) wakeServer(API_ENDPOINTS.subscription.createCheckoutSession)
   }, [showNativePlanPicker])
 
-  // Also wake what comes right after this screen: creating the workspace,
-  // loading it, then the first Settings save and Home's entries. They stay
-  // up ~15 minutes, which covers the trip through checkout.
+  // Once the name form is up, wake what "Create workspace" waits on: creating
+  // it, then loading it and its settings. Only here, not on the plan picker:
+  // an idle server can shut down within ~90s, sooner than a trip through
+  // checkout. Settings and Home wake their own servers on the next screen.
+  const showWorkspaceNameForm =
+    authorityStatus === "ready" && !showNativePlanPicker && canCreateAnotherWorkspace
   useEffect(() => {
+    if (!showWorkspaceNameForm) return
     const base = (url: string) => url.split("?")[0]
     wakeServer(API_ENDPOINTS.workspaces.create)
     wakeServer(base(API_ENDPOINTS.bootstrap.get("")))
-    wakeServer(base(API_ENDPOINTS.settings.post("")))
-    wakeServer(API_ENDPOINTS.entries.get)
-    wakeServer(API_ENDPOINTS.taxProfile.get)
-  }, [])
+    wakeServer(base(API_ENDPOINTS.settings.get("")))
+  }, [showWorkspaceNameForm])
 
   useEffect(() => {
     if (hasSingleWorkspaceType) {
@@ -398,9 +411,44 @@ export default function WelcomePage() {
 
   return (
     <div className="min-h-screen bg-secondary/30 p-4 py-8">
+      {/* /welcome is outside the app layout, so it needs its own; without it
+          these messages only showed up later, on Settings. Centered like
+          signup and login so the keyboard can't cover them. */}
+      <Toaster viewportClassName={CENTERED_TOAST_VIEWPORT} />
       <StackInHeader />
 
       <div className="max-w-2xl mx-auto">
+        {showPaymentCheck ? (
+          <Card>
+            {checkingSubscription ? (
+              <CardContent className="flex flex-col items-center py-10 text-center" aria-live="polite">
+                <AppLoader fullscreen={false} size={160} label="Confirming your payment…" />
+                <p className="text-sm text-muted-foreground">This usually takes a few seconds.</p>
+              </CardContent>
+            ) : (
+              <CardContent className="space-y-4 py-8 text-center" aria-live="polite">
+                <h2 className="text-xl font-semibold">We haven't seen your payment yet</h2>
+                <p className="text-sm text-muted-foreground">
+                  If you finished checkout, it can take a minute to come through. If you didn't, no
+                  charge was made.
+                </p>
+                <Button
+                  onClick={() => void checkForNewSubscription({ attempts: 3, announce: true })}
+                  className="w-full"
+                >
+                  I've finished checkout
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => setPaymentNotSeen(false)}
+                  className="text-sm text-primary underline underline-offset-2"
+                >
+                  Back to plans
+                </button>
+              </CardContent>
+            )}
+          </Card>
+        ) : (
         <Card>
           <CardHeader>
             <CardTitle className="text-2xl font-bold">
@@ -546,6 +594,7 @@ export default function WelcomePage() {
           </CardContent>
           )}
         </Card>
+        )}
       </div>
     </div>
   )

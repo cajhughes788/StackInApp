@@ -3,7 +3,10 @@
     "details": [
       {
         "appIDs": ["S9H39QCPR7.com.cajetanhughes.stackin"],
-        "components": [{ "/": "/plaid/oauth-return*" }]
+        "components": [
+          { "/": "/plaid/oauth-return*" },
+          { "/": "/checkout/return*", "?": { "source": "ios-app" } }
+        ]
       }
     ]
   }
