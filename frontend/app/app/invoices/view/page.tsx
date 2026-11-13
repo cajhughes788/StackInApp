@@ -28,6 +28,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import RecordPaymentSheet from "@/components/invoices/record-payment-sheet"
 import RefundSheet from "@/components/invoices/refund-sheet"
 import SendInvoiceSheet, { invoiceReminderText } from "@/components/invoices/send-invoice-sheet"
+import RepeatInvoiceSheet from "@/components/invoices/repeat-invoice-sheet"
+import { useWorkspaceInvoiceSchedules } from "@/lib/stores/useInvoiceSchedulesStore"
 import {
   InvoiceDisputeCard,
   InvoiceMoneyBreakdown,
@@ -181,6 +183,11 @@ function InvoiceDetailPage() {
   const justCreated = useQueryParam("share") === "1"
   // A just-created invoice is found under its real id as soon as it has one.
   const invoice = invoiceId ? invoices.find((i) => i.id === currentInvoiceId(invoiceId)) ?? null : null
+  // The repeating invoice this one belongs to (made by it, or started from it).
+  const { schedules } = useWorkspaceInvoiceSchedules(workspaceId)
+  const schedule = invoice
+    ? schedules.find((s) => s.id === invoice.scheduleId || (s.sourceInvoiceId === invoice.id && s.status !== "ended")) ?? null
+    : null
   const saving = useInvoiceSaving(invoice?.id ?? null)
   const [busy, setBusy] = useState<null | "link" | "pdf" | "text">(null)
   const [paymentOpen, setPaymentOpen] = useState(false)
@@ -188,6 +195,7 @@ function InvoiceDetailPage() {
   // The payment a refund comes off; null means the latest with anything left.
   const [refundPaymentId, setRefundPaymentId] = useState<string | null>(null)
   const [sendOpen, setSendOpen] = useState(false)
+  const [repeatOpen, setRepeatOpen] = useState(false)
   // The link, when neither a share sheet nor the clipboard was available.
   const [manualLink, setManualLink] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<null | "void" | "delete" | "close" | "writeoff">(null)
@@ -410,6 +418,13 @@ function InvoiceDetailPage() {
                 <DropdownMenuItem onSelect={() => openRefund(null)}>
                   {invoiceRefundTarget(invoice)?.via === "online" ? "Refund" : "Record a refund"}
                 </DropdownMenuItem>
+              ) : null}
+              {schedule ? (
+                <DropdownMenuItem asChild>
+                  <Link href={`/app/invoices/repeating?id=${encodeURIComponent(schedule.id)}`}>View repeating invoice</Link>
+                </DropdownMenuItem>
+              ) : !invoice.quickCharge ? (
+                <DropdownMenuItem onSelect={() => setRepeatOpen(true)}>Repeat this invoice</DropdownMenuItem>
               ) : null}
               {invoiceHasPayments(invoice) ? (
                 <DropdownMenuItem disabled>To undo a payment, delete its income entry</DropdownMenuItem>
@@ -688,6 +703,7 @@ function InvoiceDetailPage() {
             </div>
           </section>
 
+          {workspaceId ? <RepeatInvoiceSheet open={repeatOpen} onOpenChange={setRepeatOpen} invoice={invoice} workspaceId={workspaceId} /> : null}
           {workspaceId ? (
             <RecordPaymentSheet open={paymentOpen} onOpenChange={setPaymentOpen} invoice={invoice} workspaceId={workspaceId} />
           ) : null}

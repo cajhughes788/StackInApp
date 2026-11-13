@@ -20,6 +20,7 @@ import {
   InvoiceRow,
   InvoicesPage,
   QuoteRow,
+  ScheduleRow,
   cardClass,
   localToday,
   useInvoicesWorkspace,
@@ -29,6 +30,7 @@ import { getClientDetail, mergeClients } from "@/lib/api/clientsApi"
 import { createClientInBackground, updateClientInBackground } from "@/lib/domain/clientService"
 import { currentYear, useClientsStore } from "@/lib/stores/useClientsStore"
 import { useWorkspaceQuotes } from "@/lib/stores/useQuotesStore"
+import { useWorkspaceInvoiceSchedules } from "@/lib/stores/useInvoiceSchedulesStore"
 import { cn } from "@/lib/utils"
 import { buildClientRows, clientKey } from "@shared/clients"
 import { formatInvoiceDate, formatInvoiceMoney } from "@shared/invoiceDisplay"
@@ -84,6 +86,19 @@ function InvoiceClientPage() {
   const client = row?.client ?? null
   // Their quotes: linked to the saved client, or by name before one is saved.
   const { quotes } = useWorkspaceQuotes(workspaceId)
+  const { schedules } = useWorkspaceInvoiceSchedules(workspaceId)
+  // Their repeating invoices that are still going.
+  const clientSchedules = useMemo(
+    () =>
+      row
+        ? schedules.filter(
+            (schedule) =>
+              schedule.status !== "ended" &&
+              (client ? schedule.clientId === client.id : clientKey(schedule.clientName) === clientKey(row.name))
+          )
+        : [],
+    [client, schedules, row]
+  )
   const clientQuotes = useMemo(
     () =>
       row
@@ -392,6 +407,17 @@ function InvoiceClientPage() {
               </ul>
             ) : null}
           </section>
+
+          {clientSchedules.length > 0 ? (
+            <section className="space-y-2">
+              <h2 className="px-1 text-sm font-semibold text-muted-foreground">Repeating</h2>
+              <ul className="overflow-hidden rounded-[18px] border border-card-border bg-card">
+                {clientSchedules.map((schedule) => (
+                  <ScheduleRow key={schedule.id} schedule={schedule} />
+                ))}
+              </ul>
+            </section>
+          ) : null}
 
           {clientQuotes.length > 0 ? (
             <section className="space-y-2">

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { AlertTriangle, Banknote, CheckCircle2, ChevronRight, Clock, EyeOff, FileCheck, ReceiptText } from "lucide-react"
+import { AlertTriangle, Banknote, CheckCircle2, ChevronRight, Clock, EyeOff, FileCheck, ReceiptText, Repeat } from "lucide-react"
 
 import { getPlaidItems } from "@/lib/api/plaidApi"
 
@@ -123,6 +123,8 @@ export default function NeedsYouPanel() {
   // Quotes the client accepted that don't have their invoice yet.
   const { quotes } = useWorkspaceQuotes(activeWorkspaceId)
   const acceptedQuotes = useMemo(() => quotesToInvoice(quotes), [quotes])
+  // Repeating invoices saved as drafts for the owner to check and send.
+  const scheduledDrafts = useMemo(() => (invoices ?? []).filter((invoice) => invoice.scheduleId && invoice.status === "draft"), [invoices])
   const unpaidAppointmentsTotal = unpaidAppointments.reduce((sum, item) => sum + Math.round(item.left * 100), 0) / 100
   const overdueTotal = overdue.reduce((sum, invoice) => sum + Math.round(invoiceBalanceDue(invoice) * 100), 0) / 100
   const total =
@@ -133,6 +135,7 @@ export default function NeedsYouPanel() {
     failedPayments.length +
     overdueDeposits.length +
     acceptedQuotes.length +
+    scheduledDrafts.length +
     (overdue.length > 0 ? 1 : 0) +
     (unpaidAppointments.length > 0 ? 1 : 0)
 
@@ -255,6 +258,25 @@ export default function NeedsYouPanel() {
             <span className="block font-medium text-foreground">{invoice.clientName}&apos;s deposit is overdue</span>
             <span className="block text-sm text-muted-foreground">
               Invoice #{invoice.number} · {formatInvoiceMoney(invoiceDueNow(invoice)?.amount ?? 0)} · waive it or cancel
+            </span>
+          </span>
+          <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        </Link>
+      ))}
+
+      {scheduledDrafts.map((invoice) => (
+        <Link
+          key={invoice.id}
+          href={`/app/invoices/view?id=${encodeURIComponent(invoice.id)}`}
+          className="flex items-center gap-3 rounded-[18px] border border-card-border bg-card p-4 hover:bg-muted/40"
+        >
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-accent text-emerald-700 dark:text-emerald-400">
+            <Repeat className="size-5" aria-hidden="true" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-medium text-foreground">Invoice for {invoice.clientName} is ready to send</span>
+            <span className="block text-sm text-muted-foreground">
+              Repeating · #{invoice.number} · {formatInvoiceMoney(invoice.total)}
             </span>
           </span>
           <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />

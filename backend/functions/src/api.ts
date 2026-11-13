@@ -206,6 +206,21 @@ export const updateInvoiceStatus = withCorsAuth(
 )
 
 // ---------------------------------------------------------------------------
+// Repeating invoices (shared/schemas/invoiceSchedule.ts)
+// ---------------------------------------------------------------------------
+
+export const getInvoiceSchedules = withCorsAuth(async (req, res) => {
+  const { getInvoiceSchedulesHandler } = await import("./routes/getInvoiceSchedules.js")
+  await getInvoiceSchedulesHandler(req, res)
+})
+
+// Start one from an invoice (POST); edit, pause, resume or stop it (PATCH).
+export const saveInvoiceSchedule = withCorsAuth(async (req, res) => {
+  const { saveInvoiceScheduleHandler } = await import("./routes/saveInvoiceSchedule.js")
+  await saveInvoiceScheduleHandler(req, res)
+})
+
+// ---------------------------------------------------------------------------
 // Quotes (shared/schemas/quote.ts)
 // ---------------------------------------------------------------------------
 

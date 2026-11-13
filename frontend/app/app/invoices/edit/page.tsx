@@ -21,8 +21,12 @@ import {
 import { useToast } from "@/hooks/use-toast"
 import { wakeInvoiceServers } from "@/lib/api/invoicesApi"
 import { createQuote, editQuote } from "@/lib/api/quotesApi"
+import { createInvoiceSchedule, updateInvoiceSchedule } from "@/lib/api/invoiceSchedulesApi"
+import { useInvoiceSchedulesStore, useWorkspaceInvoiceSchedules } from "@/lib/stores/useInvoiceSchedulesStore"
+import { RepeatOptions, newRepeatDraft, repeatDraftFrom, repeatEnd, type RepeatDraft } from "@/components/invoices/repeat-options"
+import { addScheduleDays, daysBetween, scheduleNextDateFrom } from "@shared/invoiceSchedules"
 import { useQuotesStore, useWorkspaceQuotes } from "@/lib/stores/useQuotesStore"
-import { createInvoiceInBackground, currentInvoiceId, editInvoiceInBackground } from "@/lib/domain/invoiceService"
+import { createInvoiceInBackground, currentInvoiceId, editInvoiceInBackground, invoiceSaved } from "@/lib/domain/invoiceService"
 import { useClientsStore } from "@/lib/stores/useClientsStore"
 import { buildClientKeyIndex } from "@shared/clients"
 import type { ClientType } from "@shared/schemas/client"
@@ -121,6 +125,13 @@ function InvoiceFormPage() {
   const upsertQuote = useQuotesStore((state) => state.upsertQuote)
   const existingQuote = isQuote && invoiceId ? quotes.find((quote) => quote.id === invoiceId) ?? null : null
   const sourceQuote = !isQuote && fromQuoteId ? quotes.find((quote) => quote.id === fromQuoteId) ?? null : null
+  // ?schedule=<id>: edits a repeating invoice — what each future one bills,
+  // and how it repeats (shared/schemas/invoiceSchedule.ts).
+  const scheduleParam = useQueryParam("schedule")
+  const isSchedule = !isQuote && !!scheduleParam
+  const { schedules, status: schedulesStatus } = useWorkspaceInvoiceSchedules(isSchedule ? workspaceId : null)
+  const upsertSchedule = useInvoiceSchedulesStore((state) => state.upsertSchedule)
+  const existingSchedule = isSchedule ? schedules.find((schedule) => schedule.id === scheduleParam) ?? null : null
   const noun = isQuote ? "quote" : "invoice"
   const { toast } = useToast()
   // "New invoice for <client>" from a client's page.
@@ -158,6 +169,9 @@ function InvoiceFormPage() {
   const [depositText, setDepositText] = useState("")
   const [depositDueDate, setDepositDueDate] = useState(() => addDays(localToday(), 7))
   const [saving, setSaving] = useState<null | "draft" | "share">(null)
+  // "Repeat this invoice" on a new invoice (always on when editing a schedule).
+  const [repeatOn, setRepeatOn] = useState(false)
+  const [repeat, setRepeat] = useState<RepeatDraft>(newRepeatDraft)
   const [showErrors, setShowErrors] = useState(false)
   const initialized = useRef(false)
 
@@ -166,8 +180,31 @@ function InvoiceFormPage() {
     if (initialized.current || loadStatus !== "ready") return
     if (isQuote ? invoiceId && !existingQuote : invoiceId && !existing) return
     if (fromQuoteId && !sourceQuote && quotesStatus !== "error") return
+    if (isSchedule && !existingSchedule) return
     initialized.current = true
-    if (existingQuote) {
+    if (existingSchedule) {
+      setClientName(existingSchedule.clientName)
+      setClientId(existingSchedule.clientId ?? null)
+      setClientEmail(existingSchedule.clientEmail ?? "")
+      setClientPhone(existingSchedule.clientPhone ?? "")
+      setClientAddress(existingSchedule.clientAddress ?? "")
+      setLines(
+        existingSchedule.lines.map((line) => ({
+          ...newLine(line.category),
+          description: line.description,
+          quantity: String(line.quantity),
+          rate: line.rate.toFixed(2),
+        }))
+      )
+      setNote(existingSchedule.note)
+      setPolicies(existingSchedule.policies)
+      // Terms are kept as "due N days after", shown from today.
+      setIssueDate(localToday())
+      setDueDate(addScheduleDays(localToday(), existingSchedule.dueInDays))
+      setDepositOn(false)
+      setRepeatOn(true)
+      setRepeat(repeatDraftFrom(existingSchedule))
+    } else if (existingQuote) {
       setClientName(existingQuote.clientName)
       setClientId(existingQuote.clientId ?? null)
       setClientEmail(existingQuote.clientEmail ?? "")
@@ -269,7 +306,7 @@ function InvoiceFormPage() {
         setClientAddress(last?.clientAddress ?? "")
       }
     }
-  }, [existing, existingQuote, fromQuoteId, invoiceId, invoices, isQuote, loadStatus, prefillClient, prefillClientId, quotesStatus, savedClients, settings, sourceQuote])
+  }, [existing, existingQuote, existingSchedule, fromQuoteId, invoiceId, invoices, isQuote, isSchedule, loadStatus, prefillClient, prefillClientId, quotesStatus, savedClients, settings, sourceQuote])
 
   // Paid and void invoices can't be edited, nor a quote the client answered.
   useEffect(() => {
@@ -354,7 +391,18 @@ function InvoiceFormPage() {
     email:
       clientEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail.trim()) ? "That email doesn't look right." : null,
   }
-  const valid = !errors.client && !errors.lines && !errors.dates && !errors.email && !depositError
+  // Repeating invoices don't take deposits.
+  const repeating = repeatOn && !isQuote && !existing
+  // Editing a schedule: its own next date, unless the frequency changes.
+  // A new one: the next comes one period after this invoice, and after today.
+  const scheduleNextDate = existingSchedule
+    ? repeat.frequency === existingSchedule.frequency
+      ? existingSchedule.nextDate
+      : undefined
+    : scheduleNextDateFrom(issueDate, repeat.frequency, localToday(), { includeToday: false })
+  const repeatResult = repeating ? repeatEnd(repeat, existingSchedule ? existingSchedule.anchorDate : issueDate, scheduleNextDate) : null
+  const repeatError = repeatResult && "error" in repeatResult ? repeatResult.error : null
+  const valid = !errors.client && !errors.lines && !errors.dates && !errors.email && (repeating || !depositError) && !repeatError
 
   function updateLine(key: number, patch: Partial<DraftLine>) {
     setLines((current) => current.map((line) => (line.key === key ? { ...line, ...patch } : line)))
@@ -392,6 +440,10 @@ function InvoiceFormPage() {
       void saveQuote(mode, body)
       return
     }
+    if (existingSchedule) {
+      void saveSchedule(existingSchedule.id, body)
+      return
+    }
     // Saved in the background (invoiceService) — the next screen shows it now.
     setSaving(mode)
     if (existing) {
@@ -404,9 +456,13 @@ function InvoiceFormPage() {
     } else {
       const created = createInvoiceInBackground(workspaceId, {
         ...body,
+        ...(repeating ? { deposit: null } : {}),
         clientMutationId: clientMutationId.current,
         ...(sourceQuote ? { quoteId: sourceQuote.id } : {}),
       })
+      if (repeating && repeatResult && "end" in repeatResult) {
+        void startRepeating(workspaceId, created.id, { frequency: repeat.frequency, end: repeatResult.end, sendMode: repeat.sendMode })
+      }
       // The server marks the quote invoiced with it; show that now.
       if (sourceQuote) upsertQuote(workspaceId, { ...sourceQuote, status: "invoiced", invoiceId: created.id })
       if (mode === "share") {
@@ -415,6 +471,53 @@ function InvoiceFormPage() {
       } else {
         router.replace("/app/invoices")
       }
+    }
+  }
+
+  // The repeat starts once the invoice is saved (it's the first one). The
+  // form has moved on by then; a failure says so in a toast.
+  async function startRepeating(workspaceId: string, invoiceTempId: string, options: Pick<Parameters<typeof createInvoiceSchedule>[1], "frequency" | "end" | "sendMode">) {
+    try {
+      const invoiceId = await invoiceSaved(invoiceTempId)
+      const schedule = await createInvoiceSchedule(workspaceId, { ...options, invoiceId, clientMutationId: clientMutationId.current })
+      upsertSchedule(workspaceId, schedule)
+    } catch (error) {
+      toast({
+        title: "Couldn't set the invoice to repeat",
+        description: `${error instanceof Error ? error.message : "Please try again."} Open the invoice and choose Repeat this invoice.`,
+        variant: "destructive",
+      })
+    }
+  }
+
+  // A repeating invoice's changes apply to the ones still to come.
+  async function saveSchedule(scheduleId: string, body: QuoteFormBody) {
+    if (!workspaceId || !repeatResult || !("end" in repeatResult)) return
+    setSaving("share")
+    try {
+      const schedule = await updateInvoiceSchedule(workspaceId, scheduleId, {
+        action: "edit",
+        clientName: body.clientName,
+        clientEmail: body.clientEmail ?? "",
+        clientPhone: body.clientPhone,
+        clientAddress: body.clientAddress,
+        lines: body.lines,
+        note: body.note,
+        policies: body.policies,
+        dueInDays: Math.max(0, daysBetween(body.issueDate, body.dueDate)),
+        frequency: repeat.frequency,
+        end: repeatResult.end,
+        sendMode: repeat.sendMode,
+      })
+      upsertSchedule(workspaceId, schedule)
+      router.replace(`/app/invoices/repeating?id=${encodeURIComponent(schedule.id)}`)
+    } catch (error) {
+      setSaving(null)
+      toast({
+        title: "Couldn't save the changes",
+        description: error instanceof Error ? error.message : "Check your connection and try again.",
+        variant: "destructive",
+      })
     }
   }
 
@@ -444,7 +547,9 @@ function InvoiceFormPage() {
     }
   }
 
-  const title = isQuote
+  const title = isSchedule
+    ? "Edit repeating invoice"
+    : isQuote
     ? existingQuote
       ? `Edit ${quoteNumberLabel(existingQuote.number)}`
       : "New quote"
@@ -457,9 +562,14 @@ function InvoiceFormPage() {
     loadStatus === "loading" ||
     (isQuote && invoiceId && quotesStatus === "loading") ||
     (!!fromQuoteId && quotesStatus === "loading") ||
+    (isSchedule && schedulesStatus === "loading") ||
     (invoiceId && !(isQuote ? existingQuote : existing) && loadStatus === "ready" && !initialized.current)
-  const missing = !!invoiceId && loadStatus === "ready" && (isQuote ? quotesStatus !== "loading" && !existingQuote : !existing)
-  const backHref = isQuote
+  const missing =
+    (isSchedule && schedulesStatus !== "loading" && !existingSchedule) ||
+    (!!invoiceId && loadStatus === "ready" && (isQuote ? quotesStatus !== "loading" && !existingQuote : !existing))
+  const backHref = isSchedule
+    ? `/app/invoices/repeating?id=${encodeURIComponent(scheduleParam!)}`
+    : isQuote
     ? existingQuote
       ? `/app/invoices/quote?id=${encodeURIComponent(existingQuote.id)}`
       : "/app/invoices?filter=quotes"
@@ -477,7 +587,7 @@ function InvoiceFormPage() {
       backHref={backHref}
       backLabel="Cancel"
       action={
-        existing?.status === "sent" || existingQuote?.status === "sent" ? null : (
+        existing?.status === "sent" || existingQuote?.status === "sent" || isSchedule ? null : (
           <Button
             type="button"
             variant="ghost"
@@ -491,7 +601,9 @@ function InvoiceFormPage() {
       }
     >
       {missing ? (
-        <div className={cn(cardClass, "text-sm text-muted-foreground")}>This {noun} wasn&apos;t found.</div>
+        <div className={cn(cardClass, "text-sm text-muted-foreground")}>
+          {isSchedule ? "This repeating invoice wasn't found." : <>This {noun} wasn&apos;t found.</>}
+        </div>
       ) : waitingForInvoice ? (
         <div className="space-y-3" aria-hidden="true">
           <Skeleton className="h-28 w-full rounded-[18px]" />
@@ -688,6 +800,9 @@ function InvoiceFormPage() {
           </section>
 
           <section className={cn(cardClass, "space-y-3")}>
+            {isSchedule ? (
+              <p className="text-sm text-muted-foreground">Each invoice is dated the day it&apos;s made. Its due date follows these terms:</p>
+            ) : (
             <label className={fieldLabelClass}>
               {isQuote ? "Quote date" : "Invoice date"}
               <input
@@ -704,6 +819,7 @@ function InvoiceFormPage() {
                 }}
               />
             </label>
+            )}
             <fieldset className="space-y-1.5">
               <legend className="mb-1.5 text-sm font-medium text-muted-foreground">{isQuote ? "Good for" : <>When it&apos;s due</>}</legend>
               <div className="grid grid-cols-3 gap-1 rounded-[14px] bg-muted p-1">
@@ -762,6 +878,7 @@ function InvoiceFormPage() {
             </fieldset>
           </section>
 
+          {repeating ? null : (
           <section className={cn(cardClass, "space-y-3")}>
             {depositLocked && existing?.deposit ? (
               <p className="text-sm text-muted-foreground">
@@ -840,6 +957,7 @@ function InvoiceFormPage() {
               </>
             )}
           </section>
+          )}
 
           <section className={cn(cardClass, "space-y-1.5")}>
             <label className={fieldLabelClass}>
@@ -881,13 +999,46 @@ function InvoiceFormPage() {
             </p>
           </section>
 
+          {!isQuote && !existing ? (
+            <section className={cn(cardClass, "space-y-3")}>
+              {isSchedule ? (
+                <h2 className="text-sm font-semibold text-muted-foreground">How it repeats</h2>
+              ) : (
+                <label className="flex items-center justify-between gap-3">
+                  <span>
+                    <span className="block text-sm font-medium text-foreground">Repeat this invoice</span>
+                    <span className="block text-xs text-muted-foreground">
+                      {repeatOn ? "This is the first one; 521 makes the rest on their dates." : "For clients you bill the same amount on a schedule."}
+                    </span>
+                  </span>
+                  <Switch checked={repeatOn} onCheckedChange={setRepeatOn} aria-label="Repeat this invoice" />
+                </label>
+              )}
+              {repeating ? (
+                <>
+                  <RepeatOptions
+                    draft={repeat}
+                    onChange={setRepeat}
+                    firstDate={existingSchedule ? existingSchedule.anchorDate : issueDate}
+                    clientHasEmail={!!clientEmail.trim()}
+                    nextDate={scheduleNextDate}
+                    error={showErrors ? repeatError : null}
+                  />
+                  {!isSchedule && depositOn ? (
+                    <p className="text-xs text-muted-foreground">Repeating invoices don&apos;t ask for a deposit, so this one won&apos;t either.</p>
+                  ) : null}
+                </>
+              ) : null}
+            </section>
+          ) : null}
+
           <div className="flex gap-2.5 pt-1">
             <Button
               type="submit"
               disabled={saving !== null}
               className="h-[52px] flex-1 rounded-full text-base font-semibold"
             >
-              {saving === "share" ? "Saving..." : existing || existingQuote ? "Save" : "Review & send"}
+              {saving === "share" ? "Saving..." : existing || existingQuote || isSchedule ? "Save" : "Review & send"}
             </Button>
           </div>
         </form>

@@ -60,6 +60,8 @@ export {
   saveQuote,
   updateQuoteStatus,
   publicQuote,
+  getInvoiceSchedules,
+  saveInvoiceSchedule,
   updatePaymentAccount,
   stripeConnectWebhook,
   createImportBatch,
@@ -115,5 +117,6 @@ export { sendInvoiceRemindersDaily } from "./scheduled/sendInvoiceRemindersDaily
 export { sendAppointmentReminders } from "./scheduled/sendAppointmentReminders"
 export { refreshBusyCalendars } from "./scheduled/refreshBusyCalendars"
 export { cleanupBookingLimitsDaily } from "./scheduled/cleanupBookingLimitsDaily"
+export { makeScheduledInvoicesHourly } from "./scheduled/makeScheduledInvoicesHourly"
 export { notifySupportReportCreated } from "./triggers/notifySupportReportCreated"
 export { sendContentLogSignupRow } from "./triggers/sendContentLogSignupRow"

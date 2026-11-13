@@ -15,6 +15,20 @@
       ]
     },
     {
+      "collectionGroup": "invoiceSchedules",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "nextDate",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "recurringRules",
       "queryScope": "COLLECTION_GROUP",
       "fields": [

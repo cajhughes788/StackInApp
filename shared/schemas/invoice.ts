@@ -215,6 +215,8 @@ export const InvoiceSchema = z
     appointmentId: z.string().nullable().default(null),
     // The quote it was made from ("Turn into invoice" — shared/schemas/quote.ts).
     quoteId: z.string().nullable().default(null),
+    // The repeating schedule that made it (shared/schemas/invoiceSchedule.ts).
+    scheduleId: z.string().nullable().default(null),
 
     // --- Payment ledger -------------------------------------------------
     // Oldest first. A payment's processor fee, method and links live on it.

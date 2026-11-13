@@ -11,6 +11,7 @@ import {
   InvoiceRow,
   InvoicesPage,
   QuoteRow,
+  ScheduleRow,
   cardClass,
   localToday,
   useInvoicesWorkspace,
@@ -20,12 +21,13 @@ import ClientList from "@/components/clients/client-list"
 import { wakePaymentSetupServer } from "@/lib/api/invoicesApi"
 import { useInvoicesStore } from "@/lib/stores/useInvoicesStore"
 import { useWorkspaceQuotes } from "@/lib/stores/useQuotesStore"
+import { useWorkspaceInvoiceSchedules } from "@/lib/stores/useInvoiceSchedulesStore"
 import { cn } from "@/lib/utils"
 import { formatInvoiceMoney } from "@shared/invoiceDisplay"
 import { invoiceBalanceDue, invoiceDueNow, invoicePaymentsReceivedIn } from "@shared/invoicePayments"
 import type { InvoiceType } from "@shared/schemas/invoice"
 
-type Filter = "all" | "open" | "overdue" | "paid" | "draft" | "quick" | "quotes"
+type Filter = "all" | "open" | "overdue" | "paid" | "draft" | "quick" | "quotes" | "repeating"
 
 const FILTERS: Array<{ id: Filter; label: string }> = [
   { id: "all", label: "All" },
@@ -34,6 +36,7 @@ const FILTERS: Array<{ id: Filter; label: string }> = [
   { id: "paid", label: "Paid" },
   { id: "draft", label: "Drafts" },
   { id: "quotes", label: "Quotes" },
+  { id: "repeating", label: "Repeating" },
   { id: "quick", label: "Quick charges" },
 ]
 
@@ -42,7 +45,7 @@ function matchesFilter(invoice: InvoiceType, filter: Filter, today: string): boo
   // they don't crowd the invoices list.
   if (filter === "quick") return !!invoice.quickCharge
   // Quotes aren't invoices; the Quotes filter lists them instead.
-  if (filter === "quotes") return false
+  if (filter === "quotes" || filter === "repeating") return false
   if (invoice.quickCharge) return false
   switch (filter) {
     case "all":
@@ -79,6 +82,15 @@ export default function InvoicesListPageRoute() {
 function InvoicesListPage() {
   const { ready, workspaceId, invoices, settings, loadStatus } = useInvoicesWorkspace()
   const { quotes } = useWorkspaceQuotes(workspaceId)
+  const { schedules } = useWorkspaceInvoiceSchedules(workspaceId)
+  // Active first, then paused, then ended; soonest next date first.
+  const sortedSchedules = useMemo(
+    () => {
+      const order = { active: 0, paused: 1, ended: 2 }
+      return [...schedules].sort((a, b) => order[a.status] - order[b.status] || a.nextDate.localeCompare(b.nextDate))
+    },
+    [schedules]
+  )
   const router = useRouter()
   const takesPayments = useInvoicesStore((s) => {
     const account = workspaceId ? s.byWorkspaceId[workspaceId]?.paymentAccount : null
@@ -255,7 +267,19 @@ function InvoicesListPage() {
                 </div>
               ) : null}
 
-              {filter === "quotes" ? (
+              {filter === "repeating" ? (
+                sortedSchedules.length === 0 ? (
+                  <div className={cn(cardClass, "text-sm text-muted-foreground")}>
+                    No repeating invoices yet. Turn on Repeat this invoice when you make one, or choose it from an invoice&apos;s ••• menu.
+                  </div>
+                ) : (
+                  <ul className="overflow-hidden rounded-[18px] border border-card-border bg-card">
+                    {sortedSchedules.map((schedule) => (
+                      <ScheduleRow key={schedule.id} schedule={schedule} />
+                    ))}
+                  </ul>
+                )
+              ) : filter === "quotes" ? (
                 quotes.length === 0 ? (
                   <div className={cn(cardClass, "text-sm text-muted-foreground")}>
                     No quotes yet. Send a client a price before the job — when they accept, turn it into an invoice in one tap.

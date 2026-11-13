@@ -150,6 +150,7 @@ export function createInvoiceInBackground(workspaceId: string, input: CreateInpu
     quickCharge: null,
     appointmentId: null,
     quoteId: input.quoteId ?? null,
+    scheduleId: null,
     clientEmail: input.clientEmail || null,
     clientPhone: input.clientPhone || null,
     clientAddress: input.clientAddress || null,

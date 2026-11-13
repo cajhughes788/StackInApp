@@ -29,6 +29,8 @@ import {
 } from "@shared/schemas/invoice"
 import { quoteDisplayStatus, quoteNumberLabel } from "@shared/quotes"
 import type { QuoteType } from "@shared/schemas/quote"
+import { scheduleStatusLine } from "@shared/invoiceSchedules"
+import type { InvoiceScheduleType } from "@shared/schemas/invoiceSchedule"
 
 // Shared pieces of the invoice screens (app/app/invoices/*).
 
@@ -287,6 +289,27 @@ export function QuoteRow({ quote, title, today }: { quote: QuoteType; title: str
           <div className={cn("font-semibold tabular-nums", muted ? "text-muted-foreground" : "text-foreground")}>{formatInvoiceMoney(quote.total)}</div>
           <div className="mt-0.5">
             <QuoteStatusPill quote={quote} today={today} short />
+          </div>
+        </div>
+      </Link>
+    </li>
+  )
+}
+
+// One repeating invoice in a list: client, how often and the next date, amount.
+export function ScheduleRow({ schedule }: { schedule: InvoiceScheduleType }) {
+  const muted = schedule.status !== "active"
+  return (
+    <li className="border-b border-border last:border-0">
+      <Link href={`/app/invoices/repeating?id=${encodeURIComponent(schedule.id)}`} className="flex items-center gap-3 px-4 py-3.5 hover:bg-muted/50">
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-semibold text-foreground">{schedule.clientName}</div>
+          <div className="truncate text-sm text-muted-foreground">{scheduleStatusLine(schedule, shortDate)}</div>
+        </div>
+        <div className="shrink-0 text-right">
+          <div className={cn("font-semibold tabular-nums", muted ? "text-muted-foreground" : "text-foreground")}>{formatInvoiceMoney(schedule.total)}</div>
+          <div className="mt-0.5 text-xs text-muted-foreground">
+            {schedule.invoicesMade} made
           </div>
         </div>
       </Link>

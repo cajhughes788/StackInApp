@@ -28,6 +28,12 @@ export const API_ENDPOINTS = {
     publicPage: "https://publicinvoice-3lc2fwdgwq-uc.a.run.app",
   },
 
+  // Repeating invoices: POST starts one, PATCH edits / pauses / resumes / stops.
+  invoiceSchedules: {
+    get: "https://getinvoiceschedules-3lc2fwdgwq-uc.a.run.app",
+    save: "https://saveinvoiceschedule-3lc2fwdgwq-uc.a.run.app",
+  },
+
   quotes: {
     get: "https://getquotes-3lc2fwdgwq-uc.a.run.app",
     // POST creates, PATCH edits, DELETE removes a draft.
