@@ -20,6 +20,8 @@ import { toast } from "@/hooks/use-toast";
 import { isProcessingFeeTrackingOn, sumBreakdownFees, supportsProcessingFee } from "@shared/processingFees";
 import { useSettingsData } from "@/lib/stores/useSettingsStore";
 import { ApiError } from "@/lib/api";
+import { API_ENDPOINTS } from "@/lib/api/core/endpoints";
+import { wakeServer } from "@/lib/api/core/wake";
 
 export const paymentFieldConfig = {
     venmo: {
@@ -125,6 +127,15 @@ export type CellEditorControl = {
     trigger?: ReactNode;
 };
 
+// Editors render with the records grids, so the edit and delete servers are
+// woken while the grid is on screen, before a change is made (a cold one
+// took ~8s in the logs). wakeServer skips any woken in the last few minutes.
+function useWakeEntryEditing() {
+    useEffect(() => {
+        wakeServer(API_ENDPOINTS.entries.patch);
+        wakeServer(API_ENDPOINTS.entries.delete);
+    }, []);
+}
 function savedFailedToast(description = "We could not save this change. Please try again.") {
     toast({
         title: "Couldn't save your change",
@@ -153,6 +164,7 @@ export function NumericCellEditor({ entry, field, prefix = "", decimals = 2, wor
         ? resolvedValue.toFixed(decimals)
         : "";
     const [val, setVal] = useState(initial);
+    useWakeEntryEditing();
     const [saving, setSaving] = useState(false);
     // Reset input when the entry changes while the editor is closed.
     useEffect(() => {
@@ -268,6 +280,7 @@ export function BreakdownCellEditor({ entry, field, tipsEnabled, workspaceId, is
     const [other, setOther] = useState(aggregated.other > 0
         ? aggregated.other.toFixed(2)
         : "");
+    useWakeEntryEditing();
     const [saving, setSaving] = useState(false);
     // Reset inputs when entry changes while editor is closed.
     useEffect(() => {
@@ -414,6 +427,7 @@ export function HoursCellEditor({ entry, breakMinutesDefault, workspaceId, isOpe
     const [hoursInd, setHoursInd] = useState(entry.independent?.hours != null
         ? entry.independent.hours.toFixed(2)
         : "");
+    useWakeEntryEditing();
     const [saving, setSaving] = useState(false);
     // Reset inputs when entry changes while editor is closed.
     useEffect(() => {

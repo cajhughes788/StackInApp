@@ -14,6 +14,8 @@ import { PopoverTrigger, Popover } from "@/components/ui/popover"
 import { GridEditorPopoverContent } from "@/components/grid-editor-popover-content"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { API_ENDPOINTS } from "@/lib/api/core/endpoints"
+import { wakeServer } from "@/lib/api/core/wake"
 import * as expensesService from "@/lib/domain/expenseService"
 import {
   findExpenseCategoryGuideEntry,
@@ -49,6 +51,16 @@ export type ExpenseEditorControl = {
   trigger?: ReactNode
 }
 
+// Editors and details render with the records grids, so the edit and delete
+// servers are woken while the grid is on screen, before a change is made (a
+// cold delete took ~8s in the logs). wakeServer skips recent repeats.
+function useWakeExpenseEditing() {
+  useEffect(() => {
+    wakeServer(API_ENDPOINTS.expenses.patch)
+    wakeServer(API_ENDPOINTS.expenses.delete)
+  }, [])
+}
+
 function currentFieldValue(expense: Expense, field: EditableExpenseField): string {
   if (field === "amount") return String(expense.amount ?? "")
   if (field === "account") return expense.account ?? ""
@@ -76,6 +88,7 @@ export function ExpenseFieldEditor({
   workspaceType: VisibilityContext["workspaceType"]
   independentSettings: VisibilityContext["independentSettings"]
 }) {
+  useWakeExpenseEditing()
   const [value, setValue] = useState(() => currentFieldValue(expense, field))
   const [fieldError, setFieldError] = useState<string | null>(null)
   // Each opening starts from the expense's current value.
@@ -253,6 +266,7 @@ export function ExpenseDetails({
   onAttachReceipt: () => void
   onReceiptViewerClose?: () => void
 }) {
+  useWakeExpenseEditing()
   const e = expense
   return (
     <div className="space-y-3">
