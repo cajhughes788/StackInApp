@@ -185,10 +185,12 @@ export default function SignupPage() {
     const router = useRouter();
     const { toast } = useToast();
     // Wake the servers Continue waits on (the account, then the plan check
-    // on the next screen) while the form is filled in (see lib/api/core/wake).
+    // on the next screen) while the form is filled in (see lib/api/core/wake),
+    // and checkout's, so it's ready well before a plan is picked.
     useEffect(() => {
         wakeServer(API_ENDPOINTS.user.signup);
         wakeServer(API_ENDPOINTS.subscription.get);
+        wakeServer(API_ENDPOINTS.subscription.createCheckoutSession);
     }, []);
     const [email, setEmail] = useState("");
     // Typo hints wait until the person has left the email field once, so

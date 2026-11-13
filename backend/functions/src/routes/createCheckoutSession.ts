@@ -55,12 +55,17 @@ type BillingSubscriptionDoc = SubscriptionDoc & {
     pendingCheckoutTier?: SubscriptionTier;
 };
 
+// One client per server, so its open connection to Stripe is reused by every
+// checkout instead of each one opening its own.
+let stripeClient: Stripe | null = null;
 function getStripeClient(): Stripe {
+    if (stripeClient) return stripeClient;
     const stripeSecretKey = STRIPE_SECRET_KEY.value();
     if (!stripeSecretKey) {
         throw new Error("Missing STRIPE_SECRET_KEY");
     }
-    return new Stripe(stripeSecretKey);
+    stripeClient = new Stripe(stripeSecretKey);
+    return stripeClient;
 }
 function hasStripeSubscriptionHistory(subscription: SubscriptionDoc | null): boolean {
     return Boolean(subscription?.stripeSubscriptionId || subscription?.stripeCustomerId);
@@ -119,9 +124,25 @@ function hasRedemptionsLeft(limit: number | null, used: number): boolean {
     return limit === null || used < limit;
 }
 
-// The launch deal's promotion code id while it can still be used, else
-// undefined. Any Stripe hiccup also means undefined: they get the trial.
+// The launch deal check is remembered for a minute, so checkouts close
+// together (and the wake-up's own check) share one Stripe call. If the last
+// redemption goes within that minute, Stripe refuses the code at checkout
+// creation and the trial is used instead (see createSession below).
+const INTRO_PROMOTION_CACHE_MS = 60 * 1000;
+let introPromotionCache: { id: string | undefined; checkedAt: number } | null = null;
+
 async function findAvailableIntroPromotion(stripe: Stripe): Promise<string | undefined> {
+    if (introPromotionCache && Date.now() - introPromotionCache.checkedAt < INTRO_PROMOTION_CACHE_MS) {
+        return introPromotionCache.id;
+    }
+    const id = await lookUpIntroPromotion(stripe);
+    if (id !== null) introPromotionCache = { id, checkedAt: Date.now() };
+    return id ?? undefined;
+}
+
+// The launch deal's promotion code id while it can still be used, else
+// undefined. null is a Stripe hiccup (not remembered): they get the trial.
+async function lookUpIntroPromotion(stripe: Stripe): Promise<string | undefined | null> {
     if (!INTRO_PROMOTION_CODE) return undefined;
     try {
         const { data } = await stripe.promotionCodes.list({
@@ -140,8 +161,29 @@ async function findAvailableIntroPromotion(stripe: Stripe): Promise<string | und
     }
     catch (error) {
         console.warn("createCheckoutSession: couldn't check the intro promotion", error instanceof Error ? error.message : error);
-        return undefined;
+        return null;
     }
+}
+
+// Run by the plan screen's wake-up (see withCorsAuth's warmUp): opens this
+// server's connections to the database, sign-in service and Stripe, and
+// checks the launch deal, so the tap that follows doesn't pay for them.
+// Once per server; failures are ignored (the tap just does it itself).
+let warmUpPromise: Promise<void> | null = null;
+export function warmUpCheckout(): Promise<void> {
+    if (!warmUpPromise) {
+        warmUpPromise = (async () => {
+            const startedAt = Date.now();
+            await Promise.allSettled([
+                db.collection("_warmup").doc("checkout").get(),
+                // No such user: the call fails, but its connection stays open.
+                auth.getUser("warmup-no-such-user"),
+                findAvailableIntroPromotion(getStripeClient()),
+            ]);
+            console.log("createCheckoutSession: warmed up", { ms: Date.now() - startedAt });
+        })().catch(() => {});
+    }
+    return warmUpPromise;
 }
 
 // Closes the checkout for a plan they switched away from, so it can't still
@@ -213,8 +255,18 @@ export async function createCheckoutSessionHandler(req: Request, res: Response):
             .collection("subscription")
             .doc("current");
         subscriptionRef = currentSubscriptionRef;
-        const userRecord = await auth.getUser(uid);
-        const checkoutReservation = await db.runTransaction(async (transaction) => {
+        // Started together rather than one after another: the account
+        // lookup (then the Stripe customer search by its email) and the
+        // launch deal check run while the checkout is reserved below. They
+        // only read, so any of them that turns out unneeded is just ignored.
+        const userPromise = auth.getUser(uid);
+        const customerByEmailPromise = userPromise.then((user) =>
+            user.email ? findStripeCustomerIdByEmail(stripe, user.email) : undefined);
+        const introPromotionPromise = findAvailableIntroPromotion(stripe);
+        // Kept from surfacing as unhandled if the request ends before
+        // they're awaited (a reused checkout, or an error).
+        customerByEmailPromise.catch(() => {});
+        const reservationPromise = db.runTransaction(async (transaction) => {
             const subscriptionSnap = await transaction.get(currentSubscriptionRef);
             const existingSubscription = subscriptionSnap.exists
                 ? (subscriptionSnap.data() as BillingSubscriptionDoc)
@@ -256,6 +308,11 @@ export async function createCheckoutSessionHandler(req: Request, res: Response):
                 replacedSessionId,
             };
         });
+        const [reservationResult, userResult] = await Promise.allSettled([reservationPromise, userPromise]);
+        if (reservationResult.status === "rejected") {
+            throw reservationResult.reason;
+        }
+        const checkoutReservation = reservationResult.value;
         if (checkoutReservation.kind === "reuse") {
             res.status(200).json({
                 ok: true,
@@ -265,9 +322,11 @@ export async function createCheckoutSessionHandler(req: Request, res: Response):
             return;
         }
         shouldReleasePendingCheckout = true;
-        if (checkoutReservation.replacedSessionId) {
-            await expireReplacedCheckout(stripe, checkoutReservation.replacedSessionId);
+        // The account lookup failing releases the reservation (catch below).
+        if (userResult.status === "rejected") {
+            throw userResult.reason;
         }
+        const userRecord = userResult.value;
         const existingSubscription = checkoutReservation.existingSubscription;
         const email = userRecord.email;
         if (!email) {
@@ -280,18 +339,25 @@ export async function createCheckoutSessionHandler(req: Request, res: Response):
             return;
         }
         const existingCustomerId = existingSubscription?.stripeCustomerId ??
-            await findStripeCustomerIdByEmail(stripe, email);
-        if (existingCustomerId) {
-            const blockingSubscription = await findBlockingStripeSubscription(stripe, existingCustomerId);
-            if (blockingSubscription) {
-                await clearPendingCheckout(currentSubscriptionRef);
-                shouldReleasePendingCheckout = false;
-                res.status(409).json({
-                    ok: false,
-                    error: "This account already has a Stripe subscription. Please manage the existing subscription instead of creating a new one.",
-                });
-                return;
-            }
+            await customerByEmailPromise;
+        // Closing a replaced checkout and checking for an existing Stripe
+        // subscription run side by side; both must pass before a new one.
+        const [, blockingSubscription] = await Promise.all([
+            checkoutReservation.replacedSessionId
+                ? expireReplacedCheckout(stripe, checkoutReservation.replacedSessionId)
+                : Promise.resolve(),
+            existingCustomerId
+                ? findBlockingStripeSubscription(stripe, existingCustomerId)
+                : Promise.resolve(null),
+        ]);
+        if (blockingSubscription) {
+            await clearPendingCheckout(currentSubscriptionRef);
+            shouldReleasePendingCheckout = false;
+            res.status(409).json({
+                ok: false,
+                error: "This account already has a Stripe subscription. Please manage the existing subscription instead of creating a new one.",
+            });
+            return;
         }
         const priceId = getStripePriceIdForTier(tier);
         const successUrl = buildCheckoutSuccessUrl(source);
@@ -299,7 +365,7 @@ export async function createCheckoutSessionHandler(req: Request, res: Response):
         // subscribers are billed immediately.
         const isFirstTimeSubscriber = !hasStripeSubscriptionHistory(existingSubscription);
         const introPromotionId = isFirstTimeSubscriber
-            ? await findAvailableIntroPromotion(stripe)
+            ? await introPromotionPromise
             : undefined;
 
         const createSession = (promotionId: string | undefined) => stripe.checkout.sessions.create({

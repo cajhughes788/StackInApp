@@ -6,7 +6,6 @@ import { logout as firebaseLogout } from "@/lib/auth";
 import { clearAllSettingsHints } from "@/lib/storage/localSettingsHint";
 import { bumpAuthSessionVersion } from "@/lib/authSession";
 import { debugError, debugLog } from "@/lib/debugLoop";
-import { registerPushNotifications } from "@/lib/push/registerPush";
 // Zustand stores
 import { useTaxProfileStore } from "@/lib/stores/useTaxProfileStore";
 import { useEntriesStore } from "@/lib/stores/useEntriesStore";
@@ -162,7 +161,8 @@ export function AuthProvider({ children }: {
                 });
                 setUser(fbUser);
                 setAuthLoading(false);
-                void registerPushNotifications();
+                // Notifications are set up inside the app, not here, so a
+                // new account isn't asked before paying (see app/app/layout).
             })
                 .catch((error) => {
                 debugError("auth", "state_transition_failed", {

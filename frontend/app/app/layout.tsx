@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
+import { registerPushNotifications } from "@/lib/push/registerPush"
 
 import AppLoader from "@/components/app-loader"
 import { NativePermissionGuideDialog } from "@/components/mobile/NativePermissionGuideDialog"
@@ -54,6 +55,16 @@ export default function AppLayout({
   useNotificationWorkspaceOpen(status)
   useOfflineReplay()
   useWorkspaceSettingsSync(activeWorkspaceId, allWorkspaceIds, settingsService)
+
+  // Push notifications start once a workspace is open (so after paying).
+  // The "Allow notifications?" question waits for Home; anyone who already
+  // answered it is registered on whatever screen the app opens to.
+  const pathname = usePathname()
+  const onHome = pathname?.replace(/\/$/, "") === "/app/home"
+  useEffect(() => {
+    if (!contextReady) return
+    void registerPushNotifications({ allowPrompt: onHome })
+  }, [contextReady, onHome])
 
   useEffect(() => {
     debugLog("app-layout", "render_state", {

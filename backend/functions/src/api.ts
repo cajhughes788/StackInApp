@@ -489,7 +489,13 @@ export const createCheckoutSession = withCorsAuth(
     await createCheckoutSessionHandler(req, res)
   },
   true,
-  { secrets: [SECRETS.STRIPE_SECRET_KEY] }
+  {
+    secrets: [SECRETS.STRIPE_SECRET_KEY],
+    warmUp: async () => {
+      const { warmUpCheckout } = await import("./routes/createCheckoutSession.js")
+      await warmUpCheckout()
+    },
+  }
 )
 
 export const getSubscription = withCorsAuth(async (req, res) => {

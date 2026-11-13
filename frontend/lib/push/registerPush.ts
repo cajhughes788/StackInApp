@@ -6,6 +6,7 @@ import { debugError, debugLog } from "@/lib/debugLoop"
 import { deepLinkRequestFromPushData, useDeepLinkStore } from "@/lib/push/deepLinkStore"
 
 let hasRegistered = false
+let registering = false
 
 // iOS-only for this pass — Android FCM setup (google-services.json, manifest
 // changes) is a follow-up using the same backend registerDeviceToken route.
@@ -16,13 +17,26 @@ let hasRegistered = false
 // the OS permission prompt and registerForRemoteNotifications() — but the
 // actual token we send to the backend comes from FcmTokenPlugin.swift, which
 // bridges the APNs token into an FCM token via native FirebaseMessaging.
-export async function registerPushNotifications(): Promise<void> {
-  if (hasRegistered) return
+//
+// The iOS "Allow notifications?" prompt only shows where allowPrompt is set
+// (Home, so never before someone has paid and set up). Anyone who already
+// answered it is registered on any in-app screen, so tokens and taps that
+// open the app keep working wherever it launches.
+export async function registerPushNotifications({ allowPrompt }: { allowPrompt: boolean }): Promise<void> {
+  if (hasRegistered || registering) return
   if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== "ios") return
-  hasRegistered = true
+  registering = true
 
   try {
-    const permission = await PushNotifications.requestPermissions()
+    const current = await PushNotifications.checkPermissions()
+    if (current.receive !== "granted" && current.receive !== "denied" && !allowPrompt) {
+      // Not asked yet: wait for Home.
+      return
+    }
+    hasRegistered = true
+    const permission = current.receive === "granted" || current.receive === "denied"
+      ? current
+      : await PushNotifications.requestPermissions()
     if (permission.receive !== "granted") {
       debugLog("push-notifications", "permission_denied", {})
       return
@@ -68,5 +82,7 @@ export async function registerPushNotifications(): Promise<void> {
     debugError("push-notifications", "register_failed", {
       reason: error instanceof Error ? error.message : String(error),
     })
+  } finally {
+    registering = false
   }
 }

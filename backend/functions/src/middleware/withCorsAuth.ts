@@ -99,13 +99,27 @@ async function checkAppCheck(req: Request): Promise<{ verified: boolean; reason?
 // ---------------------------------------------------------------------------
 // 🔹 Main unified wrapper
 // ---------------------------------------------------------------------------
+// A route's warm-up gets at most this long before the preflight answers anyway.
+const WARM_UP_LIMIT_MS = 10_000;
+
+// options.warmUp (not passed on to onRequest): run on a preflight before it's
+// answered, so the app's wake-up (an OPTIONS request, see
+// frontend/lib/api/core/wake.ts) also opens the route's connections. It
+// should do its work once per server and resolve at once after that.
 export function withCorsAuth(handler: (req: Request, res: Response) => Promise<void> | void, requireAuth: boolean = true, options: Record<string, any> = {}) {
-    return onRequest(options as any, async (req, res) => {
+    const { warmUp, ...functionOptions } = options as { warmUp?: () => Promise<void> } & Record<string, any>;
+    return onRequest(functionOptions as any, async (req, res) => {
         // Base CORS headers
         res.setHeader("Access-Control-Allow-Origin", "*");
         res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS");
         res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, idempotency-key, Idempotency-Key, X-StackIn-Trace-Id, X-StackIn-Flow, X-Firebase-AppCheck");
         // Preflight shortcut
+        if (req.method === "OPTIONS" && warmUp) {
+            await Promise.race([
+                warmUp().catch(() => {}),
+                new Promise((resolve) => setTimeout(resolve, WARM_UP_LIMIT_MS)),
+            ]);
+        }
         if (handlePreflight(req as any, res as any)) {
             return;
         }
