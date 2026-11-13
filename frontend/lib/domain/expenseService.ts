@@ -147,8 +147,15 @@ export async function createExpense(
     scopedPeriodId,
   })
 
-  // 3. Save optimistic to IndexedDB (append style)
-  await domainExpenses.saveExpense(scopedPeriodId, optimistic)
+  // 3. Save optimistic to IndexedDB (append style). If the phone's storage
+  // write fails, take the expense back off the screen so it doesn't look
+  // saved when it isn't (the storage layer has already sent a failure note).
+  try {
+    await domainExpenses.saveExpense(scopedPeriodId, optimistic)
+  } catch (error) {
+    useExpensesStore.getState().removeExpense(workspaceId, tempId)
+    throw error
+  }
   traceCacheWrite("expenses", diagTraceId, "optimistic_write", { expenseId: tempId, scopedPeriodId })
   trace.mark("expense.cache_saved", {
     tempId,
@@ -236,7 +243,8 @@ export async function createExpense(
     })
     useExpensesStore.getState().removeExpense(workspaceId, tempId)
     traceReconciliation("expenses", diagTraceId, "rollback_applied", { expenseId: tempId, reason: "api_failure" })
-    await domainExpenses.deleteExpense(scopedPeriodId, tempId)
+    // If storage is what broke, this fails too; keep the original error.
+    await domainExpenses.deleteExpense(scopedPeriodId, tempId).catch(() => {})
     trace.mark("expense.optimistic_removed", {
       tempId,
       scopedPeriodId,

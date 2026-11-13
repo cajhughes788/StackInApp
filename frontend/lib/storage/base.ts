@@ -9,6 +9,7 @@ import { Capacitor } from "@capacitor/core";
 import { CapacitorSQLite, SQLiteConnection, SQLiteDBConnection, } from "@capacitor-community/sqlite";
 import localforage from "localforage";
 import { Preferences } from "@capacitor/preferences";
+import { reportFailure } from "@/lib/observability/failureReports";
 // ------------------------------------------------------------
 // Platform Detection
 // ------------------------------------------------------------
@@ -24,6 +25,17 @@ let encryptionReadyPromise: Promise<void> | null = null;
 // ------------------------------------------------------------
 function trace(msg: string, ...rest: any[]) {
     ;
+}
+// Failure notes (lib/observability/failureReports.ts): only the key's area
+// ("expenses", "offline-queue", ...), never the ids after it.
+function reportStorageFailure(step: string, key: string | null, err: unknown) {
+    const area = key ? (key.split(":")[0] || "unknown").slice(0, 40) : "all";
+    reportFailure({
+        kind: "local_storage",
+        step,
+        where: `${isNative ? "sqlite" : "web"}:${area}`,
+        error: err,
+    });
 }
 // ------------------------------------------------------------
 // Encryption Key
@@ -193,7 +205,7 @@ export async function readRaw(key: string): Promise<string | null> {
         return out;
     }
     catch (err) {
-        ;
+        reportStorageFailure("read", key, err);
         return null;
     }
 }
@@ -218,6 +230,7 @@ export async function writeRaw(key: string, value: string): Promise<void> {
     }
     catch (err) {
         trace("writeRaw:FAILED", key, err instanceof Error ? err.message : String(err));
+        reportStorageFailure("write", key, err);
         throw err;
     }
 }
@@ -237,7 +250,7 @@ export async function removeRaw(key: string): Promise<void> {
         trace("removeRaw:SUCCESS", key);
     }
     catch (err) {
-        ;
+        reportStorageFailure("remove", key, err);
     }
 }
 export async function listKeysRaw(): Promise<string[]> {
@@ -262,7 +275,7 @@ export async function listKeysRaw(): Promise<string[]> {
         return keys;
     }
     catch (err) {
-        ;
+        reportStorageFailure("list_keys", null, err);
         return [];
     }
 }

@@ -39,6 +39,7 @@ import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import { useSelectedPeriod } from "@/lib/stores/usePeriodSelectionStore"
 import { useReceiptCapture } from "@/hooks/use-receipt-capture"
 import ReceiptCaptureField from "@/components/receipt-capture-field"
+import { reportFailure } from "@/lib/observability/failureReports"
 
 const ExpenseInputSchema = ExpenseInput
 const VEHICLE_MODE_STORAGE_KEY = "stackin.vehicleExpenseMode"
@@ -810,6 +811,13 @@ export default function ExpenseForm() {
             setRepeatEnabled(submittedRepeatEnabled)
             // Offline already surfaced its own toast — avoid a redundant alert.
             if (error instanceof Error && error.message.startsWith("Offline —")) return
+            reportFailure({
+              kind: "user_saw_error",
+              step: submittedRepeatEnabled ? "save_recurring_expense" : "save_expense",
+              where: "expense-form",
+              error,
+              workspaceId: activeWorkspaceId,
+            })
             alert(
               submittedRepeatEnabled
                 ? "Failed to save recurring expense. Please try again."

@@ -11,6 +11,7 @@ import {
     shouldQueueOfflineMutation,
 } from "@/lib/api/core/errors";
 import { debugError, debugLog } from "@/lib/debugLoop";
+import { reportFailure, requestTarget, requestWorkspaceId } from "@/lib/observability/failureReports";
 
 function isAndroidPlatform(): boolean {
     return typeof window !== "undefined" &&
@@ -90,6 +91,9 @@ export async function apiFetch<T = any>(endpoint: string, opts: RequestInit & {
     const { timeout = 12000, profile, signal: externalSignal, ...fetchOpts } = opts;
     const controller = new AbortController();
     let timedOut = false;
+    // Whether fetch was reached: a failure before it (getting the sign-in or
+    // App Check token) never shows up in the server logs.
+    let sentRequest = false;
     const abortTimeout = setTimeout(() => {
         timedOut = true;
         controller.abort();
@@ -164,6 +168,7 @@ export async function apiFetch<T = any>(endpoint: string, opts: RequestInit & {
             mode: "cors",
             credentials: "omit",
         }));
+        sentRequest = true;
         let res = await send();
         // A 401 usually means the token went stale (e.g. the app sat in the
         // background past its expiry). Force a fresh one and retry once
@@ -229,6 +234,22 @@ export async function apiFetch<T = any>(endpoint: string, opts: RequestInit & {
             if (timedOut && err && typeof err === "object") {
                 (err as { isTimeout?: boolean }).isTimeout = true;
             }
+        }
+        // A request the caller cancelled on purpose isn't a failure.
+        if (!isAbortError(err) || timedOut) {
+            reportFailure({
+                kind: "request",
+                step: timedOut
+                    ? sentRequest ? "timeout" : "timeout_before_send"
+                    : err instanceof ApiError ? "server"
+                        : sentRequest ? "no_connection" : "before_send",
+                where: requestTarget(endpoint),
+                method: fetchOpts.method ?? "GET",
+                status: err instanceof ApiError ? err.status : undefined,
+                error: err,
+                workspaceId: requestWorkspaceId(endpoint),
+                sentRequest,
+            });
         }
         throw err;
     }

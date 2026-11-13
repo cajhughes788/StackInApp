@@ -115,6 +115,10 @@ export const API_ENDPOINTS = {
     submit: "https://submitsupportreport-3lc2fwdgwq-uc.a.run.app",
   },
 
+  clientFailures: {
+    post: "https://logclientfailure-3lc2fwdgwq-uc.a.run.app",
+  },
+
   paystubs: {
     get: "https://getpaystubs-3lc2fwdgwq-uc.a.run.app",
     generate: "https://generatepaystub-3lc2fwdgwq-uc.a.run.app",

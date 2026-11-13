@@ -80,6 +80,7 @@ export {
   getSubscription,
   getAppBootstrap,
   submitSupportReport,
+  logClientFailure,
   requestAccountDeletion,
   cancelAccountDeletionRequest,
   createPlaidLinkToken,

@@ -626,6 +626,18 @@ export const submitSupportReport = withCorsAuth(async (req, res) => {
   await submitSupportReportHandler(req, res)
 })
 
+// Failure notes from the app (see routes/logClientFailure.ts). Signing in is
+// optional because a broken sign-in can be the failure being reported;
+// maxInstances caps what a flood of notes can cost.
+export const logClientFailure = withCorsAuth(
+  async (req, res) => {
+    const { logClientFailureHandler } = await import("./routes/logClientFailure.js")
+    await logClientFailureHandler(req, res)
+  },
+  false,
+  { maxInstances: 5 }
+)
+
 // ---------------------------------------------------------------------------
 // Plaid bank integration
 // ---------------------------------------------------------------------------

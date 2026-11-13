@@ -17,6 +17,7 @@ import { useAuxiliaryWorkspaceRefresh } from "@/hooks/useAuxiliaryWorkspaceRefre
 import { useAppOpenRefresh } from "@/hooks/useAppOpenRefresh"
 import { debugError, debugLog } from "@/lib/debugLoop"
 import { reportCrash } from "@/lib/crashReports"
+import { reportFailure } from "@/lib/observability/failureReports"
 import { useAppBootstrap } from "@/hooks/useAppBootstrap"
 import { AppBootstrapProvider } from "@/contexts/app-bootstrap-context"
 import DeepLinkHandler from "@/components/deep-link-handler"
@@ -73,6 +74,13 @@ export default function AppLayout({
   useEffect(() => {
     const handleError = (event: ErrorEvent) => {
       reportCrash("window_error", event.error ?? event.message)
+      reportFailure({
+        kind: "app_error",
+        step: "window_error",
+        where: window.location.pathname,
+        error: event.error ?? event.message,
+        workspaceId: workspaceState.status === "ready" ? workspaceState.activeWorkspaceId : null,
+      })
       debugError("app-layout", "window_error", {
         message: event.message,
         filename: event.filename,
@@ -93,6 +101,13 @@ export default function AppLayout({
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
       const reason = event.reason
       reportCrash("unhandled_rejection", reason)
+      reportFailure({
+        kind: "app_error",
+        step: "unhandled_rejection",
+        where: window.location.pathname,
+        error: reason,
+        workspaceId: workspaceState.status === "ready" ? workspaceState.activeWorkspaceId : null,
+      })
       debugError("app-layout", "unhandled_rejection", {
         message:
           reason instanceof Error
