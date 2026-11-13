@@ -1,0 +1,25 @@
+{
+  "name": "521-booking-ad",
+  "version": "1.0.0",
+  "private": true,
+  "description": "521 booking ad, built with Remotion",
+  "scripts": {
+    "studio": "remotion studio",
+    "render": "remotion render BookingAdVertical out/booking-ad-9x16.mp4 && remotion render BookingAdSquare out/booking-ad-1x1.mp4 && remotion render BookingAdWide out/booking-ad-16x9.mp4",
+    "render:vertical": "remotion render BookingAdVertical out/booking-ad-9x16.mp4",
+    "render:built": "remotion render BuiltOnBooksVertical out/built-on-your-books-9x16.mp4 && remotion render BuiltOnBooksSquare out/built-on-your-books-1x1.mp4 && remotion render BuiltOnBooksWide out/built-on-your-books-16x9.mp4",
+    "render:castle": "remotion render BuiltOnBooksVertical48 out/built-on-your-books-48s-9x16.mp4 && remotion render BuiltOnBooksSquare48 out/built-on-your-books-48s-1x1.mp4 && remotion render BuiltOnBooksWide48 out/built-on-your-books-48s-16x9.mp4",
+    "render:text": "remotion render BooksTextVertical out/books-text-9x16.mp4 && remotion render BooksTextSquare out/books-text-1x1.mp4 && remotion render BooksTextWide out/books-text-16x9.mp4"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.300",
+    "@remotion/google-fonts": "^4.0.300",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "remotion": "^4.0.300"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.8",
+    "typescript": "^5.9.3"
+  }
+}
