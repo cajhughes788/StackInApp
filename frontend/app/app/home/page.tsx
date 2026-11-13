@@ -44,6 +44,7 @@ import { useAppBootstrapState } from "@/contexts/app-bootstrap-context";
 import { useHomepageLayoutShiftDiagnostics } from "@/hooks/useHomepageLayoutShiftDiagnostics";
 import { useWarmChargeServers } from "@/hooks/useWarmChargeServers";
 import { useWarmClientsAndBooking } from "@/hooks/useWarmClientsAndBooking";
+import { useWarmRecordSaving, wakeRecordSaving } from "@/hooks/useWarmRecordSaving";
 import HomeTour from "@/components/onboarding/home-tour";
 import HomeTourOffer from "@/components/onboarding/home-tour-offer";
 import AllIncomeCard from "@/components/all-income-card";
@@ -136,6 +137,8 @@ export default function HomePage() {
     );
     // Charge now only exists in independent workspaces too.
     useWarmChargeServers(supportsExpenses ? activeWorkspaceId : null);
+    // The entry (and expense) form's save servers.
+    useWarmRecordSaving(!!activeWorkspaceId, supportsExpenses);
 
     // Kick off settings load as soon as workspace is known — runs in parallel
     // with bootstrap so settings are ready from cache before bootstrap settles.
@@ -351,7 +354,7 @@ export default function HomePage() {
           {showImportSalesPanel ? <ImportSalesPanel sources={stableImportSources} openRequest={importOpenRequest}/> : null}
         </div>
 
-        <div className="order-4" data-tour="entry-form">
+        <div className="order-4" data-tour="entry-form" onFocusCapture={() => wakeRecordSaving(true)}>
           {mode === "income" ? <EntryForm /> : <ExpenseForm />}
         </div>
 
@@ -371,7 +374,7 @@ export default function HomePage() {
         <div data-tour="total">
           <IncomeGauge />
         </div>
-        <div data-tour="entry-form">
+        <div data-tour="entry-form" onFocusCapture={() => wakeRecordSaving(false)}>
           <EntryForm />
         </div>
         <div data-tour="records">
