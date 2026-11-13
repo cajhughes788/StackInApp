@@ -17,6 +17,8 @@ import { CENTERED_TOAST_VIEWPORT, Toaster } from "@/components/ui/toaster";
 import { Capacitor } from "@capacitor/core";
 import { detectNativeSignupCountryEligibility } from "@/lib/mobile/nativeSignupEligibility";
 import { LegalLink } from "@/components/legal-link";
+import { wakeServer } from "@/lib/api/core/wake";
+import { API_ENDPOINTS } from "@/lib/api/core/endpoints";
 
 const STACKIN_WEBSITE_SIGNUP_URL =
     process.env.NEXT_PUBLIC_STACKIN_WEBSITE_SIGNUP_URL?.trim() ||
@@ -100,6 +102,30 @@ export default function LoginPage() {
     const [nativeSignupAllowed, setNativeSignupAllowed] = useState(() => !isNativeApp);
     const showCreateAccount = !isNativeApp || nativeSignupAllowed;
     const showNativeWebsiteFirstMessage = isNativeApp && !nativeSignupAllowed;
+
+    // Wake the servers Home loads from while the email and password are
+    // typed, so the first Home after logging in (nothing saved on this
+    // phone yet) doesn't wait out their cold starts (see lib/api/core/wake).
+    useEffect(() => {
+        const base = (url: string) => url.split("?")[0];
+        [
+            base(API_ENDPOINTS.bootstrap.get("")),
+            base(API_ENDPOINTS.settings.get("")),
+            API_ENDPOINTS.subscription.get,
+            API_ENDPOINTS.entries.get,
+            API_ENDPOINTS.expenses.get,
+            API_ENDPOINTS.allIncome.get,
+            API_ENDPOINTS.recurringRules.get,
+            API_ENDPOINTS.receiptDrafts.get,
+            API_ENDPOINTS.taxProfile.get,
+            API_ENDPOINTS.plaid.items,
+            API_ENDPOINTS.plaid.pendingTransactions,
+            API_ENDPOINTS.imports.batch.get,
+            API_ENDPOINTS.invoices.get,
+            API_ENDPOINTS.clients.get,
+            API_ENDPOINTS.appointments.get,
+        ].forEach((url) => wakeServer(url));
+    }, []);
 
     useEffect(() => {
         if (!isNativeApp) {
