@@ -304,6 +304,18 @@ export default function WelcomePage() {
     if (showNativePlanPicker) wakeServer(API_ENDPOINTS.subscription.createCheckoutSession)
   }, [showNativePlanPicker])
 
+  // Also wake what comes right after this screen: creating the workspace,
+  // loading it, then the first Settings save and Home's entries. They stay
+  // up ~15 minutes, which covers the trip through checkout.
+  useEffect(() => {
+    const base = (url: string) => url.split("?")[0]
+    wakeServer(API_ENDPOINTS.workspaces.create)
+    wakeServer(base(API_ENDPOINTS.bootstrap.get("")))
+    wakeServer(base(API_ENDPOINTS.settings.post("")))
+    wakeServer(API_ENDPOINTS.entries.get)
+    wakeServer(API_ENDPOINTS.taxProfile.get)
+  }, [])
+
   useEffect(() => {
     if (hasSingleWorkspaceType) {
       setType(allowedWorkspaceTypes[0])

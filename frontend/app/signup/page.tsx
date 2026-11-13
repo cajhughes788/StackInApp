@@ -3,12 +3,12 @@
 // signup form: the account and legal consent are created here, and the
 // subscription is chosen afterwards on /welcome.
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { FirebaseError } from "firebase/app";
-import { Eye, EyeOff } from "lucide-react";
+import { Check, Circle, Eye, EyeOff } from "lucide-react";
 import { FieldError } from "@/components/ui/field-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +20,7 @@ import { CENTERED_TOAST_VIEWPORT, Toaster } from "@/components/ui/toaster";
 import { getAuthSafe } from "@/lib/firebase";
 import { API_ENDPOINTS, apiFetch } from "@/lib/api";
 import { ApiError } from "@/lib/api/core/errors";
+import { wakeServer } from "@/lib/api/core/wake";
 
 // Must match the versions accepted by backend/functions/src/routes/signup.ts.
 const LEGAL_CONSENT_VERSION = "2026-04-27";
@@ -159,9 +160,34 @@ function getSignupErrorCopy(error: unknown) {
     };
 }
 
+// Mirrors the Firebase Auth password policy (enforced since 2026-10-12).
+// The symbols are the ones Firebase counts as "non-alphanumeric", so a green
+// check here always means Firebase will accept that rule too.
+const PASSWORD_SYMBOLS = "^$*.[]{}()?\"!@#%&/\\,><':;|_~`=+-";
+const PASSWORD_RULES: { label: string; met: (password: string) => boolean }[] = [
+    { label: "At least 8 characters", met: (p) => p.length >= 8 },
+    { label: "An uppercase letter", met: (p) => /[A-Z]/.test(p) },
+    { label: "A lowercase letter", met: (p) => /[a-z]/.test(p) },
+    { label: "A symbol (like ! @ # $)", met: (p) => [...p].some((c) => PASSWORD_SYMBOLS.includes(c)) },
+];
+
+function RequirementLine({ met, label }: { met: boolean; label: string }) {
+    return (<li className={`flex items-center gap-2 text-xs ${met ? "text-primary" : "text-muted-foreground"}`}>
+      {met ? <Check size={14} strokeWidth={3} aria-hidden/> : <Circle size={14} aria-hidden/>}
+      <span>{label}</span>
+      <span className="sr-only">{met ? "(done)" : "(not yet)"}</span>
+    </li>);
+}
+
 export default function SignupPage() {
     const router = useRouter();
     const { toast } = useToast();
+    // Wake the servers Continue waits on (the account, then the plan check
+    // on the next screen) while the form is filled in (see lib/api/core/wake).
+    useEffect(() => {
+        wakeServer(API_ENDPOINTS.user.signup);
+        wakeServer(API_ENDPOINTS.subscription.get);
+    }, []);
     const [email, setEmail] = useState("");
     const [phone, setPhone] = useState("");
     const [password, setPassword] = useState("");
@@ -258,10 +284,9 @@ export default function SignupPage() {
                   {showPassword ? <EyeOff size={18}/> : <Eye size={18}/>}
                 </button>
               </div>
-              {/* Mirrors the Firebase Auth password policy (enforced since 2026-10-12). */}
-              <p id="password-requirements" className="text-xs text-muted-foreground">
-                At least 8 characters, with an uppercase letter, a lowercase letter and a symbol.
-              </p>
+              <ul id="password-requirements" className="space-y-1" aria-live="polite">
+                {PASSWORD_RULES.map((rule) => (<RequirementLine key={rule.label} label={rule.label} met={rule.met(password)}/>))}
+              </ul>
             </div>
 
             <div className="space-y-2">
@@ -272,6 +297,9 @@ export default function SignupPage() {
                   {showConfirmPassword ? <EyeOff size={18}/> : <Eye size={18}/>}
                 </button>
               </div>
+              <ul className="space-y-1" aria-live="polite">
+                <RequirementLine label="Passwords match" met={confirmPassword.length > 0 && confirmPassword === password}/>
+              </ul>
               <FieldError message={confirmError}/>
             </div>
 

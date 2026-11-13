@@ -8,6 +8,11 @@ import type { SubscriptionDoc, SubscriptionTier } from "@shared/contracts/subscr
 import { getStripePriceIdForTier } from "../billing/stripePlanMap";
 export const STRIPE_SECRET_KEY = defineSecret("STRIPE_SECRET_KEY");
 const SUBSCRIPTION_TRIAL_DAYS = 30;
+// The launch deal (e.g. a free first year). While its Stripe promotion code
+// still has redemptions left, first-time subscribers get it applied for them
+// instead of the trial, so checkout shows the deal and $0.00 due today.
+// Once it's used up, checkout falls back to the trial.
+const INTRO_PROMOTION_CODE = process.env.STRIPE_INTRO_PROMOTION_CODE?.trim() || "FIRST50";
 const PENDING_CHECKOUT_LOCK_MS = 5 * 60 * 1000;
 const REUSABLE_CHECKOUT_BUFFER_MS = 30 * 1000;
 const ACTIVE_LOCAL_SUBSCRIPTION_STATUSES = new Set<SubscriptionDoc["status"]>([
@@ -108,6 +113,35 @@ async function clearPendingCheckout(subscriptionRef: FirebaseFirestore.DocumentR
         pendingCheckoutTier: FieldValue.delete(),
         updatedAt: Date.now(),
     }, { merge: true });
+}
+
+function hasRedemptionsLeft(limit: number | null, used: number): boolean {
+    return limit === null || used < limit;
+}
+
+// The launch deal's promotion code id while it can still be used, else
+// undefined. Any Stripe hiccup also means undefined: they get the trial.
+async function findAvailableIntroPromotion(stripe: Stripe): Promise<string | undefined> {
+    if (!INTRO_PROMOTION_CODE) return undefined;
+    try {
+        const { data } = await stripe.promotionCodes.list({
+            code: INTRO_PROMOTION_CODE,
+            active: true,
+            limit: 1,
+        });
+        const promotion = data[0];
+        if (!promotion) return undefined;
+        const nowSeconds = Math.floor(Date.now() / 1000);
+        if (promotion.expires_at && promotion.expires_at <= nowSeconds) return undefined;
+        if (!hasRedemptionsLeft(promotion.max_redemptions, promotion.times_redeemed)) return undefined;
+        const coupon = promotion.coupon;
+        if (!coupon.valid || !hasRedemptionsLeft(coupon.max_redemptions, coupon.times_redeemed)) return undefined;
+        return promotion.id;
+    }
+    catch (error) {
+        console.warn("createCheckoutSession: couldn't check the intro promotion", error instanceof Error ? error.message : error);
+        return undefined;
+    }
 }
 
 // Closes the checkout for a plan they switched away from, so it can't still
@@ -261,12 +295,24 @@ export async function createCheckoutSessionHandler(req: Request, res: Response):
         }
         const priceId = getStripePriceIdForTier(tier);
         const successUrl = buildCheckoutSuccessUrl(source);
-        const shouldApplyIntroTrial = !hasStripeSubscriptionHistory(existingSubscription);
+        // Intro offers are for first-time subscribers only, so returning
+        // subscribers are billed immediately.
+        const isFirstTimeSubscriber = !hasStripeSubscriptionHistory(existingSubscription);
+        const introPromotionId = isFirstTimeSubscriber
+            ? await findAvailableIntroPromotion(stripe)
+            : undefined;
 
-        const session = await stripe.checkout.sessions.create({
+        const createSession = (promotionId: string | undefined) => stripe.checkout.sessions.create({
             mode: "subscription",
             payment_method_types: ["card"],
-            allow_promotion_codes: true,
+            // Stripe won't show its own code box when a code is already
+            // attached, so the box only appears without the launch deal.
+            ...(promotionId
+                ? { discounts: [{ promotion_code: promotionId }] }
+                : { allow_promotion_codes: true }),
+            // A $0.00 first bill still collects a card, so they're charged
+            // when the deal ends unless they cancel.
+            payment_method_collection: "always",
             client_reference_id: uid,
             ...(existingCustomerId
                 ? { customer: existingCustomerId }
@@ -290,14 +336,28 @@ export async function createCheckoutSessionHandler(req: Request, res: Response):
                     tier,
                     ...(source ? { source } : {}),
                 },
-                ...(shouldApplyIntroTrial
-                    ? {
-                        // Keep the free trial introductory so returning subscribers are billed immediately.
-                        trial_period_days: SUBSCRIPTION_TRIAL_DAYS,
-                    }
+                // The launch deal replaces the trial rather than stacking on it.
+                ...(isFirstTimeSubscriber && !promotionId
+                    ? { trial_period_days: SUBSCRIPTION_TRIAL_DAYS }
                     : {}),
             },
         });
+
+        let session: Stripe.Checkout.Session;
+        if (introPromotionId) {
+            try {
+                session = await createSession(introPromotionId);
+            }
+            catch (error) {
+                // e.g. the last redemption went between the check and now, or
+                // the coupon doesn't cover this plan: fall back to the trial.
+                console.warn("createCheckoutSession: intro promotion rejected, using the trial", error instanceof Error ? error.message : error);
+                session = await createSession(undefined);
+            }
+        }
+        else {
+            session = await createSession(undefined);
+        }
         if (!session.url) {
             await clearPendingCheckout(currentSubscriptionRef);
             shouldReleasePendingCheckout = false;
