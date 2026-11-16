@@ -198,4 +198,9 @@ export const API_ENDPOINTS = {
   devices: {
     registerToken: "https://registerdevicetoken-3lc2fwdgwq-uc.a.run.app",
   },
+
+  voiceEntry: {
+    // New function — confirm the URL in the Firebase console after first deploy.
+    parse: "https://parsevoiceentry-3lc2fwdgwq-uc.a.run.app",
+  },
 } as const

@@ -7,11 +7,17 @@ import { LocalNotifications } from "@capacitor/local-notifications"
 
 import { debugError, debugLog } from "@/lib/debugLoop"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
+import { useVoiceEntryStore } from "@/lib/stores/useVoiceEntryStore"
 
 type PendingWorkspaceOpen = {
   workspaceId: string
   kind: string | null
 }
+
+// The leave/arrive reminder (NativeGeofencePlugin.swift) and its "Say it"
+// button (action id below, registered there too).
+const ENTRY_REMINDER_KIND = "entry-location-reminder"
+const SAY_IT_ACTION = "say-it"
 
 function logNotificationOpenInfo(stage: string, payload: Record<string, unknown> = {}) {
   console.info(`[NotificationOpen] ${stage}`, payload)
@@ -86,6 +92,11 @@ export function useNotificationWorkspaceOpen(status: string) {
 
             setActiveWorkspace(target.workspaceId)
             setPendingTarget(target)
+            // Open that workspace's Add entry form; "Say it" also starts the mic.
+            if (target.kind === ENTRY_REMINDER_KIND) {
+              const actionId = (event as { actionId?: unknown }).actionId
+              useVoiceEntryStore.getState().ask(target.workspaceId, actionId === SAY_IT_ACTION)
+            }
           }
         )
       } catch (error) {
@@ -133,7 +144,8 @@ export function useNotificationWorkspaceOpen(status: string) {
       return
     }
 
-    if (lastHandledRef.current === pendingTarget.workspaceId) {
+    // A reminder always goes to Home, where its Add entry form is.
+    if (lastHandledRef.current === pendingTarget.workspaceId && pendingTarget.kind !== ENTRY_REMINDER_KIND) {
       setPendingTarget(null)
       return
     }

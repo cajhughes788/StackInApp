@@ -59,6 +59,10 @@
 	<string>521 uses your location to remind you to log entries when you arrive at or leave work locations.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
 	<string>521 uses your location to remind you to log entries when you arrive at or leave work locations.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>521 uses the microphone when you tap the mic to say an entry, like "270 today, 9 to 5." Recordings are never saved.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>521 turns what you say into text to fill in your entry form for you to check and save.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>521 uses your camera to capture receipt photos for business expense records.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

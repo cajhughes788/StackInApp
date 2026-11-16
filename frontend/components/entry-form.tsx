@@ -1,7 +1,7 @@
 // /components/entry-form.tsx
 "use client";
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
-import { Plus, Minus, X } from "lucide-react";
+import { Plus, Minus, X, Mic } from "lucide-react";
 import { debounce } from "@/lib/timing";
 import { formatCurrency, getLocalDateInputValue } from "@/lib/helpers";
 import {
@@ -38,6 +38,10 @@ import { debugLog, debugRender } from "@/lib/debugLoop";
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore";
 import { useSelectedPeriod } from "@/lib/stores/usePeriodSelectionStore";
 import { CUSTOM_POSITION_ID, CUSTOM_POSITION_TITLE, getRateOptions } from "@shared/hourlyRates";
+import { useSpeechCapture } from "@/hooks/useSpeechCapture";
+import { parseVoiceEntry, wakeVoiceEntry } from "@/lib/api/voiceEntryApi";
+import { planVoiceFill, voiceFieldsFor, type VoiceAmountField, type VoiceQuestion } from "@/lib/voiceEntryFill";
+import { useVoiceEntryStore } from "@/lib/stores/useVoiceEntryStore";
 function enforceHHMM(raw: string): string {
     const digits = raw.replace(/\D/g, "");
     if (digits.length === 1)
@@ -512,6 +516,178 @@ export default function EntryForm() {
           </p>) : null}
       </div>);
     };
+    /** ------------------------------------------------
+     * VOICE ENTRY — say the entry, check the filled form, tap Add entry.
+     * Only the typed-out words go to the server (lib/api/voiceEntryApi.ts);
+     * nothing is saved until the person taps Add entry themselves.
+     * ------------------------------------------------ */
+    const [voicePhase, setVoicePhase] = useState<"idle" | "thinking">("idle");
+    const [voiceQuestions, setVoiceQuestions] = useState<VoiceQuestion[]>([]);
+    const [voiceNotes, setVoiceNotes] = useState<string[]>([]);
+    const [voiceFilled, setVoiceFilled] = useState(false);
+    const voiceRunRef = useRef(0);
+    /** Puts one amount in its field. "add" keeps what's already there. */
+    const applyVoiceAmount = useCallback((prev: typeof form, field: VoiceAmountField, category: IncomeCategory | null, amount: number, mode: "set" | "add"): typeof form => {
+        const asText = (n: number) => String(Math.round(n * 100) / 100);
+        if ((PAYMENT_REPEAT_FIELDS as readonly string[]).includes(field)) {
+            const source = field as PaymentField;
+            const config = paymentCategoryConfig[source];
+            const total = (mode === "add" ? parseMoney(prev[source]) : 0) + amount;
+            const draft: BreakdownDraft = mode === "add" ? { ...prev.paymentBreakdowns[source], selected: [...prev.paymentBreakdowns[source].selected] } : emptyBreakdownDraft();
+            const allowed = getSplitCategories(source, tipsEnabledRef.current);
+            const target = category && allowed.includes(category) ? category : config.defaultCategory;
+            draft[target] = asText(parseMoney(draft[target]) + amount);
+            if (!draft.selected.includes(target))
+                draft.selected.push(target);
+            return {
+                ...prev,
+                [source]: asText(total),
+                paymentBreakdowns: { ...prev.paymentBreakdowns, [source]: draft },
+            };
+        }
+        const simple = field as "tips" | "reportedCash" | "unreportedCash" | "posTips" | "cashTips";
+        return { ...prev, [simple]: asText((mode === "add" ? parseMoney(prev[simple]) : 0) + amount) };
+    }, []);
+    /** Outlines the filled boxes for a moment so it's clear what changed. */
+    const flashVoiceFields = useCallback((ids: string[]) => {
+        window.setTimeout(() => {
+            for (const id of ids) {
+                const input = id.startsWith("[") ? document.querySelector<HTMLElement>(id) : document.getElementById(id);
+                const row = input?.parentElement;
+                if (!row)
+                    continue;
+                row.style.outline = "2px solid #2FA866";
+                row.style.outlineOffset = "-2px";
+                window.setTimeout(() => {
+                    row.style.outline = "";
+                    row.style.outlineOffset = "";
+                }, 2600);
+            }
+        }, 60);
+    }, []);
+    const handleVoiceTranscript = useCallback(async (transcript: string) => {
+        if (!visibility || !activeWorkspace)
+            return;
+        const run = ++voiceRunRef.current;
+        setVoicePhase("thinking");
+        setVoiceNotes([]);
+        setVoiceQuestions([]);
+        setVoiceFilled(false);
+        try {
+            const result = await parseVoiceEntry({
+                transcript,
+                today,
+                workspaceType: activeWorkspace.type,
+                fields: voiceFieldsFor(visibility, Boolean(tipsEnabled)),
+                positions: visibility.mode === "w2" && visibility.showRate
+                    ? rateOptions.filter((o) => o.id !== null).map((o) => ({ id: o.id as string, title: o.title }))
+                    : [],
+            });
+            if (run !== voiceRunRef.current)
+                return;
+            const plan = planVoiceFill(result, {
+                visibility,
+                tipsEnabled: Boolean(tipsEnabled),
+                dateBounds: dateInputBounds ? { start: dateInputBounds.start, end: dateInputBounds.end } : null,
+            });
+            const nothingFilled = !plan.date && !plan.hours && !plan.inOut && !plan.positionId && plan.amounts.length === 0 && plan.questions.length === 0 && !plan.notes;
+            if (!result.isEntry || nothingFilled) {
+                setVoiceNotes([...plan.skipped, "Didn't catch an entry in that. Try again, like \u201c270 today, 9 to 5.\u201d"]);
+                return;
+            }
+            const flash: string[] = [];
+            setForm((prev) => {
+                let next = { ...prev };
+                if (plan.date) {
+                    next.date = plan.date;
+                    flash.push("date");
+                }
+                if (plan.inOut) {
+                    next = { ...next, ...plan.inOut };
+                    flash.push('[aria-label="In time"]', '[aria-label="Out time"]');
+                }
+                if (plan.hours) {
+                    if (visibility.mode === "w2") {
+                        next.hours = plan.hours;
+                        flash.push("hours");
+                    }
+                    else {
+                        next.independentHours = plan.hours;
+                        flash.push("independentHours");
+                    }
+                }
+                if (plan.positionId && settings) {
+                    next = { ...next, ...resolvePositionRate(settings, plan.positionId, next.rate) };
+                    flash.push("position");
+                }
+                // Each field this reply fills starts fresh, then takes every amount said for it.
+                const touched = new Set<VoiceAmountField>();
+                for (const item of plan.amounts) {
+                    next = applyVoiceAmount(next, item.field, item.category, item.amount, touched.has(item.field) ? "add" : "set");
+                    touched.add(item.field);
+                }
+                for (const field of touched) {
+                    flash.push(field === "posTips" ? "posSales-tips"
+                        : field === "cashTips" ? "cashSales-tips"
+                            : field === "unreportedCash" && visibility.mode === "independent" ? "independentUnreportedCash"
+                                : field);
+                }
+                if (plan.notes) {
+                    next.notes = plan.notes;
+                    flash.push("notes");
+                }
+                return next;
+            });
+            setExpanded(true);
+            setVoiceQuestions(plan.questions);
+            setVoiceNotes(plan.skipped);
+            setVoiceFilled(true);
+            flashVoiceFields(flash);
+        }
+        catch (error) {
+            if (run !== voiceRunRef.current)
+                return;
+            console.warn("[VoiceEntry] fill failed", error);
+            setVoiceNotes(["Couldn't fill in the form just now. Try again or type it in."]);
+        }
+        finally {
+            if (run === voiceRunRef.current)
+                setVoicePhase("idle");
+        }
+    }, [visibility, activeWorkspace, today, tipsEnabled, rateOptions, dateInputBounds, settings, applyVoiceAmount, flashVoiceFields]);
+    const speech = useSpeechCapture((transcript) => void handleVoiceTranscript(transcript));
+    const startVoice = useCallback(() => {
+        wakeVoiceEntry();
+        setExpanded(true);
+        setVoiceNotes([]);
+        setVoiceQuestions([]);
+        setVoiceFilled(false);
+        speech.resetStatus();
+        void speech.start();
+    }, [speech]);
+    const answerVoiceQuestion = useCallback((question: VoiceQuestion, choice: { field: VoiceAmountField; category: IncomeCategory | null } | null) => {
+        if (choice) {
+            setForm((prev) => applyVoiceAmount(prev, choice.field, choice.category, question.amount, "add"));
+            flashVoiceFields([choice.field === "posTips" ? "posSales-tips"
+                    : choice.field === "cashTips" ? "cashSales-tips"
+                        : choice.field === "unreportedCash" && visibility?.mode === "independent" ? "independentUnreportedCash"
+                            : choice.field]);
+        }
+        setVoiceQuestions((prev) => prev.filter((q) => q.id !== question.id));
+    }, [applyVoiceAmount, flashVoiceFields, visibility]);
+    // A leave-work reminder for this workspace: open the form, and with
+    // "Say it" start listening right away.
+    const voiceRequest = useVoiceEntryStore((s) => s.request);
+    const clearVoiceRequest = useVoiceEntryStore((s) => s.clear);
+    useEffect(() => {
+        if (!voiceRequest || voiceRequest.workspaceId !== activeWorkspaceId || !visibility || !speech.checked)
+            return;
+        clearVoiceRequest(voiceRequest.nonce);
+        setExpanded(true);
+        window.setTimeout(() => document.querySelector('[data-tour="entry-form"]')?.scrollIntoView({ behavior: "smooth", block: "start" }), 150);
+        if (voiceRequest.listen && speech.supported)
+            startVoice();
+    }, [voiceRequest, activeWorkspaceId, visibility, speech.checked, speech.supported, clearVoiceRequest, startVoice]);
     /** A recurring rule can only carry one number with one category. `field`
      * is eligible only when: it (or, for "custom", the single custom income
      * row) has a positive amount; a payment field has at most one category
@@ -668,6 +844,9 @@ export default function EntryForm() {
     }, [settings]);
     const handleClearForm = useCallback(() => {
         setForm((prev) => buildClearedFormState(prev));
+        setVoiceFilled(false);
+        setVoiceQuestions([]);
+        setVoiceNotes([]);
         setOpenSources(new Set());
         setRepeatSourceField(null);
         setRepeatCadence({ freq: "monthly" });
@@ -932,6 +1111,9 @@ export default function EntryForm() {
             }
             /** Reset raw form fields */
             setForm((prev) => buildClearedFormState(prev));
+            setVoiceFilled(false);
+            setVoiceQuestions([]);
+            setVoiceNotes([]);
             setOpenSources(new Set());
             setExpanded(false);
             setRepeatSourceField(null);
@@ -974,6 +1156,8 @@ export default function EntryForm() {
             + (form.customIncome ?? []).reduce((sum, item) => sum + parseMoney(item.amount ?? ""), 0)
         : 0;
     const independentPersonalCash = visibility.mode === "independent" ? parseMoney(form.unreportedCash) : 0;
+    const voiceListening = speech.status === "listening";
+    const voiceBusy = voiceListening || voicePhase === "thinking";
     return (<Card className={`relative overflow-hidden rounded-[22px] shadow-none ${expanded ? "gap-5 py-5" : "gap-0 py-4"}`}>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 px-5">
         <button type="button" onClick={() => setExpanded((current) => !current)} disabled={submitting} className="flex min-w-0 flex-col items-start gap-0.5 text-left" aria-hidden="true" tabIndex={-1}>
@@ -981,13 +1165,63 @@ export default function EntryForm() {
           {!expanded ? (<span className="text-sm text-muted-foreground">Log income for any day</span>) : null}
         </button>
 
-        <Button type="button" variant={expanded ? "ghost" : "default"} size="icon" className="size-10 shrink-0 rounded-full" onClick={() => setExpanded((current) => !current)} aria-label={expanded ? "Collapse entry form" : "Expand entry form"} disabled={submitting}>
-          {expanded ? <Minus /> : <Plus />}
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          {speech.supported ? (<Button type="button" variant="secondary" size="icon" className="size-10 shrink-0 rounded-full" onClick={startVoice} aria-label="Say your entry" disabled={submitting || voiceBusy}>
+              <Mic />
+            </Button>) : null}
+          <Button type="button" variant={expanded ? "ghost" : "default"} size="icon" className="size-10 shrink-0 rounded-full" onClick={() => setExpanded((current) => !current)} aria-label={expanded ? "Collapse entry form" : "Expand entry form"} disabled={submitting}>
+            {expanded ? <Minus /> : <Plus />}
+          </Button>
+        </div>
       </CardHeader>
 
       {!expanded ? (<CardContent className="px-5 pt-0 pb-0"/>) : (<CardContent className="px-5">
         <form onSubmit={handleSubmit} className="space-y-4">
+          {voiceListening ? (<div className="space-y-3 rounded-2xl bg-muted px-4 py-3" aria-live="polite">
+              <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <span className="size-2.5 shrink-0 animate-pulse rounded-full bg-primary" aria-hidden="true"/>
+                Listening…
+              </div>
+              <p className="text-base text-foreground">
+                {speech.transcript || <span className="text-muted-foreground">Say it like “270 today, 9 to 5, 40 in tips.”</span>}
+              </p>
+              <div className="flex gap-2">
+                <Button type="button" size="sm" className="rounded-full" onClick={speech.done} disabled={!speech.transcript}>Done</Button>
+                <Button type="button" size="sm" variant="ghost" className="rounded-full" onClick={speech.cancel}>Cancel</Button>
+              </div>
+            </div>) : null}
+
+          {voicePhase === "thinking" ? (<p className="rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground" aria-live="polite">
+              Filling in the form…
+            </p>) : null}
+
+          {speech.status === "denied" ? (<p className="rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">
+              The mic is off for 521. Turn on Microphone and Speech Recognition in Settings › 521, or type your entry below.
+            </p>) : null}
+          {speech.status === "error" ? (<p className="rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">
+              Couldn&apos;t hear that. Tap the mic to try again, or type your entry below.
+            </p>) : null}
+
+          {voiceFilled && !voiceBusy ? (<p className="rounded-2xl bg-muted px-4 py-3 text-sm text-foreground">
+              Filled in from what you said. Check it, then tap Add entry.
+            </p>) : null}
+
+          {voiceQuestions.map((question) => (<div key={question.id} className="space-y-2 rounded-2xl bg-muted px-4 py-3">
+              <p className="text-sm font-medium text-foreground">
+                {question.isTips ? "Where do the" : "Where does"} {formatCurrency(question.amount)}{question.isTips ? " in tips go?" : " go?"}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {question.options.map((option) => (<button key={`${option.field}-${option.category ?? ""}`} type="button" onClick={() => answerVoiceQuestion(question, option)} className="rounded-full bg-card px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-secondary">
+                    {option.label}
+                  </button>))}
+                <button type="button" onClick={() => answerVoiceQuestion(question, null)} className="rounded-full px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-secondary">
+                  {visibility.mode === "w2" && !question.isTips ? "Skip, it's my pay" : "Skip"}
+                </button>
+              </div>
+            </div>))}
+
+          {voiceNotes.map((note) => (<p key={note} className="px-1 text-sm text-muted-foreground">{note}</p>))}
+
           {submitting ? (<p className="text-sm text-muted-foreground">
               Adding your entry and syncing in the background...
             </p>) : null}

@@ -83,6 +83,7 @@ export {
   getAppBootstrap,
   submitSupportReport,
   logClientFailure,
+  parseVoiceEntry,
   requestAccountDeletion,
   cancelAccountDeletionRequest,
   createPlaidLinkToken,

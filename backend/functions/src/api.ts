@@ -647,6 +647,26 @@ export const submitSupportReport = withCorsAuth(async (req, res) => {
   await submitSupportReportHandler(req, res)
 })
 
+// Voice entry: turns what someone said into Add entry form fields
+// (routes/parseVoiceEntry.ts). Saves nothing. Claude key for the parse;
+// maxInstances caps what a flood of requests can cost.
+export const parseVoiceEntry = withCorsAuth(
+  async (req, res) => {
+    const { parseVoiceEntryHandler } = await import("./routes/parseVoiceEntry.js")
+    await parseVoiceEntryHandler(req, res)
+  },
+  true,
+  {
+    secrets: [SECRETS.ANTHROPIC_API_KEY],
+    maxInstances: 10,
+    // The app wakes this when the mic opens, so the reply isn't slowed by
+    // loading the route while the person waits.
+    warmUp: async () => {
+      await import("./routes/parseVoiceEntry.js")
+    },
+  }
+)
+
 // Failure notes from the app (see routes/logClientFailure.ts). Signing in is
 // optional because a broken sign-in can be the failure being reported;
 // maxInstances caps what a flood of notes can cost.

@@ -13,6 +13,7 @@
     "test:sync": "node ../scripts/test-sync.cjs"
   },
   "dependencies": {
+    "@capacitor-community/speech-recognition": "7.0.1",
     "@capacitor-community/sqlite": "^7.0.2",
     "@capacitor/android": "^7.4.4",
     "@capacitor/app": "^7.1.0",

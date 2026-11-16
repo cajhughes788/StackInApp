@@ -29,10 +29,40 @@ public class NativeGeofencePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManage
   private var alwaysPromptTimeout: DispatchWorkItem?
   private var lifecycleObservers: [NSObjectProtocol] = []
 
+  // The reminder's "Say it" button. The app reads the action id in
+  // useNotificationWorkspaceOpen.ts and opens that workspace's Add entry form
+  // with the mic listening.
+  static let entryReminderCategory = "ENTRY_REMINDER"
+  static let sayItActionId = "say-it"
+
   override public func load() {
     manager.delegate = self
     manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+    registerReminderActions()
     NSLog("[NativeGeofencePlugin] load complete")
+  }
+
+  // Adds the reminder's button set, keeping any others already registered
+  // (setNotificationCategories replaces the whole list).
+  private func registerReminderActions() {
+    let sayIt = UNNotificationAction(
+      identifier: NativeGeofencePlugin.sayItActionId,
+      title: "Say it",
+      options: [.foreground],
+      icon: UNNotificationActionIcon(systemImageName: "mic.fill")
+    )
+    let category = UNNotificationCategory(
+      identifier: NativeGeofencePlugin.entryReminderCategory,
+      actions: [sayIt],
+      intentIdentifiers: [],
+      options: []
+    )
+    let center = UNUserNotificationCenter.current()
+    center.getNotificationCategories { existing in
+      var categories = existing.filter { $0.identifier != NativeGeofencePlugin.entryReminderCategory }
+      categories.insert(category)
+      center.setNotificationCategories(categories)
+    }
   }
 
   // Asks for notifications, then location ("While Using", then "Always"),
@@ -490,8 +520,9 @@ public class NativeGeofencePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManage
       content.title = trigger == "leave"
         ? "You have left \(reminderLabel)"
         : "You have arrived at \(reminderLabel)"
-      content.body = "Add your entry for today for your \(workspaceName) workspace"
+      content.body = "Add your entry for today for your \(workspaceName) workspace. Press and hold to say it."
       content.sound = .default
+      content.categoryIdentifier = NativeGeofencePlugin.entryReminderCategory
       content.userInfo = [
         "workspaceId": workspaceId,
         "reminderId": (geofence["reminderId"] as? String) ?? "",
