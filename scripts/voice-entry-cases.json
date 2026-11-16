@@ -1,0 +1,62 @@
+{
+  "_about": "Real-style sentences for voice entry, scored by scripts/eval-voice-entry.cjs. Today is fixed at 2026-11-16 (a Monday). Fields left out of 'expect' must come back null; 'amounts' must match exactly (a list in 'target' means any of those is fine). Add a case whenever someone's real sentence fills the form wrong.",
+  "today": "2026-11-16",
+  "forms": {
+    "w2_inout": {
+      "workspaceType": "w2",
+      "fields": ["cardTips", "reportedCash"],
+      "positions": [
+        { "id": "pos_bar", "title": "Bartender" },
+        { "id": "pos_server", "title": "Server" }
+      ]
+    },
+    "w2_plain": { "workspaceType": "w2", "fields": [], "positions": [] },
+    "indie": { "workspaceType": "independent", "fields": ["venmo", "posSales", "cashSales", "posTips", "cashTips"] },
+    "indie_all": {
+      "workspaceType": "independent",
+      "fields": ["venmo", "appleCash", "zelle", "checks", "cashApp", "posSales", "cashSales", "posTips", "cashTips", "personalCash"]
+    }
+  },
+  "cases": [
+    { "form": "w2_inout", "say": "made 270 today, worked 9 to 5", "expect": { "inTime": "09:00", "outTime": "17:00", "amounts": [{ "target": "unsure", "amount": 270 }] } },
+    { "form": "w2_inout", "say": "9 to 5, 40 in card tips", "expect": { "inTime": "09:00", "outTime": "17:00", "amounts": [{ "target": "cardTips", "amount": 40 }] } },
+    { "form": "w2_inout", "say": "worked the bar yesterday 4 to midnight, 85 in credit card tips and 30 cash", "expect": { "date": "2026-11-15", "inTime": "16:00", "outTime": "00:00", "positionId": "pos_bar", "amounts": [{ "target": "cardTips", "amount": 85 }, { "target": ["reportedCash", "unsure", "tipsUnsure"], "amount": 30 }] } },
+    { "form": "w2_inout", "say": "clocked in at 10:30 and out at 6:15, server shift", "expect": { "inTime": "10:30", "outTime": "18:15", "positionId": "pos_server" } },
+    { "form": "w2_inout", "say": "eleven to seven, sixty two dollars in tips", "expect": { "inTime": "11:00", "outTime": "19:00", "amounts": [{ "target": "tipsUnsure", "amount": 62 }] } },
+    { "form": "w2_inout", "say": "last Friday 5pm to 1am bartending, 140 card tips", "expect": { "date": "2026-11-13", "inTime": "17:00", "outTime": "01:00", "positionId": "pos_bar", "amounts": [{ "target": "cardTips", "amount": 140 }] } },
+    { "form": "w2_inout", "say": "worked 8 hours", "expect": { "hours": 8 } },
+    { "form": "w2_inout", "say": "nine to five thirty", "expect": { "inTime": "09:00", "outTime": "17:30" } },
+    { "form": "w2_inout", "say": "7am to 3pm 25 card tips", "expect": { "inTime": "07:00", "outTime": "15:00", "amounts": [{ "target": "cardTips", "amount": 25 }] } },
+    { "form": "w2_inout", "say": "midnight to 8", "expect": { "inTime": "00:00", "outTime": "08:00" } },
+    { "form": "w2_plain", "say": "worked eight and a half hours today", "expect": { "hours": 8.5 } },
+    { "form": "w2_plain", "say": "made 270 today 9 to 5", "expect": { "inTime": "09:00", "outTime": "17:00", "amounts": [{ "target": "unsure", "amount": 270 }] } },
+    { "form": "w2_plain", "say": "6 hours yesterday", "expect": { "date": "2026-11-15", "hours": 6 } },
+    { "form": "indie", "say": "made 270 today", "expect": { "amounts": [{ "target": "unsure", "amount": 270 }] } },
+    { "form": "indie", "say": "200 cash and 40 in cash tips", "expect": { "amounts": [{ "target": "cashSales", "amount": 200 }, { "target": "cashTips", "amount": 40 }] } },
+    { "form": "indie", "say": "Venmo 60, and 15 of it was tips", "hard": true, "expect": { "amounts": [{ "target": "venmo", "category": null, "amount": 45 }, { "target": "venmo", "category": "tips", "amount": 15 }] } },
+    { "form": "indie", "say": "card sales 350, card tips 62", "expect": { "amounts": [{ "target": "posSales", "amount": 350 }, { "target": "posTips", "amount": 62 }] } },
+    { "form": "indie", "say": "two seventy in cash", "expect": { "amounts": [{ "target": "cashSales", "amount": 270 }] } },
+    { "form": "indie", "say": "four fifty on Square plus eighty in tips on the card", "expect": { "amounts": [{ "target": "posSales", "amount": 450 }, { "target": "posTips", "amount": 80 }] } },
+    { "form": "indie", "say": "1.2k card, 300 cash", "expect": { "amounts": [{ "target": "posSales", "amount": 1200 }, { "target": "cashSales", "amount": 300 }] } },
+    { "form": "indie", "say": "got 40 in tips", "expect": { "amounts": [{ "target": "tipsUnsure", "amount": 40 }] } },
+    { "form": "indie", "say": "Venmo 85 for a color touch up with Jessica", "expect": { "amounts": [{ "target": "venmo", "category": ["services", null], "amount": 85 }] } },
+    { "form": "indie", "say": "worked 6 hours, 320 card and 45 cash tips", "expect": { "hours": 6, "amounts": [{ "target": "posSales", "amount": 320 }, { "target": "cashTips", "amount": 45 }] } },
+    { "form": "indie", "say": "yesterday 180 cash", "expect": { "date": "2026-11-15", "amounts": [{ "target": "cashSales", "amount": 180 }] } },
+    { "form": "indie", "say": "Saturday I made 500 on card", "expect": { "date": "2026-11-14", "amounts": [{ "target": "posSales", "amount": 500 }] } },
+    { "form": "indie", "say": "Zelle 100", "expect": { "amounts": [{ "target": "unsure", "amount": 100 }] } },
+    { "form": "indie", "say": "made two hundred seventy dollars and fifty cents cash", "expect": { "amounts": [{ "target": "cashSales", "amount": 270.5 }] } },
+    { "form": "indie", "say": "$1,050 on card", "expect": { "amounts": [{ "target": "posSales", "amount": 1050 }] } },
+    { "form": "indie", "say": "the day before yesterday 250 cash", "expect": { "date": "2026-11-14", "amounts": [{ "target": "cashSales", "amount": 250 }] } },
+    { "form": "indie_all", "say": "Zelle 100 and a check for 250", "expect": { "amounts": [{ "target": "zelle", "amount": 100 }, { "target": "checks", "amount": 250 }] } },
+    { "form": "indie_all", "say": "Cash App 75, Apple Pay 40", "expect": { "amounts": [{ "target": "cashApp", "amount": 75 }, { "target": "appleCash", "amount": 40 }] } },
+    { "form": "indie_all", "say": "60 personal cash I'm not reporting", "expect": { "amounts": [{ "target": "personalCash", "amount": 60 }] } },
+    { "form": "indie_all", "say": "120 in Venmo tips", "expect": { "amounts": [{ "target": "venmo", "category": "tips", "amount": 120 }] } },
+    { "form": "indie_all", "say": "sold 35 in products on Venmo", "expect": { "amounts": [{ "target": "venmo", "category": "products", "amount": 35 }] } },
+    { "form": "indie_all", "say": "forty bucks cash tips and 210 cash", "expect": { "amounts": [{ "target": "cashTips", "amount": 40 }, { "target": "cashSales", "amount": 210 }] } },
+    { "form": "indie_all", "say": "Apple Cash 95", "expect": { "amounts": [{ "target": "appleCash", "amount": 95 }] } },
+    { "form": "indie", "say": "what's my profit this month", "expect": { "isEntry": false } },
+    { "form": "indie", "say": "remind me to call the landlord", "expect": { "isEntry": false } },
+    { "form": "indie", "say": "um", "expect": { "isEntry": false } },
+    { "form": "indie", "say": "how much did I make last week", "expect": { "isEntry": false } }
+  ]
+}

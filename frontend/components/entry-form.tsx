@@ -40,7 +40,7 @@ import { useSelectedPeriod } from "@/lib/stores/usePeriodSelectionStore";
 import { CUSTOM_POSITION_ID, CUSTOM_POSITION_TITLE, getRateOptions } from "@shared/hourlyRates";
 import { useSpeechCapture } from "@/hooks/useSpeechCapture";
 import { parseVoiceEntry, wakeVoiceEntry } from "@/lib/api/voiceEntryApi";
-import { planVoiceFill, voiceFieldsFor, type VoiceAmountField, type VoiceQuestion } from "@/lib/voiceEntryFill";
+import { planVoiceFill, voiceFieldsFor, voiceHintsFor, type VoiceAmountField, type VoiceQuestion } from "@/lib/voiceEntryFill";
 import { useVoiceEntryStore } from "@/lib/stores/useVoiceEntryStore";
 function enforceHHMM(raw: string): string {
     const digits = raw.replace(/\D/g, "");
@@ -525,6 +525,8 @@ export default function EntryForm() {
     const [voiceQuestions, setVoiceQuestions] = useState<VoiceQuestion[]>([]);
     const [voiceNotes, setVoiceNotes] = useState<string[]>([]);
     const [voiceFilled, setVoiceFilled] = useState(false);
+    // The words the phone heard, shown with the filled form so a mishearing is easy to spot.
+    const [voiceHeard, setVoiceHeard] = useState("");
     const voiceRunRef = useRef(0);
     /** Puts one amount in its field. "add" keeps what's already there. */
     const applyVoiceAmount = useCallback((prev: typeof form, field: VoiceAmountField, category: IncomeCategory | null, amount: number, mode: "set" | "add"): typeof form => {
@@ -570,6 +572,7 @@ export default function EntryForm() {
             return;
         const run = ++voiceRunRef.current;
         setVoicePhase("thinking");
+        setVoiceHeard(transcript);
         setVoiceNotes([]);
         setVoiceQuestions([]);
         setVoiceFilled(false);
@@ -643,6 +646,7 @@ export default function EntryForm() {
             setVoiceNotes(plan.skipped);
             setVoiceFilled(true);
             flashVoiceFields(flash);
+            window.setTimeout(() => document.getElementById("voice-entry-note")?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
         }
         catch (error) {
             if (run !== voiceRunRef.current)
@@ -663,8 +667,10 @@ export default function EntryForm() {
         setVoiceQuestions([]);
         setVoiceFilled(false);
         speech.resetStatus();
-        void speech.start();
-    }, [speech]);
+        void speech.start(visibility
+            ? voiceHintsFor(visibility, Boolean(tipsEnabled), visibility.mode === "w2" ? rateOptions.filter((o) => o.id !== null).map((o) => o.title) : [])
+            : []);
+    }, [speech, visibility, tipsEnabled, rateOptions]);
     const answerVoiceQuestion = useCallback((question: VoiceQuestion, choice: { field: VoiceAmountField; category: IncomeCategory | null } | null) => {
         if (choice) {
             setForm((prev) => applyVoiceAmount(prev, choice.field, choice.category, question.amount, "add"));
@@ -847,6 +853,7 @@ export default function EntryForm() {
         setVoiceFilled(false);
         setVoiceQuestions([]);
         setVoiceNotes([]);
+        setVoiceHeard("");
         setOpenSources(new Set());
         setRepeatSourceField(null);
         setRepeatCadence({ freq: "monthly" });
@@ -859,6 +866,13 @@ export default function EntryForm() {
         e.preventDefault();
         if (submitting || !settings || !visibility || !activeWorkspace)
             return;
+        // An amount voice heard but hasn't placed yet isn't in any box, so the
+        // form's own checks can't see it. Don't save without it.
+        if (voiceQuestions.length > 0) {
+            setVoiceNotes(["Pick where each amount goes above, or tap Skip, then add the entry."]);
+            document.getElementById(`voice-question-${voiceQuestions[0].id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+            return;
+        }
         submitTraceRef.current = createProfileTrace("entry_create", {
             workspaceId: activeWorkspaceId ?? "unknown",
             workspaceType: activeWorkspace.type,
@@ -1114,6 +1128,7 @@ export default function EntryForm() {
             setVoiceFilled(false);
             setVoiceQuestions([]);
             setVoiceNotes([]);
+            setVoiceHeard("");
             setOpenSources(new Set());
             setExpanded(false);
             setRepeatSourceField(null);
@@ -1135,7 +1150,7 @@ export default function EntryForm() {
             submitTraceRef.current?.mark("entry_create.complete");
             setSubmitting(false);
         }
-    }, [form, submitting, visibility, settings, activeWorkspace, activeWorkspaceId, repeatSourceField, repeatCadence, repeatEndDate, getRecurringIneligibilityReason, buildClearedFormState, rateOptions]);
+    }, [form, submitting, visibility, settings, activeWorkspace, activeWorkspaceId, repeatSourceField, repeatCadence, repeatEndDate, getRecurringIneligibilityReason, buildClearedFormState, rateOptions, voiceQuestions]);
     /** ------------------------------------------------
      * FORM UI
      * ------------------------------------------------ */
@@ -1202,11 +1217,9 @@ export default function EntryForm() {
               Couldn&apos;t hear that. Tap the mic to try again, or type your entry below.
             </p>) : null}
 
-          {voiceFilled && !voiceBusy ? (<p className="rounded-2xl bg-muted px-4 py-3 text-sm text-foreground">
-              Filled in from what you said. Check it, then tap Add entry.
-            </p>) : null}
+          {voiceHeard && !voiceFilled && !voiceListening ? (<p className="px-1 text-sm text-muted-foreground">Heard: “{voiceHeard}”</p>) : null}
 
-          {voiceQuestions.map((question) => (<div key={question.id} className="space-y-2 rounded-2xl bg-muted px-4 py-3">
+          {voiceQuestions.map((question) => (<div key={question.id} id={`voice-question-${question.id}`} className="space-y-2 rounded-2xl bg-muted px-4 py-3">
               <p className="text-sm font-medium text-foreground">
                 {question.isTips ? "Where do the" : "Where does"} {formatCurrency(question.amount)}{question.isTips ? " in tips go?" : " go?"}
               </p>
@@ -1221,6 +1234,18 @@ export default function EntryForm() {
             </div>))}
 
           {voiceNotes.map((note) => (<p key={note} className="px-1 text-sm text-muted-foreground">{note}</p>))}
+
+          {voiceFilled && !voiceBusy ? (<div id="voice-entry-note" className="space-y-3 rounded-2xl bg-muted px-4 py-3">
+              {voiceHeard ? (<p className="text-sm text-muted-foreground">Heard: “{voiceHeard}”</p>) : null}
+              <p className="text-sm text-foreground">
+                {voiceQuestions.length > 0
+                    ? "Filled in from what you said. Pick where each amount goes above, then check the form."
+                    : "Filled in from what you said. Check the form, then add it."}
+              </p>
+              <Button type="submit" disabled={submitting || voiceQuestions.length > 0} className="h-12 w-full rounded-2xl text-base font-semibold">
+                {submitting ? "Saving..." : repeatSourceField ? "Add recurring income" : "Add entry"}
+              </Button>
+            </div>) : null}
 
           {submitting ? (<p className="text-sm text-muted-foreground">
               Adding your entry and syncing in the background...

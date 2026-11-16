@@ -126,13 +126,28 @@ const EMPTY_RESULT: VoiceEntryResult = {
   notes: null,
 }
 
+// "adaptive" lets the model think briefly; "off" skips thinking for speed.
+// scripts/eval-voice-entry.cjs measures both against real sentences — change
+// this only when its pass rate holds.
+export type VoiceThinking = "adaptive" | "off"
+const THINKING: VoiceThinking = "adaptive"
+
 export async function parseVoiceEntry(request: VoiceEntryRequest): Promise<VoiceEntryResult> {
-  const anthropic = getClient()
+  return parseVoiceEntryWith(getClient(), request, THINKING)
+}
+
+// The same parse with a given client — the eval script uses this with its own key.
+export async function parseVoiceEntryWith(
+  anthropic: Anthropic,
+  request: VoiceEntryRequest,
+  thinking: VoiceThinking = THINKING
+): Promise<VoiceEntryResult> {
   let response: Anthropic.Message
   try {
     response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 2048,
+      ...(thinking === "off" ? { thinking: { type: "disabled" as const } } : {}),
       output_config: { effort: "low", format: { type: "json_schema", schema: OUTPUT_SCHEMA } },
       system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: buildUserContent(request) }],

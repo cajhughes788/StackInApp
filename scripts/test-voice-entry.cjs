@@ -21,7 +21,7 @@ Module._resolveFilename = function (request, ...rest) {
 };
 
 const assert = require("node:assert/strict");
-const { planVoiceFill, voiceFieldsFor, toTwelveHour, hoursBetween } = require("../frontend/lib/voiceEntryFill.ts");
+const { planVoiceFill, voiceFieldsFor, voiceHintsFor, toTwelveHour, hoursBetween } = require("../frontend/lib/voiceEntryFill.ts");
 const { VoiceEntryResultSchema, VoiceEntryRequestSchema } = require("../shared/voiceEntry.ts");
 
 let failures = 0;
@@ -188,6 +188,15 @@ test("server fields list follows the form", () => {
   assert.deepEqual(voiceFieldsFor(w2InOut, false), ["cardTips", "reportedCash"]);
   assert.deepEqual(voiceFieldsFor(indie, true), ["venmo", "posSales", "cashSales", "posTips", "cashTips"]);
   assert.deepEqual(voiceFieldsFor(indieCashOnly, false), ["cashSales"]);
+});
+
+test("word hints follow the form and include position names", () => {
+  const w2 = voiceHintsFor(w2InOut, false, ["Bartender"]);
+  assert.ok(w2.includes("card tips") && w2.includes("reported cash") && w2.includes("Bartender"));
+  assert.ok(!w2.includes("Venmo"));
+  const shop = voiceHintsFor(indie, true);
+  assert.ok(shop.includes("Venmo") && shop.includes("Square") && shop.includes("cash tips"));
+  assert.ok(!shop.includes("Zelle"));
 });
 
 test("reply and request shapes", () => {

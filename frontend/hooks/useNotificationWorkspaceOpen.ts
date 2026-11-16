@@ -8,6 +8,7 @@ import { LocalNotifications } from "@capacitor/local-notifications"
 import { debugError, debugLog } from "@/lib/debugLoop"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import { useVoiceEntryStore } from "@/lib/stores/useVoiceEntryStore"
+import { wakeVoiceEntry } from "@/lib/api/voiceEntryApi"
 
 type PendingWorkspaceOpen = {
   workspaceId: string
@@ -94,6 +95,7 @@ export function useNotificationWorkspaceOpen(status: string) {
             setPendingTarget(target)
             // Open that workspace's Add entry form; "Say it" also starts the mic.
             if (target.kind === ENTRY_REMINDER_KIND) {
+              wakeVoiceEntry()
               const actionId = (event as { actionId?: unknown }).actionId
               useVoiceEntryStore.getState().ask(target.workspaceId, actionId === SAY_IT_ACTION)
             }

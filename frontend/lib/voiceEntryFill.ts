@@ -240,3 +240,34 @@ export function planVoiceFill(result: VoiceEntryResult, ctx: VoiceFillContext): 
 
   return { date, hours, inOut, positionId, amounts: [...placed.values()], questions, notes, skipped }
 }
+
+/** Words for the phone's speech recognition to listen for on this form, so
+ * payment names and the person's own position titles are heard right. */
+export function voiceHintsFor(visibility: EntryFormVisibility, tipsEnabled: boolean, positionTitles: string[] = []): string[] {
+  const hints = new Set<string>(["tips", "hours", "today", "yesterday"])
+  if (visibility.mode === "w2") {
+    if (visibility.showTips) hints.add("card tips").add("credit card tips")
+    if (visibility.showReportedCash) hints.add("reported cash").add("cash tips")
+    if (visibility.showUnreportedCash) hints.add("personal cash")
+    if (visibility.showInOutTimes) hints.add("clocked in").add("clocked out")
+  } else {
+    const names: Record<VoiceSourceField, string[]> = {
+      venmo: ["Venmo"],
+      appleCash: ["Apple Pay", "Apple Cash"],
+      zelle: ["Zelle"],
+      checks: ["check", "checks"],
+      cashApp: ["Cash App"],
+      posSales: ["card", "Square", "Clover", "POS"],
+      cashSales: ["cash"],
+    }
+    for (const field of VOICE_SOURCE_FIELDS) {
+      if (sourceShown(visibility, field)) names[field].forEach((name) => hints.add(name))
+    }
+    if (tipsEnabled) hints.add("card tips").add("cash tips")
+    if (visibility.showIndependentUnreportedCash) hints.add("personal cash")
+  }
+  for (const title of positionTitles) {
+    if (title.trim()) hints.add(title.trim())
+  }
+  return [...hints].slice(0, 100)
+}
