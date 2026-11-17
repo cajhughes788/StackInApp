@@ -7,6 +7,27 @@ import {
   type VoiceEntryResult,
 } from "@shared/voiceEntry"
 import { ANTHROPIC_API_KEY } from "../secrets"
+import { db } from "../admin"
+import { TooManyRequestsError } from "../lib/httpErrors"
+
+// Most voice fill-ins one person can use a day (UTC). Normal use is 1–3; this
+// caps what Claude can cost if the feature is misused.
+export const MAX_VOICE_FILLS_PER_DAY = 50
+
+// Counts one fill-in for this person, before Claude is asked. Server only:
+// the app can't read or write users/{uid}/counters (firestore.rules).
+export async function reserveVoiceFill(uid: string): Promise<void> {
+  const ref = db.collection("users").doc(uid).collection("counters").doc("voiceEntry")
+  const today = new Date().toISOString().slice(0, 10)
+  await db.runTransaction(async (txn) => {
+    const snap = await txn.get(ref)
+    const count = snap.data()?.date === today ? Number(snap.data()?.count ?? 0) : 0
+    if (count >= MAX_VOICE_FILLS_PER_DAY) {
+      throw new TooManyRequestsError("You've used voice a lot today. Type this one in, and voice is back tomorrow.")
+    }
+    txn.set(ref, { date: today, count: count + 1 }, { merge: true })
+  })
+}
 
 // Turns a spoken entry ("made 270 today, 9 to 5, 40 in tips") into Add entry
 // form fields. Only the typed-out words reach this server — never the audio,

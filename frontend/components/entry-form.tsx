@@ -652,7 +652,9 @@ export default function EntryForm() {
             if (run !== voiceRunRef.current)
                 return;
             console.warn("[VoiceEntry] fill failed", error);
-            setVoiceNotes(["Couldn't fill in the form just now. Try again or type it in."]);
+            // 429 = today's voice limit (server message says so); anything else is a plain failure.
+            const limited = (error as { status?: number })?.status === 429;
+            setVoiceNotes([limited && error instanceof Error ? error.message : "Couldn't fill in the form just now. Try again or type it in."]);
         }
         finally {
             if (run === voiceRunRef.current)
