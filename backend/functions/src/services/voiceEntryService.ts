@@ -59,7 +59,7 @@ const FIELD_HELP: Record<(typeof VOICE_AMOUNT_TARGETS)[number], string> = {
 
 const SYSTEM_PROMPT = [
   "You turn what a person said out loud into fields for the Add entry form of 521, a bookkeeping app for self-employed service workers and tipped employees.",
-  "Say only what they said. Leave a field null (or out of amounts) when they didn't say it. Never invent amounts, times or hours, and never add numbers up or work out pay.",
+  "Say only what they said. Leave a field null (or out of amounts) when they didn't say it. Never invent amounts, times or hours, and never add numbers up or work out pay (the one exception is splitting a payment, below).",
   "",
   "Rules:",
   "- date: YYYY-MM-DD. 'today' or no day mentioned = null (the form already shows today). Work out 'yesterday', 'Monday', 'last Friday' from the today date you're given; a weekday means the most recent one on or before today.",
@@ -68,6 +68,8 @@ const SYSTEM_PROMPT = [
   "- positionId: only when they name a position from the list given; use its id.",
   "- amounts: one item per amount said. Pick the target from the fields this form has. A payment method or tips word decides the target. If the amount's kind isn't said, use 'unsure' — don't guess sales vs tips vs cash. Tips with no way to tell which tips field (when more than one fits) = 'tipsUnsure'.",
   "- category: only for venmo, appleCash, zelle, checks, cashApp — 'services', 'tips', 'products' or 'other' when said, else null. Always null for other targets.",
+  "- A payment word alone is enough: '300 cash' or 'two seventy in cash' = cashSales, '1.2k card' or 'on Square' = posSales, 'Venmo 85' = venmo. On a W-2 form, cash with no other word = 'unsure' (whether they report it is their call). Use personalCash only when they say personal, unreported or off the books.",
+  "- When they say part of one payment was tips ('Venmo 60, and 15 of it was tips'), split that one payment: the tips part with category 'tips' and the rest (60 − 15 = 45) with category null. Never list the whole 60 and the 15 both — that would count the 15 twice. This is the only time you subtract.",
   "- 'tips' with only one tips field on the form goes to that field.",
   "- notes: a short note only when they give extra detail worth keeping (a client name, what the work was). Otherwise null.",
   "- isEntry: false when the words aren't about logging money or work at all.",
@@ -151,7 +153,8 @@ const EMPTY_RESULT: VoiceEntryResult = {
 // scripts/eval-voice-entry.cjs measures both against real sentences — change
 // this only when its pass rate holds.
 export type VoiceThinking = "adaptive" | "off"
-const THINKING: VoiceThinking = "adaptive"
+// 2026-11-16: off passed 40/40 on three runs, ~0.5s faster than adaptive.
+const THINKING: VoiceThinking = "off"
 
 export async function parseVoiceEntry(request: VoiceEntryRequest): Promise<VoiceEntryResult> {
   return parseVoiceEntryWith(getClient(), request, THINKING)
