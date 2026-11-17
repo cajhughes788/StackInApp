@@ -1,0 +1,737 @@
+{
+  "_about": "Real-style sentences for voice on the invoice/quote form, scored by scripts/eval-voice-invoice.cjs. Today is fixed at 2026-11-16 (a Monday). Fields left out of 'expect' must come back null (lines null = unchanged). 'lines' must match in order: quantity, rate, category (a list = any of those), and 'desc' must appear in the description (ignoring case). Names and emails compare ignoring case; phones by digits. 'noteHas' must appear in the note. Add a case whenever someone's real sentence fills the form wrong. A first name alone may come back as said; the app matches it to saved clients (frontend/lib/voiceInvoiceFill.ts).",
+  "today": "2026-11-16",
+  "clients": [
+    "Jenna Morales",
+    "Jenna Smith",
+    "Bright Smiles Dental",
+    "Marcus Lee",
+    "Olivia Chen"
+  ],
+  "cases": [
+    {
+      "document": "invoice",
+      "say": "Invoice Jenna Morales 120 for a cut and color and 40 for a gloss treatment, due Friday",
+      "expect": {
+        "clientName": "Jenna Morales",
+        "lines": [
+          {
+            "quantity": 1,
+            "rate": 120,
+            "category": "services",
+            "desc": "cut"
+          },
+          {
+            "quantity": 1,
+            "rate": 40,
+            "category": "services",
+            "desc": "gloss"
+          }
+        ],
+        "dueDate": "2026-11-20"
+      }
+    },
+    {
+      "document": "invoice",
+      "say": "Invoice Marcus 3 hours at 45 for drywall repair, net 15",
+      "expect": {
+        "clientName": [
+          "Marcus Lee",
+          "Marcus"
+        ],
+        "lines": [
+          {
+            "quantity": 3,
+            "rate": 45,
+            "category": "services",
+            "desc": "drywall"
+          }
+        ],
+        "dueTerms": "net_15"
+      }
+    },
+    {
+      "document": "invoice",
+      "say": "Bill Olivia 2 haircuts, 60 total",
+      "expect": {
+        "clientName": [
+          "Olivia Chen",
+          "Olivia"
+        ],
+        "lines": [
+          {
+            "quantity": 1,
+            "rate": 60,
+            "category": "services",
+            "desc": "2 haircuts"
+          }
+        ]
+      }
+    },
+    {
+      "document": "invoice",
+      "say": "Invoice Jenna 85 for a blowout",
+      "expect": {
+        "clientName": "Jenna",
+        "lines": [
+          {
+            "quantity": 1,
+            "rate": 85,
+            "category": "services",
+            "desc": "blowout"
+          }
+        ]
+      }
+    },
+    {
+      "document": "invoice",
+      "say": "Invoice Bright Smiles Dental 1250 for the logo design due on receipt",
+      "expect": {
+        "clientName": "Bright Smiles Dental",
+        "lines": [
+          {
+            "quantity": 1,
+            "rate": 1250,
+            "category": "services",
+            "desc": "logo"
+          }
+        ],
+        "dueTerms": "due_on_receipt"
+      }
+    },
+    {
+      "document": "invoice",
+      "say": "Invoice Priya Patel 200 for a deep clean, her email is priya at gmail dot com",
+      "expect": {
+        "clientName": "Priya Patel",
+        "clientEmail": "priya@gmail.com",
+        "lines": [
+          {
+            "quantity": 1,
+            "rate": 200,
+            "category": "services",
+            "desc": "clean"
+          }
+        ]
+      }
+    },
+    {
+      "document": "invoice",
+      "say": "Invoice Tom Baker 350 for a photo session and 3 prints at 25 each",
+      "expect": {
+        "clientName": "Tom Baker",
+        "lines": [
+          {
+            "quantity": 1,
+            "rate": 350,
+            "category": "services",
+            "desc": "session"
+          },
+          {
+            "quantity": 3,
+            "rate": 25,
+            "category": "products",
+            "desc": "print"
+          }
+        ]
+      }
+    },
+    {
+      "document": "invoice",
+      "say": "Invoice Marcus 180 for a fence repair and 45 for materials, due in 30 days",
+      "expect": {
+        "clientName": [
+          "Marcus Lee",
+          "Marcus"
+        ],
+        "lines": [
+          {
+            "quantity": 1,
+            "rate": 180,
+            "category": "services",
+            "desc": "fence"
+          },
+          {
+            "quantity": 1,
+            "rate": 45,
+            "category": [
+              "products",
+              "other"
+            ],
+            "desc": "material"
+          }
+        ],
+        "dueTerms": "net_30"
+      }
+    },
+    {
+      "document": "invoice",
+      "say": "Invoice Olivia 95 for a facial plus a 20 dollar tip",
+      "expect": {
+        "clientName": [
+          "Olivia Chen",
+          "Olivia"
+        ],
+        "lines": [
+          {
+            "quantity": 1,
+            "rate": 95,
+            "category": "services",
+            "desc": "facial"
+          },
+          {
+            "quantity": 1,
+            "rate": 20,
+            "category": "tips"
+          }
+        ]
+      }
+    },
+    {
+      "document": "invoice",
+      "say": "Invoice Jenna Smith 150 for color correction, add a note thanks for coming in",
+      "expect": {
+        "clientName": "Jenna Smith",
+        "lines": [
+          {
+            "quantity": 1,
+            "rate": 150,
+            "category": "services",
+            "desc": "color"
+          }
+        ],
+        "noteHas": "thanks for coming in"
+      }
+    },
+    {
+      "document": "invoice",
+      "say": "Invoice Marcus 400 for the kitchen job dated last Friday",
+      "expect": {
+        "clientName": [
+          "Marcus Lee",
+          "Marcus"
+        ],
+        "lines": [
+          {
+            "quantity": 1,
+            "rate": 400,
+            "category": "services",
+            "desc": "kitchen"
+          }
+        ],
+        "issueDate": "2026-11-13"
+      }
+    },
+    {
+      "document": "invoice",
+      "say": "Invoice Kim 75 for a trim, her phone is 509 555 0142",
+      "expect": {
+        "clientName": "Kim",
+        "clientPhone": "5095550142",
+        "lines": [
+          {
+            "quantity": 1,
+            "rate": 75,
+            "category": "services",
+            "desc": "trim"
+          }
+        ]
+      }
+    },
+    {
+      "document": "invoice",
+      "say": "Invoice Bright Smiles 99.50 for a teeth whitening kit",
+      "expect": {
+        "clientName": [
+          "Bright Smiles Dental",
+          "Bright Smiles"
+        ],
+        "lines": [
+          {
+            "quantity": 1,
+            "rate": 99.5,
+            "category": [
+              "products",
+              "services"
+            ],
+            "desc": "whitening"
+          }
+        ]
+      }
+    },
+    {
+      "document": "invoice",
+      "say": "Invoice Marcus 1.2k for the deck stain, due December 1st",
+      "expect": {
+        "clientName": [
+          "Marcus Lee",
+          "Marcus"
+        ],
+        "lines": [
+          {
+            "quantity": 1,
+            "rate": 1200,
+            "category": "services",
+            "desc": "deck"
+          }
+        ],
+        "dueDate": "2026-12-01"
+      }
+    },
+    {
+      "document": "invoice",
+      "say": "I spent 40 on gas at Shell",
+      "expect": {
+        "isInvoice": false
+      }
+    },
+    {
+      "document": "invoice",
+      "say": "what's on my schedule tomorrow",
+      "expect": {
+        "isInvoice": false
+      }
+    },
+    {
+      "document": "quote",
+      "say": "Quote Olivia 450 for a bathroom remodel consult, good for 30 days",
+      "expect": {
+        "clientName": [
+          "Olivia Chen",
+          "Olivia"
+        ],
+        "lines": [
+          {
+            "quantity": 1,
+            "rate": 450,
+            "category": "services",
+            "desc": "consult"
+          }
+        ],
+        "validDays": 30
+      }
+    },
+    {
+      "document": "quote",
+      "say": "Quote for Dan Rivera, 2 days of painting at 600 a day and 300 for paint, valid for two weeks",
+      "expect": {
+        "clientName": "Dan Rivera",
+        "lines": [
+          {
+            "quantity": 2,
+            "rate": 600,
+            "category": "services",
+            "desc": "paint"
+          },
+          {
+            "quantity": 1,
+            "rate": 300,
+            "category": [
+              "products",
+              "other"
+            ],
+            "desc": "paint"
+          }
+        ],
+        "validDays": 14
+      }
+    },
+    {
+      "document": "quote",
+      "say": "Quote Marcus 2500 for a new deck, good until December 15th",
+      "expect": {
+        "clientName": [
+          "Marcus Lee",
+          "Marcus"
+        ],
+        "lines": [
+          {
+            "quantity": 1,
+            "rate": 2500,
+            "category": "services",
+            "desc": "deck"
+          }
+        ],
+        "dueDate": "2026-12-15"
+      }
+    },
+    {
+      "document": "quote",
+      "say": "Quote Bright Smiles Dental 800 for a website refresh",
+      "expect": {
+        "clientName": "Bright Smiles Dental",
+        "lines": [
+          {
+            "quantity": 1,
+            "rate": 800,
+            "category": "services",
+            "desc": "website"
+          }
+        ]
+      }
+    },
+    {
+      "document": "invoice",
+      "say": "make the gloss 45",
+      "expect": {
+        "lines": [
+          {
+            "quantity": 1,
+            "rate": 120,
+            "category": "services",
+            "desc": "cut"
+          },
+          {
+            "quantity": 1,
+            "rate": 45,
+            "category": "services",
+            "desc": "gloss"
+          }
+        ]
+      },
+      "current": {
+        "clientName": "Jenna Morales",
+        "clientEmail": null,
+        "clientPhone": null,
+        "lines": [
+          {
+            "description": "Cut and color",
+            "quantity": 1,
+            "rate": 120,
+            "category": "services"
+          },
+          {
+            "description": "Gloss treatment",
+            "quantity": 1,
+            "rate": 40,
+            "category": "services"
+          }
+        ],
+        "issueDate": "2026-11-16",
+        "dueDate": "2026-12-16",
+        "note": null
+      }
+    },
+    {
+      "document": "invoice",
+      "say": "add a 20 tip",
+      "expect": {
+        "lines": [
+          {
+            "quantity": 1,
+            "rate": 120,
+            "category": "services",
+            "desc": "cut"
+          },
+          {
+            "quantity": 1,
+            "rate": 40,
+            "category": "services",
+            "desc": "gloss"
+          },
+          {
+            "quantity": 1,
+            "rate": 20,
+            "category": "tips"
+          }
+        ]
+      },
+      "current": {
+        "clientName": "Jenna Morales",
+        "clientEmail": null,
+        "clientPhone": null,
+        "lines": [
+          {
+            "description": "Cut and color",
+            "quantity": 1,
+            "rate": 120,
+            "category": "services"
+          },
+          {
+            "description": "Gloss treatment",
+            "quantity": 1,
+            "rate": 40,
+            "category": "services"
+          }
+        ],
+        "issueDate": "2026-11-16",
+        "dueDate": "2026-12-16",
+        "note": null
+      }
+    },
+    {
+      "document": "invoice",
+      "say": "remove the gloss",
+      "expect": {
+        "lines": [
+          {
+            "quantity": 1,
+            "rate": 120,
+            "category": "services",
+            "desc": "cut"
+          }
+        ]
+      },
+      "current": {
+        "clientName": "Jenna Morales",
+        "clientEmail": null,
+        "clientPhone": null,
+        "lines": [
+          {
+            "description": "Cut and color",
+            "quantity": 1,
+            "rate": 120,
+            "category": "services"
+          },
+          {
+            "description": "Gloss treatment",
+            "quantity": 1,
+            "rate": 40,
+            "category": "services"
+          }
+        ],
+        "issueDate": "2026-11-16",
+        "dueDate": "2026-12-16",
+        "note": null
+      }
+    },
+    {
+      "document": "invoice",
+      "say": "it's for Jenna Smith",
+      "expect": {
+        "clientName": "Jenna Smith"
+      },
+      "current": {
+        "clientName": "Jenna Morales",
+        "clientEmail": null,
+        "clientPhone": null,
+        "lines": [
+          {
+            "description": "Cut and color",
+            "quantity": 1,
+            "rate": 120,
+            "category": "services"
+          },
+          {
+            "description": "Gloss treatment",
+            "quantity": 1,
+            "rate": 40,
+            "category": "services"
+          }
+        ],
+        "issueDate": "2026-11-16",
+        "dueDate": "2026-12-16",
+        "note": null
+      }
+    },
+    {
+      "document": "invoice",
+      "say": "due Friday instead",
+      "expect": {
+        "dueDate": "2026-11-20"
+      },
+      "current": {
+        "clientName": "Jenna Morales",
+        "clientEmail": null,
+        "clientPhone": null,
+        "lines": [
+          {
+            "description": "Cut and color",
+            "quantity": 1,
+            "rate": 120,
+            "category": "services"
+          },
+          {
+            "description": "Gloss treatment",
+            "quantity": 1,
+            "rate": 40,
+            "category": "services"
+          }
+        ],
+        "issueDate": "2026-11-16",
+        "dueDate": "2026-12-16",
+        "note": null
+      }
+    },
+    {
+      "document": "invoice",
+      "say": "make the cut and color 2 hours at 60",
+      "expect": {
+        "lines": [
+          {
+            "quantity": 2,
+            "rate": 60,
+            "category": "services",
+            "desc": "cut"
+          },
+          {
+            "quantity": 1,
+            "rate": 40,
+            "category": "services",
+            "desc": "gloss"
+          }
+        ]
+      },
+      "current": {
+        "clientName": "Jenna Morales",
+        "clientEmail": null,
+        "clientPhone": null,
+        "lines": [
+          {
+            "description": "Cut and color",
+            "quantity": 1,
+            "rate": 120,
+            "category": "services"
+          },
+          {
+            "description": "Gloss treatment",
+            "quantity": 1,
+            "rate": 40,
+            "category": "services"
+          }
+        ],
+        "issueDate": "2026-11-16",
+        "dueDate": "2026-12-16",
+        "note": null
+      }
+    },
+    {
+      "document": "invoice",
+      "say": "add a note, parking is in back",
+      "expect": {
+        "noteHas": "parking"
+      },
+      "current": {
+        "clientName": "Jenna Morales",
+        "clientEmail": null,
+        "clientPhone": null,
+        "lines": [
+          {
+            "description": "Cut and color",
+            "quantity": 1,
+            "rate": 120,
+            "category": "services"
+          },
+          {
+            "description": "Gloss treatment",
+            "quantity": 1,
+            "rate": 40,
+            "category": "services"
+          }
+        ],
+        "issueDate": "2026-11-16",
+        "dueDate": "2026-12-16",
+        "note": null
+      }
+    },
+    {
+      "document": "invoice",
+      "say": "make it due on receipt",
+      "expect": {
+        "dueTerms": "due_on_receipt"
+      },
+      "current": {
+        "clientName": "Jenna Morales",
+        "clientEmail": null,
+        "clientPhone": null,
+        "lines": [
+          {
+            "description": "Cut and color",
+            "quantity": 1,
+            "rate": 120,
+            "category": "services"
+          },
+          {
+            "description": "Gloss treatment",
+            "quantity": 1,
+            "rate": 40,
+            "category": "services"
+          }
+        ],
+        "issueDate": "2026-11-16",
+        "dueDate": "2026-12-16",
+        "note": null
+      }
+    },
+    {
+      "document": "invoice",
+      "say": "her email is jenna dot m at yahoo dot com",
+      "expect": {
+        "clientEmail": "jenna.m@yahoo.com"
+      },
+      "current": {
+        "clientName": "Jenna Morales",
+        "clientEmail": null,
+        "clientPhone": null,
+        "lines": [
+          {
+            "description": "Cut and color",
+            "quantity": 1,
+            "rate": 120,
+            "category": "services"
+          },
+          {
+            "description": "Gloss treatment",
+            "quantity": 1,
+            "rate": 40,
+            "category": "services"
+          }
+        ],
+        "issueDate": "2026-11-16",
+        "dueDate": "2026-12-16",
+        "note": null
+      }
+    },
+    {
+      "document": "quote",
+      "say": "good for 60 days",
+      "expect": {
+        "validDays": 60
+      },
+      "current": {
+        "clientName": "Olivia Chen",
+        "clientEmail": null,
+        "clientPhone": null,
+        "lines": [
+          {
+            "description": "Bathroom remodel consult",
+            "quantity": 1,
+            "rate": 450,
+            "category": "services"
+          }
+        ],
+        "issueDate": "2026-11-16",
+        "dueDate": "2026-12-16",
+        "note": null
+      }
+    },
+    {
+      "document": "invoice",
+      "say": "Jenna Morales, 120 for a cut",
+      "asking": [
+        "client name",
+        "line items (what it's for and the price)"
+      ],
+      "current": {
+        "clientName": null,
+        "clientEmail": null,
+        "clientPhone": null,
+        "lines": [],
+        "issueDate": "2026-11-16",
+        "dueDate": "2026-12-16",
+        "note": null
+      },
+      "expect": {
+        "clientName": "Jenna Morales",
+        "lines": [
+          {
+            "quantity": 1,
+            "rate": 120,
+            "category": "services",
+            "desc": "cut"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useEffect, useMemo } from "react"
+import { Suspense, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 
 import { NewAppointmentForm } from "@/components/booking/new-appointment-form"
@@ -12,6 +12,7 @@ import { useBookingSettingsStore } from "@/lib/stores/useBookingSettingsStore"
 import { useBusyCalendarsStore } from "@/lib/stores/useBusyCalendarsStore"
 import { useClientsStore } from "@/lib/stores/useClientsStore"
 import { cn } from "@/lib/utils"
+import { clearBookingFill, peekBookingFill } from "@/lib/voiceBookingFill"
 
 export default function NewAppointmentPageRoute() {
   return (
@@ -30,6 +31,15 @@ function NewAppointmentPage() {
   // A spot tapped on the calendar.
   const pickedDate = useQueryParam("date")
   const pickedTime = useQueryParam("time")
+  // ?voiceFill=1: a booking said on the Booking page, handed over once.
+  const voiceFillParam = useQueryParam("voiceFill") === "1"
+  const [voiceFill] = useState(() => (voiceFillParam ? peekBookingFill() : null))
+  // Used once: dropped from memory and the address, so going back doesn't refill.
+  useEffect(() => {
+    if (!voiceFillParam) return
+    clearBookingFill()
+    router.replace("/app/booking/new")
+  }, [voiceFillParam, router])
   const clientsEntry = useClientsStore((state) => (workspaceId ? state.byWorkspaceId[workspaceId] : undefined))
   const loadClients = useClientsStore((state) => state.load)
   const settingsEntry = useBookingSettingsStore((state) => (workspaceId ? state.byWorkspaceId[workspaceId] : undefined))
@@ -69,6 +79,7 @@ function NewAppointmentPage() {
           initialDate={pickedDate && /^\d{4}-\d{2}-\d{2}$/.test(pickedDate) ? pickedDate : null}
           initialTime={pickedTime && /^([01]\d|2[0-3]):[0-5]\d$/.test(pickedTime) ? pickedTime : null}
           busy={busyTimes}
+          voiceFill={voiceFill}
           onCreate={(input) => {
             const result = createAppointmentInBackground({
               workspaceId,

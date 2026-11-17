@@ -21,7 +21,7 @@ Module._resolveFilename = function (request, ...rest) {
 };
 
 const assert = require("node:assert/strict");
-const { planVoiceFill, voiceFieldsFor, voiceHintsFor, toTwelveHour, hoursBetween } = require("../frontend/lib/voiceEntryFill.ts");
+const { planVoiceFill, voiceFieldsFor, voiceHintsFor, voiceCurrentFor, toTwelveHour, toTwentyFourHour, hoursBetween } = require("../frontend/lib/voiceEntryFill.ts");
 const { VoiceEntryResultSchema, VoiceEntryRequestSchema } = require("../shared/voiceEntry.ts");
 
 let failures = 0;
@@ -73,9 +73,11 @@ const reply = (overrides) => ({
   hours: null,
   inTime: null,
   outTime: null,
+  timesUnclear: false,
   positionId: null,
   amounts: [],
   notes: null,
+  remove: [],
   ...overrides,
 });
 const ctx = (visibility, tipsEnabled = false) => ({ visibility, tipsEnabled, dateBounds: { start: "2026-11-01", end: "2026-11-30" } });
@@ -86,6 +88,59 @@ test("12-hour times", () => {
   assert.deepEqual(toTwelveHour("00:00"), { time: "12:00", period: "AM" });
   assert.deepEqual(toTwelveHour("12:15"), { time: "12:15", period: "PM" });
   assert.equal(toTwelveHour("25:00"), null);
+});
+
+test("24-hour times from the form's boxes", () => {
+  assert.equal(toTwentyFourHour("2:47", "PM"), "14:47");
+  assert.equal(toTwentyFourHour("12:15", "AM"), "00:15");
+  assert.equal(toTwentyFourHour("12:00", "PM"), "12:00");
+  assert.equal(toTwentyFourHour("", "AM"), null);
+  assert.equal(toTwentyFourHour("13:00", "PM"), null);
+});
+
+test("times said but not made out: a note instead of quiet empty boxes", () => {
+  const plan = planVoiceFill(reply({ timesUnclear: true }), ctx(w2InOut));
+  assert.equal(plan.inOut, null);
+  assert.match(plan.skipped[0], /Didn't catch the times/);
+  const oneTime = planVoiceFill(reply({ inTime: "14:47" }), ctx(w2InOut));
+  assert.match(oneTime.skipped[0], /Didn't catch the times/);
+  assert.equal(planVoiceFill(reply({ inTime: "14:47", outTime: "23:21" }), ctx(w2InOut)).skipped.length, 0);
+});
+
+test("a fix can empty a box", () => {
+  const plan = planVoiceFill(reply({ remove: ["cashSales", "zelle"] }), ctx(indie, true));
+  assert.deepEqual(plan.cleared, ["cashSales"]);
+  assert.deepEqual(planVoiceFill(reply({ remove: ["personalCash"] }), ctx({ ...w2InOut, showUnreportedCash: true })).cleared, ["unreportedCash"]);
+});
+
+test("what's on the form, for a fix", () => {
+  const current = voiceCurrentFor(
+    {
+      date: "2026-11-16",
+      today: "2026-11-16",
+      inTime: "2:47",
+      inPeriod: "PM",
+      outTime: "11:21",
+      outPeriod: "PM",
+      hours: "",
+      positionId: null,
+      amounts: { tips: "331.91", reportedCash: "", unreportedCash: "20", venmo: "50" },
+    },
+    [{ id: "q0", amount: 40, isTips: false, options: [] }],
+    { visibility: w2InOut, tipsEnabled: false }
+  );
+  assert.deepEqual(current, {
+    date: null,
+    inTime: "14:47",
+    outTime: "23:21",
+    hours: null,
+    positionId: null,
+    // personal cash isn't on this form, Venmo isn't a W-2 box; the open question rides along.
+    amounts: [
+      { target: "cardTips", category: null, amount: 331.91 },
+      { target: "unsure", category: null, amount: 40 },
+    ],
+  });
 });
 
 test("hours between times, past midnight too", () => {
@@ -207,6 +262,10 @@ test("reply and request shapes", () => {
     VoiceEntryRequestSchema.safeParse({ transcript: "270 today", today: "2026-11-16", workspaceType: "w2", fields: ["cardTips"] }).success,
     true
   );
+  // Older servers leave out timesUnclear and remove.
+  const old = VoiceEntryResultSchema.parse({ isEntry: true, date: null, hours: null, inTime: null, outTime: null, positionId: null, amounts: [], notes: null });
+  assert.equal(old.timesUnclear, false);
+  assert.deepEqual(old.remove, []);
 });
 
 if (failures > 0) {

@@ -11,8 +11,9 @@ import { NativeSpeech, isNativeSpeechAvailable } from "@/plugins/NativeSpeech"
 
 export type SpeechCaptureStatus = "idle" | "listening" | "denied" | "unavailable" | "error"
 
-// A pause this long after some words counts as finished talking.
-const SILENCE_MS = 1800
+// This long with no talking after some words counts as finished. The plugin
+// measures it from the sound itself, so a slow word reply doesn't cut anyone off.
+const SILENCE_MS = 2500
 // Nothing heard at all for this long: stop rather than listen forever.
 const FIRST_WORDS_MS = 8000
 

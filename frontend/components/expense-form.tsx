@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Info, Minus, Plus } from "lucide-react"
+import { Info, Mic, Minus, Plus, Square } from "lucide-react"
 
 import { getBusinessMileageRate } from "@shared/businessMileage"
 import { getCalendarMonthBucketFromDate } from "@shared/payPeriods"
@@ -23,6 +23,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import ExpenseCategoryPicker from "@/components/expense-category-picker"
 import {
   findExpenseCategoryGuideEntry,
+  getVisibleExpenseCategoryOptions,
   isExpenseCategorySelectable,
   normalizeExpenseCategoryLabel,
   resolveExpenseCategoryLabel,
@@ -34,12 +35,23 @@ import * as recurringRulesService from "@/lib/domain/recurringRulesService"
 import RecurringCadencePicker from "@/components/recurring-cadence-picker"
 import type { RecurringCadence } from "@shared/schemas/recurringRule"
 import { useExpenseMemoryStore } from "@/lib/stores/useExpenseMemoryStore"
+import { useVoiceHandoffStore } from "@/lib/stores/useVoiceHandoffStore"
+import { listWords, scrollToVoiceReview, VoiceReviewFooter, VoiceReviewLabel, type VoiceAsk } from "@/components/voice-review"
+import { useVoiceLaunchStore } from "@/lib/stores/useVoiceLaunchStore"
 import { useSettingsStore } from "@/lib/stores/useSettingsStore"
 import { useWorkspaceStore } from "@/lib/stores/useWorkspaceStore"
 import { useSelectedPeriod } from "@/lib/stores/usePeriodSelectionStore"
 import { useReceiptCapture } from "@/hooks/use-receipt-capture"
 import ReceiptCaptureField from "@/components/receipt-capture-field"
 import { reportFailure } from "@/lib/observability/failureReports"
+import { useSpeechCapture } from "@/hooks/useSpeechCapture"
+import { parseVoiceExpense, wakeVoiceEntry } from "@/lib/api/voiceEntryApi"
+import {
+  planExpenseFill,
+  voiceExpenseCurrentFor,
+  voiceExpenseHints,
+  type ExpenseVoiceQuestion,
+} from "@/lib/voiceExpenseFill"
 
 const ExpenseInputSchema = ExpenseInput
 const VEHICLE_MODE_STORAGE_KEY = "stackin.vehicleExpenseMode"
@@ -155,6 +167,125 @@ function writeVehicleModePreference(
   }
 }
 
+// A new category, carrying vendor/amount/description between the plain
+// fields and the vehicle fields when it switches to or from vehicle.
+function applyAccountChange(
+  prev: FormState,
+  value: string,
+  customExpenseCategories: readonly string[]
+): FormState {
+  const previousCategoryLabel = normalizeExpenseCategoryLabel(
+    prev.account,
+    customExpenseCategories
+  )
+  const nextCategoryLabel = normalizeExpenseCategoryLabel(
+    value,
+    customExpenseCategories
+  )
+  const wasVehicleCategory = isVehicleTransportationCategory(previousCategoryLabel)
+  const isNextVehicleCategory = isVehicleTransportationCategory(nextCategoryLabel)
+  const next = {
+    ...prev,
+    account: value,
+    vehicle: {
+      ...prev.vehicle,
+      mileage: {
+        ...prev.vehicle.mileage,
+      },
+      directExpense: {
+        ...prev.vehicle.directExpense,
+      },
+    },
+    generic: {
+      ...prev.generic,
+    },
+  }
+
+  if (!wasVehicleCategory && isNextVehicleCategory) {
+    if (!prev.vehicle.directExpense.vendor && prev.generic.vendor) {
+      next.vehicle.directExpense.vendor = prev.generic.vendor
+    }
+    if (!prev.vehicle.directExpense.amount && prev.generic.amount) {
+      next.vehicle.directExpense.amount = prev.generic.amount
+    }
+    if (!prev.vehicle.directExpense.description && prev.generic.description) {
+      next.vehicle.directExpense.description = prev.generic.description
+    }
+    if (!prev.vehicle.mileage.vendor && prev.generic.vendor) {
+      next.vehicle.mileage.vendor = prev.generic.vendor
+    }
+    if (
+      !prev.vehicle.mileage.description &&
+      !prev.vehicle.mileage.descriptionIsManual &&
+      prev.generic.description
+    ) {
+      next.vehicle.mileage.description = prev.generic.description
+    }
+  }
+
+  if (wasVehicleCategory && !isNextVehicleCategory) {
+    const directSource = prev.vehicle.directExpense
+    const mileageSource = prev.vehicle.mileage
+
+    if (!prev.generic.vendor) {
+      next.generic.vendor = directSource.vendor || mileageSource.vendor
+    }
+    if (!prev.generic.amount && directSource.amount) {
+      next.generic.amount = directSource.amount
+    }
+    if (!prev.generic.description) {
+      next.generic.description =
+        directSource.description || mileageSource.description
+    }
+  }
+
+  return next
+}
+
+// Mileage ↔ direct expense, carrying the vendor and description across.
+function applyVehicleMode(prev: FormState, mode: VehicleExpenseMode): FormState {
+  const next = {
+    ...prev,
+    vehicle: {
+      ...prev.vehicle,
+      mode,
+      mileage: {
+        ...prev.vehicle.mileage,
+      },
+      directExpense: {
+        ...prev.vehicle.directExpense,
+      },
+    },
+  }
+
+  if (mode === "mileage") {
+    if (!prev.vehicle.mileage.vendor && prev.vehicle.directExpense.vendor) {
+      next.vehicle.mileage.vendor = prev.vehicle.directExpense.vendor
+    }
+    if (
+      !prev.vehicle.mileage.description &&
+      !prev.vehicle.mileage.descriptionIsManual &&
+      prev.vehicle.directExpense.description
+    ) {
+      next.vehicle.mileage.description =
+        prev.vehicle.directExpense.description
+    }
+  } else {
+    if (!prev.vehicle.directExpense.vendor && prev.vehicle.mileage.vendor) {
+      next.vehicle.directExpense.vendor = prev.vehicle.mileage.vendor
+    }
+    if (
+      !prev.vehicle.directExpense.description &&
+      prev.vehicle.mileage.description
+    ) {
+      next.vehicle.directExpense.description =
+        prev.vehicle.mileage.description
+    }
+  }
+
+  return next
+}
+
 // Soft filled fields and quiet labels for the restyled form.
 const FIELD_INPUT_CLASS = "h-11 rounded-xl border-0 bg-muted px-3.5 shadow-none"
 const FIELD_LABEL_CLASS = "mb-1.5 block text-sm font-normal text-muted-foreground"
@@ -214,6 +345,41 @@ export default function ExpenseForm() {
   // state reuses the same key, but a new submission gets a fresh one.
   const clientMutationIdRef = useRef<string>(generateClientMutationId())
 
+  // Voice: what the phone heard, any questions, and notes about what was left out.
+  const [voicePhase, setVoicePhase] = useState<"idle" | "thinking">("idle")
+  const [voiceQuestions, setVoiceQuestions] = useState<ExpenseVoiceQuestion[]>([])
+  const [voiceNotes, setVoiceNotes] = useState<string[]>([])
+  const [voiceFilled, setVoiceFilled] = useState(false)
+  const [voiceHeard, setVoiceHeard] = useState("")
+  // Where a category voice picked came from, when it wasn't said out loud.
+  const [voiceCategoryNote, setVoiceCategoryNote] = useState<string | null>(null)
+  // "9121" filled as $91.21: the whole-dollar reading, for "It was $9,121".
+  const [voiceWholeAmount, setVoiceWholeAmount] = useState<{ cents: number; whole: number } | null>(null)
+  const voiceRunRef = useRef(0)
+  // The form as it was before voice first filled it, for the note's undo (X).
+  const voiceUndoRef = useRef<FormState | null>(null)
+  // This recording fixes what voice already filled ("make that 52").
+  const voiceFixingRef = useRef(false)
+  // What the review's voice button asked for ("amount"), sent with that fix.
+  const voiceAskingRef = useRef<string[]>([])
+  const formRef = useRef(form)
+  formRef.current = form
+  const voiceQuestionsRef = useRef(voiceQuestions)
+  voiceQuestionsRef.current = voiceQuestions
+
+  const resetVoice = useCallback(() => {
+    voiceRunRef.current += 1
+    voiceUndoRef.current = null
+    voiceFixingRef.current = false
+    setVoicePhase("idle")
+    setVoiceFilled(false)
+    setVoiceQuestions([])
+    setVoiceNotes([])
+    setVoiceHeard("")
+    setVoiceCategoryNote(null)
+    setVoiceWholeAmount(null)
+  }, [])
+
   const receiptCapture = useReceiptCapture(activeWorkspaceId)
   const { attachedReceiptAsset, receiptUploading, clearAttachedReceipt } = receiptCapture
 
@@ -260,6 +426,7 @@ export default function ExpenseForm() {
       setRepeatCadence({ freq: "monthly" })
       setRepeatEndDate("")
       clearAttachedReceipt()
+      resetVoice()
       return
     }
 
@@ -408,74 +575,7 @@ export default function ExpenseForm() {
 
   const updateAccount = useCallback(
     (value: string) => {
-      setForm((prev) => {
-        const previousCategoryLabel = normalizeExpenseCategoryLabel(
-          prev.account,
-          customExpenseCategories
-        )
-        const nextCategoryLabel = normalizeExpenseCategoryLabel(
-          value,
-          customExpenseCategories
-        )
-        const wasVehicleCategory = isVehicleTransportationCategory(previousCategoryLabel)
-        const isNextVehicleCategory = isVehicleTransportationCategory(nextCategoryLabel)
-        const next = {
-          ...prev,
-          account: value,
-          vehicle: {
-            ...prev.vehicle,
-            mileage: {
-              ...prev.vehicle.mileage,
-            },
-            directExpense: {
-              ...prev.vehicle.directExpense,
-            },
-          },
-          generic: {
-            ...prev.generic,
-          },
-        }
-
-        if (!wasVehicleCategory && isNextVehicleCategory) {
-          if (!prev.vehicle.directExpense.vendor && prev.generic.vendor) {
-            next.vehicle.directExpense.vendor = prev.generic.vendor
-          }
-          if (!prev.vehicle.directExpense.amount && prev.generic.amount) {
-            next.vehicle.directExpense.amount = prev.generic.amount
-          }
-          if (!prev.vehicle.directExpense.description && prev.generic.description) {
-            next.vehicle.directExpense.description = prev.generic.description
-          }
-          if (!prev.vehicle.mileage.vendor && prev.generic.vendor) {
-            next.vehicle.mileage.vendor = prev.generic.vendor
-          }
-          if (
-            !prev.vehicle.mileage.description &&
-            !prev.vehicle.mileage.descriptionIsManual &&
-            prev.generic.description
-          ) {
-            next.vehicle.mileage.description = prev.generic.description
-          }
-        }
-
-        if (wasVehicleCategory && !isNextVehicleCategory) {
-          const directSource = prev.vehicle.directExpense
-          const mileageSource = prev.vehicle.mileage
-
-          if (!prev.generic.vendor) {
-            next.generic.vendor = directSource.vendor || mileageSource.vendor
-          }
-          if (!prev.generic.amount && directSource.amount) {
-            next.generic.amount = directSource.amount
-          }
-          if (!prev.generic.description) {
-            next.generic.description =
-              directSource.description || mileageSource.description
-          }
-        }
-
-        return next
-      })
+      setForm((prev) => applyAccountChange(prev, value, customExpenseCategories))
     },
     [customExpenseCategories]
   )
@@ -567,48 +667,7 @@ export default function ExpenseForm() {
 
   const updateVehicleMode = useCallback(
     (mode: VehicleExpenseMode) => {
-      setForm((prev) => {
-        const next = {
-          ...prev,
-          vehicle: {
-            ...prev.vehicle,
-            mode,
-            mileage: {
-              ...prev.vehicle.mileage,
-            },
-            directExpense: {
-              ...prev.vehicle.directExpense,
-            },
-          },
-        }
-
-        if (mode === "mileage") {
-          if (!prev.vehicle.mileage.vendor && prev.vehicle.directExpense.vendor) {
-            next.vehicle.mileage.vendor = prev.vehicle.directExpense.vendor
-          }
-          if (
-            !prev.vehicle.mileage.description &&
-            !prev.vehicle.mileage.descriptionIsManual &&
-            prev.vehicle.directExpense.description
-          ) {
-            next.vehicle.mileage.description =
-              prev.vehicle.directExpense.description
-          }
-        } else {
-          if (!prev.vehicle.directExpense.vendor && prev.vehicle.mileage.vendor) {
-            next.vehicle.directExpense.vendor = prev.vehicle.mileage.vendor
-          }
-          if (
-            !prev.vehicle.directExpense.description &&
-            prev.vehicle.mileage.description
-          ) {
-            next.vehicle.directExpense.description =
-              prev.vehicle.mileage.description
-          }
-        }
-
-        return next
-      })
+      setForm((prev) => applyVehicleMode(prev, mode))
       writeVehicleModePreference(activeWorkspaceId, mode)
     },
     [activeWorkspaceId]
@@ -625,7 +684,8 @@ export default function ExpenseForm() {
     setRepeatCadence({ freq: "monthly" })
     setRepeatEndDate("")
     clearAttachedReceipt()
-  }, [preferredVehicleMode, clearAttachedReceipt])
+    resetVoice()
+  }, [preferredVehicleMode, clearAttachedReceipt, resetVoice])
 
   const dismissKeyboard = useCallback(() => {
     if (typeof document === "undefined") return
@@ -635,6 +695,348 @@ export default function ExpenseForm() {
       activeElement.blur()
     }
   }, [])
+
+  /** ------------------------------------------------
+   * VOICE EXPENSE — say the expense, check the filled form, tap Save expense.
+   * Only the typed-out words go to the server (lib/api/voiceEntryApi.ts);
+   * nothing is saved until the person taps Save expense themselves.
+   * ------------------------------------------------ */
+  const voiceCategories = useMemo(
+    () => getVisibleExpenseCategoryOptions(customExpenseCategories, visibilityContext).slice(0, 150),
+    [customExpenseCategories, visibilityContext]
+  )
+  const voiceVehicleCategory = useMemo(
+    () =>
+      voiceCategories.find((option) =>
+        isVehicleTransportationCategory(normalizeExpenseCategoryLabel(option, customExpenseCategories))
+      ) ?? null,
+    [voiceCategories, customExpenseCategories]
+  )
+
+  /** Outlines the filled boxes for a moment so it's clear what changed. */
+  const flashVoiceFields = useCallback((ids: string[]) => {
+    window.setTimeout(() => {
+      for (const id of ids) {
+        const element = document.getElementById(id)
+        // Date and the big amount sit inside a row; outline the row.
+        const target = id === "date" || id === "amount" ? element?.closest<HTMLElement>(".rounded-2xl") : element
+        if (!target) continue
+        target.style.outline = "2px solid #2FA866"
+        target.style.outlineOffset = "-2px"
+        window.setTimeout(() => {
+          target.style.outline = ""
+          target.style.outlineOffset = ""
+        }, 2600)
+      }
+    }, 60)
+  }, [])
+
+  const handleVoiceTranscript = useCallback(
+    async (transcript: string) => {
+      if (!activeWorkspaceId) return
+      const run = ++voiceRunRef.current
+      const fixing = voiceFixingRef.current
+      const openQuestions = fixing ? voiceQuestionsRef.current : []
+      setVoicePhase("thinking")
+      setVoiceHeard(transcript)
+      setVoiceNotes([])
+      if (!fixing) {
+        setVoiceQuestions([])
+        setVoiceFilled(false)
+        setVoiceCategoryNote(null)
+      }
+
+      try {
+        const current = formRef.current
+        const today = getLocalDateInputValue()
+        const currentIsVehicle = isVehicleTransportationCategory(
+          normalizeExpenseCategoryLabel(current.account, customExpenseCategories)
+        )
+        const currentMode = currentIsVehicle ? current.vehicle.mode : null
+        const mileage = current.vehicle.mileage
+        const fields = currentMode === "direct_expense" ? current.vehicle.directExpense : current.generic
+
+        const result = await parseVoiceExpense({
+          kind: "expense",
+          transcript,
+          today,
+          workspaceId: activeWorkspaceId,
+          categories: voiceCategories,
+          vehicleCategory: voiceVehicleCategory,
+          ...(fixing
+            ? {
+                asking: voiceAskingRef.current.length > 0 ? voiceAskingRef.current : undefined,
+                current: voiceExpenseCurrentFor(
+                  currentMode === "mileage"
+                    ? {
+                        date: current.date,
+                        today,
+                        account: current.account,
+                        amount: "",
+                        vendor: mileage.vendor,
+                        // The made-up "18 business miles" line isn't something they said.
+                        description: mileage.descriptionIsManual ? mileage.description : "",
+                        miles: mileage.businessMiles,
+                        parkingAndTolls: mileage.parkingAndTolls,
+                      }
+                    : {
+                        date: current.date,
+                        today,
+                        account: current.account,
+                        amount: fields.amount,
+                        vendor: fields.vendor,
+                        description: fields.description,
+                        miles: "",
+                        parkingAndTolls: "",
+                      }
+                ),
+              }
+            : {}),
+        })
+        if (run !== voiceRunRef.current) return
+
+        const plan = planExpenseFill(result, {
+          categories: voiceCategories,
+          vehicleCategory: voiceVehicleCategory,
+          dateBounds: selectedPeriod ? { start: selectedPeriod.start, end: selectedPeriod.end } : null,
+          phoneLearned: getSelectableAutoAccount,
+          recentCategories: [...useExpenseMemoryStore.getState().memory.accounts].reverse(),
+          fixing,
+          currentCategory: current.account || null,
+          currentVehicleMode: currentMode,
+        })
+        const nothingFilled =
+          !plan.date && !plan.amount && !plan.vendor && !plan.description && !plan.category &&
+          !plan.miles && !plan.parkingAndTolls && plan.questions.length === 0
+        if (!result.isExpense || nothingFilled) {
+          setVoiceNotes([
+            ...plan.skipped,
+            fixing
+              ? "Didn't catch a change in that. Try again, like \u201cmake that 52.\u201d"
+              : "Didn't catch an expense in that. Try again, like \u201c42 on gas at Shell.\u201d",
+          ])
+          return
+        }
+
+        const flash: string[] = []
+        const asText = (n: number) => String(Math.round(n * 100) / 100)
+        setForm((prev) => {
+          if (!voiceUndoRef.current) voiceUndoRef.current = prev
+          let next = prev
+          if (plan.category && plan.category !== prev.account) {
+            next = applyAccountChange(next, plan.category, customExpenseCategories)
+            flash.push("expense-category-field")
+          }
+          const isVehicle = isVehicleTransportationCategory(
+            normalizeExpenseCategoryLabel(next.account, customExpenseCategories)
+          )
+          if (isVehicle && plan.vehicleMode && plan.vehicleMode !== next.vehicle.mode) {
+            // Not saved as their preferred mode: that's for when they pick it themselves.
+            next = applyVehicleMode(next, plan.vehicleMode)
+          }
+          next = {
+            ...next,
+            generic: { ...next.generic },
+            vehicle: {
+              ...next.vehicle,
+              mileage: { ...next.vehicle.mileage },
+              directExpense: { ...next.vehicle.directExpense },
+            },
+          }
+          if (plan.date) {
+            next.date = plan.date
+            flash.push("date")
+          }
+          if (isVehicle && next.vehicle.mode === "mileage") {
+            const m = next.vehicle.mileage
+            if (plan.vendor) {
+              m.vendor = plan.vendor
+              flash.push("vehicleMileageVendor")
+            }
+            if (plan.miles) {
+              m.businessMiles = asText(plan.miles)
+              flash.push("businessMiles")
+            }
+            if (plan.parkingAndTolls) {
+              m.parkingAndTolls = asText(plan.parkingAndTolls)
+              flash.push("parkingAndTolls")
+            }
+            if (plan.description) {
+              m.description = plan.description
+              m.descriptionIsManual = true
+              flash.push("vehicleMileageDescription")
+            }
+          } else {
+            const direct = isVehicle
+            const target = direct ? next.vehicle.directExpense : next.generic
+            if (plan.amount) {
+              target.amount = asText(plan.amount)
+              flash.push(direct ? "vehicleDirectAmount" : "amount")
+            }
+            if (plan.vendor) {
+              target.vendor = plan.vendor
+              flash.push(direct ? "vehicleDirectVendor" : "vendor")
+            }
+            if (plan.description) {
+              target.description = plan.description
+              flash.push(direct ? "vehicleDirectDescription" : "description")
+            }
+          }
+          return next
+        })
+        setExpanded(true)
+
+        if (plan.category) {
+          setVoiceCategoryNote(
+            plan.categorySource === "learned"
+              ? `Category: ${plan.category} (from your past expenses)`
+              : plan.categorySource === "suggested"
+                ? `Category: ${plan.category} (suggested \u2014 check it)`
+                : null
+          )
+        }
+        // New questions get ids from this run so they never clash with ones still open.
+        const newQuestions = plan.questions.map((q) => ({ ...q, id: `${run}-${q.id}` }))
+        // On a fix, an open question stays unless the fix answered or re-asked it.
+        const answered = new Set<string>(newQuestions.map((q) => q.kind))
+        if (plan.category) answered.add("category")
+        if (plan.miles) answered.add("miles")
+        setVoiceQuestions(
+          fixing ? [...openQuestions.filter((q) => !answered.has(q.kind)), ...newQuestions] : newQuestions
+        )
+        if (plan.amount !== null) {
+          setVoiceWholeAmount(plan.amountAsWhole ? { cents: plan.amount, whole: plan.amountAsWhole } : null)
+        }
+        setVoiceNotes(plan.skipped)
+        setVoiceFilled(true)
+        flashVoiceFields(flash)
+        scrollToVoiceReview("voice-expense-review")
+      } catch (error) {
+        if (run !== voiceRunRef.current) return
+        console.warn("[VoiceExpense] fill failed", error)
+        // 429 = today's voice limit (server message says so); anything else is a plain failure.
+        const limited = (error as { status?: number })?.status === 429
+        setVoiceNotes([
+          limited && error instanceof Error ? error.message : "Couldn't fill in the form just now. Try again or type it in.",
+        ])
+      } finally {
+        if (run === voiceRunRef.current) setVoicePhase("idle")
+      }
+    },
+    [
+      activeWorkspaceId,
+      customExpenseCategories,
+      flashVoiceFields,
+      getSelectableAutoAccount,
+      selectedPeriod,
+      voiceCategories,
+      voiceVehicleCategory,
+    ]
+  )
+  const speech = useSpeechCapture((transcript) => void handleVoiceTranscript(transcript))
+
+  // Said to Ask 521 on Home ("42 on gas at Shell"): fill from those words.
+  // The mic, for a handoff that only named this form (startVoice is defined below).
+  const startVoiceRef = useRef<() => void>(() => {})
+  const voiceHandoff = useVoiceHandoffStore((state) => state.request)
+  const takeVoiceHandoff = useVoiceHandoffStore((state) => state.take)
+  useEffect(() => {
+    if (voiceHandoff?.target !== "expense" || !activeWorkspaceId || voiceCategories.length === 0) return
+    if (voiceHandoff.listen && !speech.checked) return
+    const taken = takeVoiceHandoff(["expense"], activeWorkspaceId)
+    if (!taken) return
+    voiceFixingRef.current = false
+    voiceUndoRef.current = null
+    setVoiceFilled(false)
+    setExpanded(true)
+    window.setTimeout(() => document.querySelector('[data-tour="entry-form"]')?.scrollIntoView({ behavior: "smooth", block: "start" }), 120)
+    if (taken.listen) {
+      if (speech.supported) startVoiceRef.current()
+      return
+    }
+    void handleVoiceTranscript(taken.transcript)
+  }, [voiceHandoff, activeWorkspaceId, voiceCategories.length, takeVoiceHandoff, handleVoiceTranscript, speech.checked, speech.supported])
+
+  /** With the filled-in note showing, the mic fixes what voice filled
+   * ("make that 52") instead of starting over. */
+  const startVoice = useCallback((ask?: VoiceAsk | null) => {
+    wakeVoiceEntry()
+    setExpanded(true)
+    setVoiceNotes([])
+    voiceFixingRef.current = voiceFilled
+    voiceAskingRef.current = voiceFilled && ask ? ask.asking : []
+    if (!voiceFilled) {
+      setVoiceQuestions([])
+      setVoiceCategoryNote(null)
+      voiceUndoRef.current = null
+    }
+    speech.resetStatus()
+    void speech.start(voiceExpenseHints(useExpenseMemoryStore.getState().memory.vendors, voiceCategories))
+  }, [speech, voiceFilled, voiceCategories])
+
+  startVoiceRef.current = () => startVoice()
+
+  /** "It was $9,121": swaps the dollars-and-cents reading for the whole one. */
+  // "Hey Siri, add an expense in 521": open the form listening.
+  const voiceLaunch = useVoiceLaunchStore((state) => state.request)
+  useEffect(() => {
+    if (voiceLaunch?.target !== "expense" || !speech.checked || !activeWorkspaceId) return
+    if (!useVoiceLaunchStore.getState().take("expense")) return
+    setExpanded(true)
+    window.setTimeout(() => document.querySelector('[data-tour="entry-form"]')?.scrollIntoView({ behavior: "smooth", block: "start" }), 150)
+    if (speech.supported) startVoice()
+  }, [voiceLaunch, speech.checked, speech.supported, activeWorkspaceId, startVoice])
+
+  const switchToWholeVoiceAmount = useCallback(() => {
+    if (!voiceWholeAmount) return
+    const { cents, whole } = voiceWholeAmount
+    setForm((prev) => {
+      const isVehicle = isVehicleTransportationCategory(
+        normalizeExpenseCategoryLabel(prev.account, customExpenseCategories)
+      )
+      const matches = (value: string) => Number(value) === cents
+      if (isVehicle && prev.vehicle.mode === "direct_expense" && matches(prev.vehicle.directExpense.amount)) {
+        return {
+          ...prev,
+          vehicle: { ...prev.vehicle, directExpense: { ...prev.vehicle.directExpense, amount: String(whole) } },
+        }
+      }
+      if (!isVehicle && matches(prev.generic.amount)) {
+        return { ...prev, generic: { ...prev.generic, amount: String(whole) } }
+      }
+      return prev
+    })
+    flashVoiceFields(["amount", "vehicleDirectAmount"])
+    setVoiceWholeAmount(null)
+  }, [voiceWholeAmount, customExpenseCategories, flashVoiceFields])
+
+  /** The note's X: puts the form back as it was before voice filled it. */
+  const undoVoiceFill = useCallback(() => {
+    const before = voiceUndoRef.current
+    if (before) setForm(before)
+    resetVoice()
+  }, [resetVoice])
+
+  const answerVoiceQuestion = useCallback(
+    (question: ExpenseVoiceQuestion, choice: { category: string } | { miles: number } | null) => {
+      if (choice && "category" in choice) {
+        setForm((prev) => applyAccountChange(prev, choice.category, customExpenseCategories))
+        setVoiceCategoryNote(null)
+        flashVoiceFields(["expense-category-field"])
+      } else if (choice && "miles" in choice) {
+        setForm((prev) => ({
+          ...prev,
+          vehicle: {
+            ...prev.vehicle,
+            mileage: { ...prev.vehicle.mileage, businessMiles: String(choice.miles) },
+          },
+        }))
+        flashVoiceFields(["businessMiles"])
+      }
+      setVoiceQuestions((prev) => prev.filter((q) => q.id !== question.id))
+    },
+    [customExpenseCategories, flashVoiceFields]
+  )
 
   const buildPayload = useCallback(() => {
     const normalizedAccount =
@@ -740,6 +1142,15 @@ export default function ExpenseForm() {
       // The form only opens inside a workspace.
       if (!activeWorkspaceId) return
 
+      // An answer voice is still waiting on isn't on the form yet.
+      if (voiceQuestions.length > 0) {
+        setVoiceNotes(["Answer the question above, or tap Skip, then save."])
+        document
+          .getElementById(`voice-question-${voiceQuestions[0].id}`)
+          ?.scrollIntoView({ behavior: "smooth", block: "center" })
+        return
+      }
+
       setSubmitting(true)
 
       try {
@@ -794,6 +1205,7 @@ export default function ExpenseForm() {
         setRepeatEndDate("")
         dismissKeyboard()
         clearAttachedReceipt()
+        resetVoice()
         setSubmitting(false)
 
         void createPromise
@@ -843,8 +1255,10 @@ export default function ExpenseForm() {
       repeatCadence,
       repeatEnabled,
       repeatEndDate,
+      resetVoice,
       submitting,
       updateFromExpense,
+      voiceQuestions,
     ]
   )
 
@@ -886,6 +1300,19 @@ export default function ExpenseForm() {
     )
   }
 
+  const voiceListening = speech.status === "listening"
+  const voiceBusy = voiceListening || voicePhase === "thinking"
+  // The review's voice button asks for whatever the expense still needs.
+  const voiceMissing: string[] = []
+  if (isVehicleMileageMode) {
+    if (!(Number(form.vehicle.mileage.businessMiles) > 0)) voiceMissing.push("miles")
+  } else if (!(Number(isVehicleDirectMode ? form.vehicle.directExpense.amount : form.generic.amount) > 0)) {
+    voiceMissing.push("amount")
+  }
+  if (!form.account && !voiceQuestions.some((q) => q.kind === "category")) voiceMissing.push("category")
+  const voiceAsk: VoiceAsk | null =
+    voiceMissing.length > 0 ? { label: `Say the ${listWords(voiceMissing)}`, asking: voiceMissing } : null
+
   return (
     <Card
       className={`rounded-[22px] shadow-none ${
@@ -908,16 +1335,43 @@ export default function ExpenseForm() {
           ) : null}
         </button>
 
-        <Button
-          type="button"
-          variant={expanded ? "ghost" : "default"}
-          size="icon"
-          className="size-10 shrink-0 rounded-full"
-          onClick={() => setExpanded((current) => !current)}
-          aria-label={expanded ? "Collapse expense form" : "Expand expense form"}
-        >
-          {expanded ? <Minus /> : <Plus />}
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          {speech.supported ? (
+            voiceListening ? (
+              <Button
+                type="button"
+                size="icon"
+                className="size-10 shrink-0 animate-pulse rounded-full bg-[#2FA866] text-white hover:bg-[#2FA866]/90"
+                onClick={speech.done}
+                aria-label="Stop and fill in"
+              >
+                <Square className="fill-current" />
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="secondary"
+                size="icon"
+                className="size-10 shrink-0 rounded-full"
+                onClick={() => startVoice()}
+                aria-label="Say your expense"
+                disabled={submitting || voiceBusy}
+              >
+                <Mic />
+              </Button>
+            )
+          ) : null}
+          <Button
+            type="button"
+            variant={expanded ? "ghost" : "default"}
+            size="icon"
+            className="size-10 shrink-0 rounded-full"
+            onClick={() => setExpanded((current) => !current)}
+            aria-label={expanded ? "Collapse expense form" : "Expand expense form"}
+          >
+            {expanded ? <Minus /> : <Plus />}
+          </Button>
+        </div>
       </CardHeader>
 
       {!expanded ? (
@@ -925,6 +1379,60 @@ export default function ExpenseForm() {
       ) : (
         <CardContent className="px-5">
           <form onSubmit={handleSubmit} className="space-y-4">
+            {voiceListening ? (
+              <div className="space-y-3 rounded-2xl bg-muted px-4 py-3" aria-live="polite">
+                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <span className="size-2.5 shrink-0 animate-pulse rounded-full bg-primary" aria-hidden="true" />
+                  Listening…
+                </div>
+                <p className="text-base text-foreground">
+                  {speech.transcript || (
+                    <span className="text-muted-foreground">Say it like “42 on gas at Shell” or “drove 18 miles to a client.”</span>
+                  )}
+                </p>
+                <p className="text-xs text-muted-foreground">Tap the green button or pause when you&apos;re done.</p>
+                <div className="flex gap-2">
+                  <Button type="button" size="sm" className="rounded-full" onClick={speech.done} disabled={!speech.transcript}>
+                    Done
+                  </Button>
+                  <Button type="button" size="sm" variant="ghost" className="rounded-full" onClick={speech.cancel}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+
+            {voicePhase === "thinking" ? (
+              <p className="rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground" aria-live="polite">
+                Filling in the form…
+              </p>
+            ) : null}
+
+            {speech.status === "denied" ? (
+              <p className="rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">
+                The mic is off for 521. Turn on Microphone and Speech Recognition in Settings › 521, or type your expense below.
+              </p>
+            ) : null}
+            {speech.status === "error" ? (
+              <p className="rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">
+                Couldn&apos;t hear that. Tap the mic to try again, or type your expense below.
+              </p>
+            ) : null}
+
+            {voiceHeard && !voiceFilled && !voiceListening ? (
+              <p className="px-1 text-sm text-muted-foreground">Heard: “{voiceHeard}”</p>
+            ) : null}
+
+            {voiceFilled ? <VoiceReviewLabel id="voice-expense-review" /> : null}
+
+            {!voiceFilled
+              ? voiceNotes.map((note) => (
+                  <p key={note} className="px-1 text-sm text-muted-foreground">
+                    {note}
+                  </p>
+                ))
+              : null}
+
             {/* Receipt attachment — placed first so the user can kick off the
                 upload immediately while filling in the rest of the form.
                 Stays mounted at a fixed height through the brief
@@ -952,7 +1460,7 @@ export default function ExpenseForm() {
               />
             </div>
 
-            <div className="space-y-1.5">
+            <div id="expense-category-field" className="space-y-1.5">
               <div className="flex items-center gap-1">
                 <Label htmlFor="account-trigger" className="text-sm font-normal text-muted-foreground">
                   Category
@@ -1391,6 +1899,77 @@ export default function ExpenseForm() {
                 onEndDateChange={setRepeatEndDate}
                 minEndDate={form.date}
               />
+            ) : null}
+
+            {voiceFilled && !voiceBusy ? (
+              <VoiceReviewFooter
+                heard={voiceHeard}
+                ask={voiceAsk}
+                onVoice={() => startVoice(voiceAsk)}
+                onUndo={undoVoiceFill}
+                disabled={submitting}
+              >
+                {voiceQuestions.map((question) => (
+                  <div
+                    key={question.id}
+                    id={`voice-question-${question.id}`}
+                    className="space-y-2 rounded-2xl bg-muted px-4 py-3"
+                  >
+                    <p className="text-sm font-medium text-foreground">{question.prompt}</p>
+                    <div className="flex flex-wrap gap-2">
+                      {question.kind === "category"
+                        ? question.options.map((option) => (
+                            <button
+                              key={option.category}
+                              type="button"
+                              onClick={() => answerVoiceQuestion(question, { category: option.category })}
+                              className="rounded-full bg-card px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-secondary"
+                            >
+                              {option.label}
+                            </button>
+                          ))
+                        : question.options.map((option) => (
+                            <button
+                              key={option.miles}
+                              type="button"
+                              onClick={() => answerVoiceQuestion(question, { miles: option.miles })}
+                              className="rounded-full bg-card px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-secondary"
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                      <button
+                        type="button"
+                        onClick={() => answerVoiceQuestion(question, null)}
+                        className="rounded-full px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-secondary"
+                      >
+                        {question.kind === "category" ? "I'll pick above" : "Skip"}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {voiceNotes.map((note) => (
+                  <p key={note} className="px-1 text-sm text-muted-foreground">
+                    {note}
+                  </p>
+                ))}
+
+                {voiceCategoryNote ? <p className="px-1 text-sm text-muted-foreground">{voiceCategoryNote}</p> : null}
+                {voiceWholeAmount ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm text-muted-foreground">
+                      Read {voiceWholeAmount.whole} as ${voiceWholeAmount.cents.toFixed(2)}.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={switchToWholeVoiceAmount}
+                      className="rounded-full bg-card px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-secondary"
+                    >
+                      It was ${voiceWholeAmount.whole.toLocaleString("en-US")}
+                    </button>
+                  </div>
+                ) : null}
+              </VoiceReviewFooter>
             ) : null}
 
             <div className="flex gap-2 pt-1">

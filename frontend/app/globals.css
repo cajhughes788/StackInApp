@@ -481,3 +481,36 @@
   pointer-events: auto !important;
   -webkit-user-select: none;
 }
+
+/* Ask 521 "Show me": where an answer came from (components/ask-focus-layer.tsx).
+   A soft green glow that settles into a thin green outline. */
+[data-ask-lit] {
+  border-radius: 12px;
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+  animation: ask-glow 2.4s ease-out 1;
+}
+/* Lines in a list: tinted, with the outline just inside so nothing clips it. */
+[data-ask-lit][data-ask-line] {
+  outline-offset: -2px;
+}
+/* Statement lines sit flush in their list; give the lit one room inside its
+   outline without moving the text. */
+[data-ask-lit][data-ask-pad] {
+  margin-inline: -8px;
+  padding-inline: 8px;
+}
+[data-ask-lit]:not(button) {
+  background-color: color-mix(in srgb, var(--primary) 12%, transparent);
+}
+@keyframes ask-glow {
+  0%, 35% {
+    box-shadow: 0 0 18px 4px color-mix(in srgb, var(--primary) 55%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-ask-lit] { animation: none; }
+}

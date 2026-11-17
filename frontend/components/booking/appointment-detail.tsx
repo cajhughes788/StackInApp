@@ -73,6 +73,7 @@ export function AppointmentDetail({
   saving,
   bookingSettings = null,
   busyTimes = [],
+  voiceMove = null,
   onAction,
 }: {
   appointment: AppointmentType
@@ -89,6 +90,9 @@ export function AppointmentDetail({
   // their own calendars.
   bookingSettings?: BookingSettings | null
   busyTimes?: Array<{ start: string; end: string; calendar: string }>
+  // Voice's "move my 3 to 4": open Change time with this filled in. The
+  // owner still taps Move it.
+  voiceMove?: { date: string; startTime: string } | null
   // emailedTo: "reschedule" only — where "Your appointment moved" went.
   onAction: (action: AppointmentAction) => Promise<{ appointment: AppointmentType; shareUrl: string | null; emailedTo?: string | null }>
 }) {
@@ -98,9 +102,9 @@ export function AppointmentDetail({
   const [confirmingCancel, setConfirmingCancel] = useState(false)
   const [confirmingNoShow, setConfirmingNoShow] = useState(false)
   // "Change time": the new date and time being picked.
-  const [moving, setMoving] = useState(false)
-  const [moveDate, setMoveDate] = useState(appointment.date)
-  const [moveTime, setMoveTime] = useState(appointment.startTime)
+  const [moving, setMoving] = useState(!!voiceMove && (appointment.status === "requested" || appointment.status === "confirmed"))
+  const [moveDate, setMoveDate] = useState(voiceMove?.date ?? appointment.date)
+  const [moveTime, setMoveTime] = useState(voiceMove?.startTime ?? appointment.startTime)
   const [recording, setRecording] = useState(false)
   const [paidDate, setPaidDate] = useState(localToday())
   const [method, setMethod] = useState<InvoicePaidMethod | null>(null)

@@ -30,6 +30,14 @@ function AppointmentPage() {
   // Just booked (New appointment): how the client gets their link. Read
   // once, then dropped from the address so going back doesn't repeat it.
   const then = useQueryParam("then")
+  // Voice's "move my 3 to 4": Change time opens with the new time filled in.
+  const moveDateParam = useQueryParam("moveDate")
+  const moveTimeParam = useQueryParam("moveTime")
+  const [voiceMove] = useState(() =>
+    moveDateParam && /^\d{4}-\d{2}-\d{2}$/.test(moveDateParam) && moveTimeParam && /^([01]\d|2[0-3]):[0-5]\d$/.test(moveTimeParam)
+      ? { date: moveDateParam, startTime: moveTimeParam }
+      : null
+  )
   const [arrival] = useState<AppointmentArrival | null>(() =>
     then === "sent" || then === "failed" || then === "text" || then === "share" || then === "remind" ? then : null
   )
@@ -80,6 +88,7 @@ function AppointmentPage() {
           saving={saving}
           bookingSettings={bookingSettings}
           busyTimes={busyTimes ?? []}
+          voiceMove={voiceMove}
           onAction={(action) => runAppointmentAction(workspaceId, appointment, action, invoice)}
         />
       ) : !entry || entry.status === "loading" ? (

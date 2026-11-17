@@ -1,4 +1,5 @@
-// Scores voice entry against real-style sentences (scripts/voice-entry-cases.json),
+// Scores voice entry (including "Fix by voice" corrections, the cases with
+// `current`) against real-style sentences (scripts/voice-entry-cases.json),
 // using the exact parser the server runs (backend/functions/src/services/voiceEntryService.ts).
 // It calls Claude, so it needs a key and costs a few cents a run. Not part of
 // `npm test` for that reason.
@@ -45,6 +46,9 @@ function compare(expect, got) {
   const problems = [];
   const wantEntry = expect.isEntry ?? true;
   if (got.isEntry !== wantEntry) problems.push(`isEntry ${got.isEntry}, wanted ${wantEntry}`);
+  if (got.timesUnclear !== (expect.timesUnclear ?? false)) problems.push(`timesUnclear ${got.timesUnclear}, wanted ${expect.timesUnclear ?? false}`);
+  const wantRemove = [...(expect.remove ?? [])].sort().join(",");
+  if ([...(got.remove ?? [])].sort().join(",") !== wantRemove) problems.push(`remove ${JSON.stringify(got.remove)}, wanted [${wantRemove}]`);
   for (const key of ["date", "hours", "inTime", "outTime", "positionId"]) {
     const want = expect[key] ?? null;
     if (got[key] !== want) problems.push(`${key} ${JSON.stringify(got[key])}, wanted ${JSON.stringify(want)}`);
@@ -79,6 +83,7 @@ async function main() {
         workspaceType: form.workspaceType,
         fields: form.fields,
         positions: form.positions ?? [],
+        ...(testCase.current ? { current: testCase.current } : {}), ...(testCase.asking ? { asking: testCase.asking } : {}),
       };
       const started = Date.now();
       try {

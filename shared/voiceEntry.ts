@@ -31,6 +31,31 @@ export type VoiceAmountTarget = (typeof VOICE_AMOUNT_TARGETS)[number]
 
 export const VOICE_SPLIT_CATEGORIES = ["services", "tips", "products", "other"] as const
 
+const TIME_24 = z.string().regex(/^\d{2}:\d{2}$/)
+const DATE_KEY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+
+export const VoiceEntryAmountSchema = z.object({
+  target: z.enum(VOICE_AMOUNT_TARGETS),
+  // Only for Venmo / Apple Pay / Zelle / Checks / Cash App: which part of
+  // the payment this was ("60 in Venmo tips" → tips). null = not said.
+  category: z.enum(VOICE_SPLIT_CATEGORIES).nullable(),
+  amount: z.number().positive().max(1_000_000),
+})
+export type VoiceEntryAmount = z.infer<typeof VoiceEntryAmountSchema>
+
+// What's on the form when someone taps "Fix by voice", so "make that PM" or
+// "tips were 313" can be understood. Only sent for a fix.
+export const VoiceEntryCurrentSchema = z.object({
+  date: DATE_KEY.nullable(),
+  inTime: TIME_24.nullable(),
+  outTime: TIME_24.nullable(),
+  hours: z.number().positive().max(24).nullable(),
+  positionId: z.string().max(100).nullable(),
+  // Amounts in boxes, plus ones still waiting on a "where does it go?" answer (target "unsure").
+  amounts: z.array(VoiceEntryAmountSchema).max(20),
+})
+export type VoiceEntryCurrent = z.infer<typeof VoiceEntryCurrentSchema>
+
 export const VoiceEntryRequestSchema = z.object({
   transcript: z.string().trim().min(1).max(1000),
   // The phone's own date, so "today" / "yesterday" / "Monday" mean the
@@ -44,28 +69,26 @@ export const VoiceEntryRequestSchema = z.object({
     .array(z.object({ id: z.string().max(100), title: z.string().max(100) }))
     .max(30)
     .default([]),
+  current: VoiceEntryCurrentSchema.optional(),
+  // What the voice button just asked for ("email", "service"): a bare answer fills those.
+  asking: z.array(z.string().trim().min(1).max(40)).max(6).optional(),
 })
 export type VoiceEntryRequest = z.infer<typeof VoiceEntryRequestSchema>
-
-export const VoiceEntryAmountSchema = z.object({
-  target: z.enum(VOICE_AMOUNT_TARGETS),
-  // Only for Venmo / Apple Pay / Zelle / Checks / Cash App: which part of
-  // the payment this was ("60 in Venmo tips" → tips). null = not said.
-  category: z.enum(VOICE_SPLIT_CATEGORIES).nullable(),
-  amount: z.number().positive().max(1_000_000),
-})
-export type VoiceEntryAmount = z.infer<typeof VoiceEntryAmountSchema>
 
 export const VoiceEntryResultSchema = z.object({
   // false when what was said isn't an entry at all.
   isEntry: z.boolean(),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+  date: DATE_KEY.nullable(),
   hours: z.number().positive().max(24).nullable(),
   // 24-hour "HH:MM".
-  inTime: z.string().regex(/^\d{2}:\d{2}$/).nullable(),
-  outTime: z.string().regex(/^\d{2}:\d{2}$/).nullable(),
+  inTime: TIME_24.nullable(),
+  outTime: TIME_24.nullable(),
+  // They seemed to give work times, but what they are couldn't be made out.
+  timesUnclear: z.boolean().default(false),
   positionId: z.string().nullable(),
   amounts: z.array(VoiceEntryAmountSchema).max(20),
   notes: z.string().max(500).nullable(),
+  // On a fix: amounts to take off the form ("no cash", "take off the Venmo").
+  remove: z.array(z.enum(VOICE_AMOUNT_TARGETS)).max(20).default([]),
 })
 export type VoiceEntryResult = z.infer<typeof VoiceEntryResultSchema>

@@ -1,0 +1,727 @@
+{
+  "_about": "Real-style things said to Ask 521 on Home, scored by scripts/eval-voice-ask.cjs. Today is fixed at 2026-11-18 (a Wednesday). ws = the workspace type. topic, page, form, category, client and paymentMethod left out of 'expect' must come back null; period and comparePeriod are only checked when given (a list = any of those; null allowed when listed). Within a period, only the fields given are checked (a list = any of those). Add a case whenever someone's real question goes wrong. unsupported: true = must name what it can't split by; left out = must be null. hasDetails is only checked when given.",
+  "today": "2026-11-18",
+  "clients": [
+    "Jenna Morales",
+    "Jenna Smith",
+    "Marcus Lee",
+    "Olivia Chen"
+  ],
+  "expenseCategories": [
+    "Supplies",
+    "Rent / Booth Rent",
+    "Equipment",
+    "Marketing & Advertising",
+    "Software & Subscriptions",
+    "Insurance",
+    "Vehicle & Transportation",
+    "Travel",
+    "Office Expenses",
+    "Miscellaneous/ Other"
+  ],
+  "cases": [
+    {
+      "ws": "independent",
+      "say": "How much did I make this week?",
+      "expect": {
+        "intent": "question",
+        "topic": "income",
+        "period": {
+          "kind": "this_week"
+        }
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "how much did I make today",
+      "expect": {
+        "intent": "question",
+        "topic": "income",
+        "period": {
+          "kind": "today"
+        }
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "what did I make last week",
+      "expect": {
+        "intent": "question",
+        "topic": "income",
+        "period": {
+          "kind": "last_week"
+        }
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "how much did I bring in in October",
+      "expect": {
+        "intent": "question",
+        "topic": "income",
+        "period": {
+          "kind": "month",
+          "month": 10,
+          "year": [
+            null,
+            2026
+          ]
+        }
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "how much have I made this year",
+      "expect": {
+        "intent": "question",
+        "topic": "income",
+        "period": {
+          "kind": "this_year"
+        }
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "how much did I make in 2025",
+      "expect": {
+        "intent": "question",
+        "topic": "income",
+        "period": [
+          {
+            "kind": "year",
+            "year": 2025
+          },
+          {
+            "kind": "last_year"
+          }
+        ]
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "how much did I make last quarter",
+      "expect": {
+        "intent": "question",
+        "topic": "income",
+        "period": {
+          "kind": "last_quarter"
+        }
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "how much did I make on Monday",
+      "expect": {
+        "intent": "question",
+        "topic": "income",
+        "period": [
+          {
+            "kind": "day",
+            "date": "2026-11-16"
+          }
+        ]
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "how much in tips this month",
+      "expect": {
+        "intent": "question",
+        "topic": "tips",
+        "period": {
+          "kind": "this_month"
+        }
+      }
+    },
+    {
+      "ws": "w2",
+      "say": "how many hours did I work this week",
+      "expect": {
+        "intent": "question",
+        "topic": "hours",
+        "period": {
+          "kind": "this_week"
+        }
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "what did I spend this month",
+      "expect": {
+        "intent": "question",
+        "topic": "expenses",
+        "period": [
+          {
+            "kind": "this_month"
+          },
+          null
+        ]
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "how much have I spent on gas this year",
+      "expect": {
+        "intent": "question",
+        "topic": "expenses",
+        "period": {
+          "kind": "this_year"
+        },
+        "category": "Vehicle & Transportation"
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "how much did I spend on supplies in September",
+      "expect": {
+        "intent": "question",
+        "topic": "expenses",
+        "period": {
+          "kind": "month",
+          "month": 9,
+          "year": [
+            null,
+            2026
+          ]
+        },
+        "category": "Supplies"
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "what's my profit this quarter",
+      "expect": {
+        "intent": "question",
+        "topic": "profit",
+        "period": {
+          "kind": "this_quarter"
+        }
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "how much did I actually keep last month after expenses",
+      "expect": {
+        "intent": "question",
+        "topic": "profit",
+        "period": {
+          "kind": "last_month"
+        }
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "how does this month compare to last month",
+      "expect": {
+        "intent": "question",
+        "topic": "compare_income",
+        "period": {
+          "kind": "this_month"
+        },
+        "comparePeriod": [
+          {
+            "kind": "last_month"
+          },
+          null
+        ]
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "am I doing better than last week",
+      "expect": {
+        "intent": "question",
+        "topic": "compare_income",
+        "period": {
+          "kind": "this_week"
+        },
+        "comparePeriod": [
+          {
+            "kind": "last_week"
+          },
+          null
+        ]
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "who owes me money",
+      "expect": {
+        "intent": "question",
+        "topic": "owed"
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "what's overdue",
+      "expect": {
+        "intent": "question",
+        "topic": "overdue"
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "how much am I waiting on from invoices",
+      "expect": {
+        "intent": "question",
+        "topic": "owed"
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "what's on tomorrow",
+      "expect": {
+        "intent": "question",
+        "topic": "appointments",
+        "period": [
+          {
+            "kind": "day",
+            "date": "2026-11-19"
+          }
+        ]
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "do I have anything Friday",
+      "expect": {
+        "intent": "question",
+        "topic": "appointments",
+        "period": [
+          {
+            "kind": "day",
+            "date": "2026-11-20"
+          }
+        ]
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "what's my schedule today",
+      "expect": {
+        "intent": "question",
+        "topic": "appointments",
+        "period": [
+          {
+            "kind": "today"
+          },
+          {
+            "kind": "day",
+            "date": "2026-11-18"
+          }
+        ]
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "when's my next appointment",
+      "expect": {
+        "intent": "question",
+        "topic": "next_appointment"
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "when is Jenna coming in next",
+      "expect": {
+        "intent": "question",
+        "topic": "next_appointment",
+        "client": "Jenna"
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "how much has Marcus paid me this year",
+      "expect": {
+        "intent": "question",
+        "topic": "client_paid",
+        "period": [
+          {
+            "kind": "this_year"
+          },
+          null
+        ],
+        "client": "Marcus Lee"
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "how much has Olivia Chen paid me in total",
+      "expect": {
+        "intent": "question",
+        "topic": "client_paid",
+        "period": {
+          "kind": "all_time"
+        },
+        "client": "Olivia Chen"
+      }
+    },
+    {
+      "ws": "w2",
+      "say": "how much did I make in tips last week",
+      "expect": {
+        "intent": "question",
+        "topic": "tips",
+        "period": {
+          "kind": "last_week"
+        }
+      }
+    },
+    {
+      "ws": "w2",
+      "say": "what did I make yesterday",
+      "expect": {
+        "intent": "question",
+        "topic": "income",
+        "period": {
+          "kind": "yesterday"
+        }
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "show my October P&L",
+      "expect": {
+        "intent": "open",
+        "page": "pl",
+        "period": {
+          "kind": "month",
+          "month": 10,
+          "year": [
+            null,
+            2026
+          ]
+        }
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "open my profit and loss for this year",
+      "expect": {
+        "intent": "open",
+        "page": "pl",
+        "period": {
+          "kind": "this_year"
+        }
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "open invoices",
+      "expect": {
+        "intent": "open",
+        "page": "invoices"
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "show me what's overdue",
+      "expect": {
+        "intent": [
+          "open",
+          "question"
+        ],
+        "page": [
+          "overdue",
+          null
+        ],
+        "topic": [
+          "overdue",
+          null
+        ]
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "open Jenna Morales's page",
+      "expect": {
+        "intent": "open",
+        "page": "client",
+        "client": "Jenna Morales"
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "go to booking Thursday",
+      "expect": {
+        "intent": "open",
+        "page": "booking",
+        "period": [
+          {
+            "kind": "day",
+            "date": "2026-11-19"
+          }
+        ]
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "show my receipts",
+      "expect": {
+        "intent": "open",
+        "page": "receipts"
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "take me to my clients",
+      "expect": {
+        "intent": "open",
+        "page": "clients"
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "open my quotes",
+      "expect": {
+        "intent": "open",
+        "page": "quotes"
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "made 270 today 9 to 5",
+      "expect": {
+        "intent": "log",
+        "form": "entry"
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "42 on gas at Shell",
+      "expect": {
+        "intent": "log",
+        "form": "expense"
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "drove 18 miles to a client",
+      "expect": {
+        "intent": "log",
+        "form": "expense"
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "invoice Jenna 120 for a cut",
+      "expect": {
+        "intent": "log",
+        "form": "invoice"
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "quote Marcus 2500 for a new deck",
+      "expect": {
+        "intent": "log",
+        "form": "quote"
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "book Jenna Thursday at 2",
+      "expect": {
+        "intent": "log",
+        "form": "booking"
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "move my 3 to 4",
+      "expect": {
+        "intent": "log",
+        "form": "booking"
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "new client Priya Patel 509 555 0142",
+      "expect": {
+        "intent": "log",
+        "form": "client"
+      }
+    },
+    {
+      "ws": "w2",
+      "say": "40 in tips tonight",
+      "expect": {
+        "intent": "log",
+        "form": "entry"
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "how much do I owe in taxes",
+      "expect": {
+        "intent": "none"
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "change my mileage rate in settings",
+      "expect": {
+        "intent": "none"
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "charge Jenna 60 dollars",
+      "expect": {
+        "intent": "none"
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "what's the weather",
+      "expect": {
+        "intent": "none"
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "How much did I make in Venmo in October",
+      "expect": {
+        "intent": "question",
+        "topic": "income",
+        "paymentMethod": "venmo",
+        "period": {
+          "kind": "month",
+          "month": 10
+        }
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "how much came in through Zelle this week",
+      "expect": {
+        "intent": "question",
+        "topic": "income",
+        "paymentMethod": "zelle",
+        "period": {
+          "kind": "this_week"
+        }
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "how much did I make in cash tips today",
+      "expect": {
+        "intent": "question",
+        "topic": "tips",
+        "paymentMethod": "cash",
+        "period": {
+          "kind": "today"
+        }
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "what did I make by card yesterday",
+      "expect": {
+        "intent": "question",
+        "topic": "income",
+        "paymentMethod": "card",
+        "period": {
+          "kind": "yesterday"
+        }
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "how's my Cash App money this month compared to last month",
+      "expect": {
+        "intent": "question",
+        "topic": [
+          "compare_income",
+          "income"
+        ],
+        "paymentMethod": "cash_app"
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "how much did I make on PayPal last month",
+      "expect": {
+        "intent": "question",
+        "topic": "income",
+        "unsupported": true,
+        "period": {
+          "kind": "last_month"
+        }
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "how much did I make from haircuts this month",
+      "expect": {
+        "intent": "question",
+        "topic": "income",
+        "unsupported": true
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "Add an expense",
+      "expect": {
+        "intent": "log",
+        "form": "expense",
+        "hasDetails": false
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "log some income",
+      "expect": {
+        "intent": "log",
+        "form": "entry",
+        "hasDetails": false
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "I want to book an appointment",
+      "expect": {
+        "intent": "log",
+        "form": "booking",
+        "hasDetails": false
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "new invoice",
+      "expect": {
+        "intent": [
+          "log",
+          "open"
+        ],
+        "form": [
+          "invoice",
+          null
+        ],
+        "page": [
+          null,
+          "invoices"
+        ]
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "add a new client",
+      "expect": {
+        "intent": "log",
+        "form": "client",
+        "hasDetails": false
+      }
+    },
+    {
+      "ws": "independent",
+      "say": "Add an expense for $25.36 at Walmart for paint and concealer",
+      "expect": {
+        "intent": "log",
+        "form": "expense",
+        "hasDetails": true
+      }
+    }
+  ]
+}

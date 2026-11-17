@@ -37,6 +37,8 @@ export function BookingCalendar({
   busy = [],
   settings,
   timeZone,
+  initialDate = null,
+  onSelectedChange,
 }: {
   // Only ones that are happening (no canceled, declined or expired).
   appointments: AppointmentType[]
@@ -44,11 +46,15 @@ export function BookingCalendar({
   busy?: Array<{ start: string; end: string; calendar: string }>
   settings: BookingSettings | null
   timeZone: string
+  // A day to open on (Ask 521's "what's on Thursday" → Show me).
+  initialDate?: string | null
+  // The day being looked at (voice's "move my 3" is on it).
+  onSelectedChange?: (date: string) => void
 }) {
   const router = useRouter()
   const hours = settings ?? BookingSettingsSchema.parse({})
   const [today, setToday] = useState(() => calendarToday(timeZone))
-  const [selected, setSelected] = useState(today)
+  const [selected, setSelected] = useState(initialDate ?? today)
   const [nowMinutes, setNowMinutes] = useState(() => calendarNowMinutes(timeZone))
 
   // The "now" line moves, and today rolls over at midnight.
@@ -61,6 +67,10 @@ export function BookingCalendar({
     const timer = window.setInterval(tick, 60_000)
     return () => window.clearInterval(timer)
   }, [timeZone])
+
+  useEffect(() => {
+    onSelectedChange?.(selected)
+  }, [onSelectedChange, selected])
 
   const week = useMemo(() => calendarWeek(selected), [selected])
   const byDate = useMemo(() => {
@@ -254,6 +264,7 @@ export function BookingCalendar({
                 ) : null}
                 <button
                   type="button"
+                  data-ask-line={appointment.id}
                   onClick={(event) => {
                     event.stopPropagation()
                     router.push(`/app/booking/view?id=${encodeURIComponent(appointment.id)}`)

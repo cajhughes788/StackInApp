@@ -226,7 +226,7 @@ function rowDetail(invoice: InvoiceType): string {
 // page) over its number and latest event, amount and status on the right.
 export function InvoiceRow({ invoice, title, today }: { invoice: InvoiceType; title: string; today: string }) {
   return (
-    <li className="border-b border-border last:border-0">
+    <li data-ask-line={invoice.id} className="border-b border-border last:border-0">
       <Link
         href={`/app/invoices/view?id=${encodeURIComponent(invoice.id)}`}
         className="flex items-center gap-3 px-4 py-3.5 hover:bg-muted/50"

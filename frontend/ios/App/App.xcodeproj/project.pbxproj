@@ -20,6 +20,7 @@
 		70ADCACFAF0B328A8A83CF8E /* AppCheckPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = F53E5711B333EB5A2A0879C0 /* AppCheckPlugin.swift */; };
 		955D9F22056A0AC49D411813 /* CrashReportsPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2529FE579E19FE73B291EB7 /* CrashReportsPlugin.swift */; };
 		5E1A0C2B7D4F4E9A8B3C6D01 /* NativeSpeechPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E1A0C2B7D4F4E9A8B3C6D02 /* NativeSpeechPlugin.swift */; };
+		5E1A0C2B7D4F4E9A8B3C6E01 /* VoiceLaunchPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E1A0C2B7D4F4E9A8B3C6E02 /* VoiceLaunchPlugin.swift */; };
 		A084ECDBA7D38E1E42DFC39D /* Pods_App.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AF277DCFFFF123FFC6DF26C7 /* Pods_App.framework */; };
 		A0DB4A00A6964C9D8565B96C /* NativePlacePickerPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBC521538E8C4DC0A50E91AB /* NativePlacePickerPlugin.swift */; };
 		A7B9D0E4D9F54B359C35A10A /* NativePrintPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6E5DFA640EE427AA028C9ED /* NativePrintPlugin.swift */; };
@@ -44,6 +45,7 @@
 		9A7224A525D94D35AF8A8F73 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		A2529FE579E19FE73B291EB7 /* CrashReportsPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CrashReportsPlugin.swift; sourceTree = "<group>"; };
 		5E1A0C2B7D4F4E9A8B3C6D02 /* NativeSpeechPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NativeSpeechPlugin.swift; sourceTree = "<group>"; };
+		5E1A0C2B7D4F4E9A8B3C6E02 /* VoiceLaunchPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VoiceLaunchPlugin.swift; sourceTree = "<group>"; };
 		AF277DCFFFF123FFC6DF26C7 /* Pods_App.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_App.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		AF51FD2D460BCFE21FA515B2 /* Pods-App.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-App.release.xcconfig"; path = "Pods/Target Support Files/Pods-App/Pods-App.release.xcconfig"; sourceTree = "<group>"; };
 		B6E5DFA640EE427AA028C9ED /* NativePrintPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePrintPlugin.swift; sourceTree = "<group>"; };
@@ -115,6 +117,7 @@
 				F53E5711B333EB5A2A0879C0 /* AppCheckPlugin.swift */,
 				A2529FE579E19FE73B291EB7 /* CrashReportsPlugin.swift */,
 				5E1A0C2B7D4F4E9A8B3C6D02 /* NativeSpeechPlugin.swift */,
+				5E1A0C2B7D4F4E9A8B3C6E02 /* VoiceLaunchPlugin.swift */,
 				5A1D0C3E9B7F4E21A0C4D101 /* NativePlaidLinkPlugin.swift */,
 			);
 			path = App;
@@ -281,6 +284,7 @@
 				70ADCACFAF0B328A8A83CF8E /* AppCheckPlugin.swift in Sources */,
 				955D9F22056A0AC49D411813 /* CrashReportsPlugin.swift in Sources */,
 				5E1A0C2B7D4F4E9A8B3C6D01 /* NativeSpeechPlugin.swift in Sources */,
+				5E1A0C2B7D4F4E9A8B3C6E01 /* VoiceLaunchPlugin.swift in Sources */,
 				5A1D0C3E9B7F4E21A0C4D102 /* NativePlaidLinkPlugin.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

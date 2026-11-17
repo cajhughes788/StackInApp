@@ -1,0 +1,700 @@
+{
+  "_about": "Real-style sentences for booking by voice, scored by scripts/eval-voice-booking.cjs. Today is fixed at 2026-11-16 (a Monday). mode 'book' = the New appointment form; 'any' = the Booking page (book or move). Fields left out of 'expect' must come back null (action defaults to 'book'). Times compare as hour on a 12-hour clock, minute, and meridiem (a list = any of those); a 24-hour hour counts as pm. Names, emails and services compare ignoring case; phones by digits. 'locationHas' must appear in the location. Add a case whenever someone's real sentence fills it wrong.",
+  "today": "2026-11-16",
+  "clients": [
+    "Jenna Morales",
+    "Jenna Smith",
+    "Marcus Lee",
+    "Olivia Chen"
+  ],
+  "services": [
+    "Haircut",
+    "Root color",
+    "Full color",
+    "Blowout",
+    "Beard trim"
+  ],
+  "cases": [
+    {
+      "mode": "any",
+      "say": "Book Jenna Thursday at 2 for a cut",
+      "expect": {
+        "action": "book",
+        "clientName": "Jenna",
+        "serviceName": "Haircut",
+        "date": "2026-11-19",
+        "time": {
+          "hour": 2,
+          "minute": 0,
+          "meridiem": null
+        }
+      }
+    },
+    {
+      "mode": "book",
+      "say": "Marcus tomorrow at 10 for a beard trim",
+      "expect": {
+        "clientName": [
+          "Marcus",
+          "Marcus Lee"
+        ],
+        "serviceName": "Beard trim",
+        "date": "2026-11-17",
+        "time": {
+          "hour": 10,
+          "minute": 0,
+          "meridiem": null
+        }
+      }
+    },
+    {
+      "mode": "book",
+      "say": "Olivia Chen next Monday at 9:30 am for a full color",
+      "expect": {
+        "clientName": "Olivia Chen",
+        "serviceName": "Full color",
+        "date": "2026-11-23",
+        "time": {
+          "hour": 9,
+          "minute": 30,
+          "meridiem": "am"
+        }
+      }
+    },
+    {
+      "mode": "any",
+      "say": "Put Priya Patel down for a blowout Saturday at 11, her number is 509 555 0142",
+      "expect": {
+        "action": "book",
+        "clientName": "Priya Patel",
+        "clientPhone": "5095550142",
+        "serviceName": "Blowout",
+        "date": "2026-11-21",
+        "time": {
+          "hour": 11,
+          "minute": 0,
+          "meridiem": null
+        }
+      }
+    },
+    {
+      "mode": "book",
+      "say": "Jenna Morales color on the 24th at 1",
+      "expect": {
+        "clientName": "Jenna Morales",
+        "serviceName": [
+          "Color"
+        ],
+        "date": "2026-11-24",
+        "time": {
+          "hour": 1,
+          "minute": 0,
+          "meridiem": null
+        }
+      }
+    },
+    {
+      "mode": "book",
+      "say": "Book Marcus for a haircut Friday at 3, 50 this time, already confirmed",
+      "expect": {
+        "clientName": [
+          "Marcus",
+          "Marcus Lee"
+        ],
+        "serviceName": "Haircut",
+        "price": 50,
+        "confirmNow": true,
+        "date": "2026-11-20",
+        "time": {
+          "hour": 3,
+          "minute": 0,
+          "meridiem": null
+        }
+      }
+    },
+    {
+      "mode": "book",
+      "say": "Kids trim for Sam Lee Wednesday at 4 for 30 minutes, 25 dollars",
+      "expect": {
+        "clientName": "Sam Lee",
+        "serviceName": "Kids trim",
+        "minutes": 30,
+        "price": 25,
+        "date": "2026-11-18",
+        "time": {
+          "hour": 4,
+          "minute": 0,
+          "meridiem": null
+        }
+      }
+    },
+    {
+      "mode": "book",
+      "say": "Olivia Thursday 2:30 in the afternoon, root color, an hour and a half",
+      "expect": {
+        "clientName": [
+          "Olivia",
+          "Olivia Chen"
+        ],
+        "serviceName": "Root color",
+        "minutes": 90,
+        "date": "2026-11-19",
+        "time": {
+          "hour": 2,
+          "minute": 30,
+          "meridiem": "pm"
+        }
+      }
+    },
+    {
+      "mode": "book",
+      "say": "Jenna Smith tonight at 7 blowout at her house on 5th Street",
+      "expect": {
+        "clientName": "Jenna Smith",
+        "serviceName": "Blowout",
+        "date": "2026-11-16",
+        "time": {
+          "hour": 7,
+          "minute": 0,
+          "meridiem": "pm"
+        },
+        "locationHas": "5th"
+      }
+    },
+    {
+      "mode": "book",
+      "say": "book Marcus at noon tomorrow haircut",
+      "expect": {
+        "clientName": [
+          "Marcus",
+          "Marcus Lee"
+        ],
+        "serviceName": "Haircut",
+        "date": "2026-11-17",
+        "time": {
+          "hour": 12,
+          "minute": 0,
+          "meridiem": [
+            "pm",
+            null
+          ]
+        }
+      }
+    },
+    {
+      "mode": "book",
+      "say": "Olivia haircut Friday at 230",
+      "expect": {
+        "clientName": [
+          "Olivia",
+          "Olivia Chen"
+        ],
+        "serviceName": "Haircut",
+        "date": "2026-11-20",
+        "time": {
+          "hour": 2,
+          "minute": 30,
+          "meridiem": null
+        }
+      }
+    },
+    {
+      "mode": "book",
+      "say": "quarter to 4 on Thursday for Jenna Morales, root color",
+      "expect": {
+        "clientName": "Jenna Morales",
+        "serviceName": "Root color",
+        "date": "2026-11-19",
+        "time": {
+          "hour": 3,
+          "minute": 45,
+          "meridiem": null
+        }
+      }
+    },
+    {
+      "mode": "any",
+      "say": "Book Dana Fox a haircut Monday at 10, email dana fox at yahoo dot com",
+      "expect": {
+        "action": "book",
+        "clientName": "Dana Fox",
+        "clientEmail": [
+          "danafox@yahoo.com",
+          "dana.fox@yahoo.com"
+        ],
+        "serviceName": "Haircut",
+        "date": "2026-11-23",
+        "time": {
+          "hour": 10,
+          "minute": 0,
+          "meridiem": null
+        }
+      }
+    },
+    {
+      "mode": "any",
+      "say": "Book Marcus Lee for a beard trim on December 2nd at 9 in the morning",
+      "expect": {
+        "action": "book",
+        "clientName": "Marcus Lee",
+        "serviceName": "Beard trim",
+        "date": "2026-12-02",
+        "time": {
+          "hour": 9,
+          "minute": 0,
+          "meridiem": "am"
+        }
+      }
+    },
+    {
+      "mode": "book",
+      "say": "Jenna haircut Thursday at 2, ask her to confirm",
+      "expect": {
+        "clientName": "Jenna",
+        "serviceName": "Haircut",
+        "date": "2026-11-19",
+        "time": {
+          "hour": 2,
+          "minute": 0,
+          "meridiem": null
+        },
+        "confirmNow": false
+      }
+    },
+    {
+      "mode": "any",
+      "say": "I spent 40 on gas at Shell",
+      "expect": {
+        "action": "none"
+      }
+    },
+    {
+      "mode": "book",
+      "say": "what's the weather tomorrow",
+      "expect": {
+        "action": "none"
+      }
+    },
+    {
+      "mode": "any",
+      "say": "move my 3 to 4",
+      "expect": {
+        "action": "move",
+        "fromTime": {
+          "hour": 3,
+          "minute": 0,
+          "meridiem": null
+        },
+        "time": {
+          "hour": 4,
+          "minute": 0,
+          "meridiem": null
+        }
+      }
+    },
+    {
+      "mode": "any",
+      "say": "move Jenna to Friday at 10",
+      "expect": {
+        "action": "move",
+        "fromClient": "Jenna",
+        "date": "2026-11-20",
+        "time": {
+          "hour": 10,
+          "minute": 0,
+          "meridiem": null
+        }
+      }
+    },
+    {
+      "mode": "any",
+      "say": "move Thursday's 3 o'clock to 5",
+      "expect": {
+        "action": "move",
+        "fromDate": "2026-11-19",
+        "fromTime": {
+          "hour": 3,
+          "minute": 0,
+          "meridiem": null
+        },
+        "time": {
+          "hour": 5,
+          "minute": 0,
+          "meridiem": null
+        }
+      }
+    },
+    {
+      "mode": "any",
+      "say": "push Marcus Lee to Wednesday",
+      "expect": {
+        "action": "move",
+        "fromClient": "Marcus Lee",
+        "date": "2026-11-18"
+      }
+    },
+    {
+      "mode": "any",
+      "say": "move Olivia's appointment tomorrow to 2 pm",
+      "expect": {
+        "action": "move",
+        "fromClient": [
+          "Olivia",
+          "Olivia Chen"
+        ],
+        "fromDate": [
+          "2026-11-17",
+          null
+        ],
+        "date": [
+          null,
+          "2026-11-17"
+        ],
+        "time": {
+          "hour": 2,
+          "minute": 0,
+          "meridiem": "pm"
+        }
+      }
+    },
+    {
+      "mode": "any",
+      "say": "move my 10 am to 11:30",
+      "expect": {
+        "action": "move",
+        "fromTime": {
+          "hour": 10,
+          "minute": 0,
+          "meridiem": "am"
+        },
+        "time": {
+          "hour": 11,
+          "minute": 30,
+          "meridiem": [
+            null,
+            "am"
+          ]
+        }
+      }
+    },
+    {
+      "mode": "any",
+      "say": "can you move today's 2 o'clock to 4:15",
+      "expect": {
+        "action": "move",
+        "fromDate": [
+          "2026-11-16",
+          null
+        ],
+        "fromTime": {
+          "hour": 2,
+          "minute": 0,
+          "meridiem": null
+        },
+        "time": {
+          "hour": 4,
+          "minute": 15,
+          "meridiem": null
+        }
+      }
+    },
+    {
+      "mode": "any",
+      "say": "reschedule Jenna Smith to next Tuesday at 1",
+      "expect": {
+        "action": "move",
+        "fromClient": "Jenna Smith",
+        "date": "2026-11-24",
+        "time": {
+          "hour": 1,
+          "minute": 0,
+          "meridiem": null
+        }
+      }
+    },
+    {
+      "mode": "any",
+      "say": "move Marcus's 10 to 11",
+      "expect": {
+        "action": "move",
+        "fromClient": [
+          "Marcus",
+          "Marcus Lee"
+        ],
+        "fromTime": {
+          "hour": 10,
+          "minute": 0,
+          "meridiem": null
+        },
+        "time": {
+          "hour": 11,
+          "minute": 0,
+          "meridiem": null
+        }
+      }
+    },
+    {
+      "mode": "book",
+      "say": "make it 3 instead",
+      "expect": {
+        "time": {
+          "hour": 3,
+          "minute": 0,
+          "meridiem": null
+        }
+      },
+      "current": {
+        "clientName": "Jenna Morales",
+        "clientEmail": null,
+        "clientPhone": null,
+        "serviceName": "Haircut",
+        "price": 45,
+        "minutes": 60,
+        "date": "2026-11-19",
+        "startTime": "14:00",
+        "location": null
+      }
+    },
+    {
+      "mode": "book",
+      "say": "Friday",
+      "expect": {
+        "date": "2026-11-20"
+      },
+      "current": {
+        "clientName": "Jenna Morales",
+        "clientEmail": null,
+        "clientPhone": null,
+        "serviceName": "Haircut",
+        "price": 45,
+        "minutes": 60,
+        "date": "2026-11-19",
+        "startTime": "14:00",
+        "location": null
+      }
+    },
+    {
+      "mode": "book",
+      "say": "it's Jenna Smith",
+      "expect": {
+        "clientName": "Jenna Smith"
+      },
+      "current": {
+        "clientName": "Jenna Morales",
+        "clientEmail": null,
+        "clientPhone": null,
+        "serviceName": "Haircut",
+        "price": 45,
+        "minutes": 60,
+        "date": "2026-11-19",
+        "startTime": "14:00",
+        "location": null
+      }
+    },
+    {
+      "mode": "book",
+      "say": "make it a blowout",
+      "expect": {
+        "serviceName": "Blowout"
+      },
+      "current": {
+        "clientName": "Jenna Morales",
+        "clientEmail": null,
+        "clientPhone": null,
+        "serviceName": "Haircut",
+        "price": 45,
+        "minutes": 60,
+        "date": "2026-11-19",
+        "startTime": "14:00",
+        "location": null
+      }
+    },
+    {
+      "mode": "book",
+      "say": "make it 60 dollars",
+      "expect": {
+        "price": 60
+      },
+      "current": {
+        "clientName": "Jenna Morales",
+        "clientEmail": null,
+        "clientPhone": null,
+        "serviceName": "Haircut",
+        "price": 45,
+        "minutes": 60,
+        "date": "2026-11-19",
+        "startTime": "14:00",
+        "location": null
+      }
+    },
+    {
+      "mode": "book",
+      "say": "make it two hours",
+      "expect": {
+        "minutes": 120
+      },
+      "current": {
+        "clientName": "Jenna Morales",
+        "clientEmail": null,
+        "clientPhone": null,
+        "serviceName": "Haircut",
+        "price": 45,
+        "minutes": 60,
+        "date": "2026-11-19",
+        "startTime": "14:00",
+        "location": null
+      }
+    },
+    {
+      "mode": "book",
+      "say": "actually it's already confirmed",
+      "expect": {
+        "confirmNow": true
+      },
+      "current": {
+        "clientName": "Jenna Morales",
+        "clientEmail": null,
+        "clientPhone": null,
+        "serviceName": "Haircut",
+        "price": 45,
+        "minutes": 60,
+        "date": "2026-11-19",
+        "startTime": "14:00",
+        "location": null
+      }
+    },
+    {
+      "mode": "book",
+      "say": "her number is 208 555 0199",
+      "expect": {
+        "clientPhone": "2085550199"
+      },
+      "current": {
+        "clientName": "Jenna Morales",
+        "clientEmail": null,
+        "clientPhone": null,
+        "serviceName": "Haircut",
+        "price": 45,
+        "minutes": 60,
+        "date": "2026-11-19",
+        "startTime": "14:00",
+        "location": null
+      }
+    },
+    {
+      "mode": "book",
+      "say": "Friday at 11 instead",
+      "expect": {
+        "date": "2026-11-20",
+        "time": {
+          "hour": 11,
+          "minute": 0,
+          "meridiem": null
+        }
+      },
+      "current": {
+        "clientName": "Jenna Morales",
+        "clientEmail": null,
+        "clientPhone": null,
+        "serviceName": "Haircut",
+        "price": 45,
+        "minutes": 60,
+        "date": "2026-11-19",
+        "startTime": "14:00",
+        "location": null
+      }
+    },
+    {
+      "mode": "book",
+      "say": "make it 4:30",
+      "expect": {
+        "time": {
+          "hour": 4,
+          "minute": 30,
+          "meridiem": null
+        }
+      },
+      "current": {
+        "clientName": "Jenna Morales",
+        "clientEmail": null,
+        "clientPhone": null,
+        "serviceName": "Haircut",
+        "price": 45,
+        "minutes": 60,
+        "date": "2026-11-19",
+        "startTime": "14:00",
+        "location": null
+      }
+    },
+    {
+      "mode": "book",
+      "say": "tom goggin at gmail dot com, a haircut",
+      "asking": [
+        "client email or phone",
+        "service"
+      ],
+      "current": {
+        "clientName": "Tom Goggin",
+        "clientEmail": null,
+        "clientPhone": null,
+        "serviceName": null,
+        "price": null,
+        "minutes": 60,
+        "date": "2026-11-20",
+        "startTime": "13:30",
+        "location": null
+      },
+      "expect": {
+        "clientEmail": [
+          "tomgoggin@gmail.com",
+          "tom.goggin@gmail.com"
+        ],
+        "serviceName": "Haircut"
+      }
+    },
+    {
+      "mode": "book",
+      "say": "509 555 0199 and a beard trim",
+      "asking": [
+        "client email or phone",
+        "service"
+      ],
+      "current": {
+        "clientName": "Tom Goggin",
+        "clientEmail": null,
+        "clientPhone": null,
+        "serviceName": null,
+        "price": null,
+        "minutes": 60,
+        "date": "2026-11-20",
+        "startTime": "13:30",
+        "location": null
+      },
+      "expect": {
+        "clientPhone": "5095550199",
+        "serviceName": "Beard trim"
+      }
+    },
+    {
+      "mode": "book",
+      "say": "blowout",
+      "asking": [
+        "service"
+      ],
+      "current": {
+        "clientName": "Tom Goggin",
+        "clientEmail": null,
+        "clientPhone": "5095550199",
+        "serviceName": null,
+        "price": null,
+        "minutes": 60,
+        "date": "2026-11-20",
+        "startTime": "13:30",
+        "location": null
+      },
+      "expect": {
+        "serviceName": "Blowout"
+      }
+    }
+  ]
+}

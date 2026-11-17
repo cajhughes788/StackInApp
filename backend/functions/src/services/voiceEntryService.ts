@@ -29,6 +29,19 @@ export async function reserveVoiceFill(uid: string): Promise<void> {
   })
 }
 
+/** Gives back one of today's voice fills. Ask 521's "log" hands the words
+ * to a form whose own fill is the one counted, so the ask itself shouldn't be. */
+export async function releaseVoiceFill(uid: string): Promise<void> {
+  const ref = db.collection("users").doc(uid).collection("counters").doc("voiceEntry")
+  const today = new Date().toISOString().slice(0, 10)
+  await db.runTransaction(async (txn) => {
+    const snap = await txn.get(ref)
+    if (snap.data()?.date !== today) return
+    const count = Number(snap.data()?.count ?? 0)
+    if (count > 0) txn.set(ref, { count: count - 1 }, { merge: true })
+  })
+}
+
 // Turns a spoken entry ("made 270 today, 9 to 5, 40 in tips") into Add entry
 // form fields. Only the typed-out words reach this server — never the audio,
 // which goes only to the phone's own speech recognition — and nothing is saved here: the app fills the form
@@ -38,7 +51,9 @@ export async function reserveVoiceFill(uid: string): Promise<void> {
 // app shows come from the person's own records.
 
 // Fast and cheap: a reply has to come back while the person waits.
-const MODEL = "claude-haiku-5-5"
+// Voice expenses (voiceExpenseService.ts) use the same model and settings.
+export const VOICE_MODEL = "claude-haiku-5-5"
+const MODEL = VOICE_MODEL
 
 const FIELD_HELP: Record<(typeof VOICE_AMOUNT_TARGETS)[number], string> = {
   venmo: "money received by Venmo",
@@ -63,16 +78,26 @@ const SYSTEM_PROMPT = [
   "",
   "Rules:",
   "- date: YYYY-MM-DD. 'today' or no day mentioned = null (the form already shows today). Work out 'yesterday', 'Monday', 'last Friday' from the today date you're given; a weekday means the most recent one on or before today.",
-  "- inTime / outTime: 24-hour HH:MM. Work hours are usually daytime: '9 to 5' = 09:00 to 17:00, '4 to midnight' = 16:00 to 00:00, '11 to 7' = 11:00 to 19:00. Use AM/PM when they say it.",
+  "- inTime / outTime: 24-hour HH:MM. Use AM/PM when they say it. When they don't: a start of 6–11 is morning, 12 is noon, 1–5 is afternoon, and the end is the first time after the start that fits. '9 to 5' = 09:00 to 17:00, '2:47 to 11:21' = 14:47 to 23:21, '11 to 7' = 11:00 to 19:00, '7 to 3:30' = 07:00 to 15:30, '5 to 1' = 17:00 to 01:00, '4 to midnight' = 16:00 to 00:00.",
+  "- Speech-to-text often garbles spoken times. When the words are clearly a time range, read 'to' or 'too' right before a minutes number as 2 ('worked to 47 to 1121' = 2:47 to 11:21), 'for' as 4, 'ate' as 8, and run-together digits as hour and minutes ('1121' = 11:21, '247' = 2:47, '930' = 9:30). A number with $ or a money word is money, not a time. Then apply the morning/afternoon rule above to the repaired times: 'in at for 30, out at 1145' = 16:30 to 23:45.",
+  "- timesUnclear: true when they seem to give work times but you still can't tell what the times are; then leave inTime and outTime null. Otherwise false.",
   "- hours: only when they say a number of hours ('worked 8 hours'). Don't work it out from in/out times.",
   "- positionId: only when they name a position from the list given; use its id.",
-  "- amounts: one item per amount said. Pick the target from the fields this form has. A payment method or tips word decides the target. If the amount's kind isn't said, use 'unsure' — don't guess sales vs tips vs cash. Tips with no way to tell which tips field (when more than one fits) = 'tipsUnsure'.",
+  "- amounts: one item per amount said. Pick the target from the fields this form has. A payment method or tips word decides the target. If the amount's kind isn't said, use 'unsure' — don't guess sales vs tips vs cash. Tips with no way to tell which tips field (when more than one fits) = 'tipsUnsure' — never plain 'unsure' when they said tips ('62 dollars in tips').",
   "- category: only for venmo, appleCash, zelle, checks, cashApp — 'services', 'tips', 'products' or 'other' when said, else null. Always null for other targets.",
-  "- A payment word alone is enough: '300 cash' or 'two seventy in cash' = cashSales, '1.2k card' or 'on Square' = posSales, 'Venmo 85' = venmo. On a W-2 form, cash with no other word = 'unsure' (whether they report it is their call). Use personalCash only when they say personal, unreported or off the books.",
+  "- A payment word alone is enough: on a self-employed form '300 cash', 'yesterday 180 cash' or 'two seventy in cash' = cashSales, '1.2k card' or 'on Square' = posSales, 'Venmo 85' = venmo. On a W-2 form, cash with no other word = 'unsure' (whether they report it is their call). Use personalCash only when they say personal, unreported or off the books.",
   "- When they say part of one payment was tips ('Venmo 60, and 15 of it was tips'), split that one payment: the tips part with category 'tips' and the rest (60 − 15 = 45) with category null. Never list the whole 60 and the 15 both — that would count the 15 twice. This is the only time you subtract.",
   "- 'tips' with only one tips field on the form goes to that field.",
   "- notes: a short note only when they give extra detail worth keeping (a client name, what the work was). Otherwise null.",
   "- isEntry: false when the words aren't about logging money or work at all.",
+  "- remove: [] unless they're fixing the form (below).",
+  "",
+  "Fixing: when you're given 'Already on the form', the person is correcting that form. Return only what the new words change; leave everything else null and out of amounts, and set isEntry true.",
+  "- Times: 'make that PM', 'no, 2:47 to 11:21', 'I got out at 11:30' — always return both inTime and outTime, keeping the one they didn't change from the form.",
+  "- An amount they correct ('tips were 313', 'no, 313') replaces the one on the form: use the target it has there. An 'unsure' amount stays 'unsure' unless they now say what it was ('the 331 was tips' = that amount with a tips target).",
+  "- More added to an amount already there ('another 20 cash') = return that field's new total (300 + 20 = 320), since what you return replaces the box.",
+  "- Taking an amount off ('no cash', 'take off the Venmo') = put its target in remove. Never return an amount of 0.",
+  "- Saying where an 'unsure' amount goes ('that was tips') = that amount with its new target.",
   "",
   "Amounts are plain numbers: 'two seventy' = 270, '1.5k' = 1500, 'forty bucks' = 40.",
 ].join("\n")
@@ -87,6 +112,7 @@ const OUTPUT_SCHEMA = {
     hours: nullable({ type: "number" }),
     inTime: nullable({ type: "string" }),
     outTime: nullable({ type: "string" }),
+    timesUnclear: { type: "boolean" },
     positionId: nullable({ type: "string" }),
     amounts: {
       type: "array",
@@ -102,12 +128,16 @@ const OUTPUT_SCHEMA = {
       },
     },
     notes: nullable({ type: "string" }),
+    remove: { type: "array", items: { type: "string", enum: [...VOICE_AMOUNT_TARGETS] } },
   },
-  required: ["isEntry", "date", "hours", "inTime", "outTime", "positionId", "amounts", "notes"],
+  required: ["isEntry", "date", "hours", "inTime", "outTime", "timesUnclear", "positionId", "amounts", "notes", "remove"],
   additionalProperties: false,
 }
 
 let client: Anthropic | null = null
+export function getVoiceClient(): Anthropic {
+  return getClient()
+}
 function getClient(): Anthropic {
   if (client) return client
   const apiKey = ANTHROPIC_API_KEY.value()
@@ -121,6 +151,28 @@ function weekdayOf(dateKey: string): string {
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" })
 }
 
+/** The voice button asked for something ("Say the client's email"): the answer is that. */
+export function askedLines(asking: readonly string[] | undefined): string[] {
+  if (!asking || asking.length === 0) return []
+  return [
+    `They were just asked for: ${asking.join(", ")}. A short answer on its own (just an email, a phone number, a name, an amount, a service) is that; fill those fields from it and leave everything else as it is.`,
+    "",
+  ]
+}
+
+function describeCurrent(current: NonNullable<VoiceEntryRequest["current"]>): string {
+  const amounts = current.amounts.map(
+    (item) => `${item.target}${item.category ? ` (${item.category})` : ""} ${item.amount}`
+  )
+  return [
+    `- date: ${current.date ?? "today"}`,
+    `- inTime: ${current.inTime ?? "none"}, outTime: ${current.outTime ?? "none"}`,
+    `- hours: ${current.hours ?? "none"}`,
+    `- positionId: ${current.positionId ?? "none"}`,
+    `- amounts: ${amounts.length > 0 ? amounts.join("; ") : "none"}`,
+  ].join("\n")
+}
+
 function buildUserContent(request: VoiceEntryRequest): string {
   const fields = request.fields.length > 0 ? request.fields : (["unsure"] as const)
   return [
@@ -132,7 +184,9 @@ function buildUserContent(request: VoiceEntryRequest): string {
     request.positions.length > 0
       ? `Positions: ${request.positions.map((p) => `${p.id} = ${p.title}`).join("; ")}`
       : "Positions: none",
+    ...(request.current ? ["", "Already on the form (they're fixing it):", describeCurrent(request.current)] : []),
     "",
+    ...askedLines(request.asking),
     "What they said:",
     `"""${request.transcript}"""`,
   ].join("\n")
@@ -144,9 +198,11 @@ const EMPTY_RESULT: VoiceEntryResult = {
   hours: null,
   inTime: null,
   outTime: null,
+  timesUnclear: false,
   positionId: null,
   amounts: [],
   notes: null,
+  remove: [],
 }
 
 // "adaptive" lets the model think briefly; "off" skips thinking for speed.
@@ -155,6 +211,7 @@ const EMPTY_RESULT: VoiceEntryResult = {
 export type VoiceThinking = "adaptive" | "off"
 // 2026-11-16: off passed 40/40 on three runs, ~0.5s faster than adaptive.
 const THINKING: VoiceThinking = "off"
+export const VOICE_THINKING = THINKING
 
 export async function parseVoiceEntry(request: VoiceEntryRequest): Promise<VoiceEntryResult> {
   return parseVoiceEntryWith(getClient(), request, THINKING)
@@ -202,6 +259,11 @@ export async function parseVoiceEntryWith(
     console.warn("voiceEntry: reply wasn't JSON")
     return EMPTY_RESULT
   }
+  // An amount of 0 means nothing to fill; drop it rather than lose the whole reply.
+  if (raw && typeof raw === "object" && Array.isArray((raw as { amounts?: unknown }).amounts)) {
+    const reply = raw as { amounts: Array<{ amount?: unknown }> }
+    reply.amounts = reply.amounts.filter((item) => typeof item?.amount !== "number" || item.amount > 0)
+  }
   const parsed = VoiceEntryResultSchema.safeParse(raw)
   if (!parsed.success) {
     console.warn("voiceEntry: reply didn't match", parsed.error.flatten())
@@ -218,5 +280,10 @@ export async function parseVoiceEntryWith(
     amounts: result.amounts.map((item) =>
       allowed.has(item.target) ? item : { ...item, target: "unsure" as const, category: null }
     ),
+    // Only a fix can take amounts off, and only ones this form has.
+    // ("unsure" isn't a box, so there's nothing to take off.)
+    remove: request.current
+      ? result.remove.filter((target) => allowed.has(target) && target !== "unsure" && target !== "tipsUnsure")
+      : [],
   }
 }

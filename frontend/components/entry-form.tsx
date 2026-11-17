@@ -1,7 +1,7 @@
 // /components/entry-form.tsx
 "use client";
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
-import { Plus, Minus, X, Mic } from "lucide-react";
+import { Plus, Minus, X, Mic, Square } from "lucide-react";
 import { debounce } from "@/lib/timing";
 import { formatCurrency, getLocalDateInputValue } from "@/lib/helpers";
 import {
@@ -40,8 +40,10 @@ import { useSelectedPeriod } from "@/lib/stores/usePeriodSelectionStore";
 import { CUSTOM_POSITION_ID, CUSTOM_POSITION_TITLE, getRateOptions } from "@shared/hourlyRates";
 import { useSpeechCapture } from "@/hooks/useSpeechCapture";
 import { parseVoiceEntry, wakeVoiceEntry } from "@/lib/api/voiceEntryApi";
-import { planVoiceFill, voiceFieldsFor, voiceHintsFor, type VoiceAmountField, type VoiceQuestion } from "@/lib/voiceEntryFill";
+import { planVoiceFill, voiceCurrentFor, voiceFieldsFor, voiceHintsFor, VOICE_SOURCE_FIELDS, type VoiceAmountField, type VoiceQuestion } from "@/lib/voiceEntryFill";
 import { useVoiceEntryStore } from "@/lib/stores/useVoiceEntryStore";
+import { useVoiceHandoffStore } from "@/lib/stores/useVoiceHandoffStore";
+import { scrollToVoiceReview, VoiceReviewFooter, VoiceReviewLabel, type VoiceAsk } from "@/components/voice-review";
 function enforceHHMM(raw: string): string {
     const digits = raw.replace(/\D/g, "");
     if (digits.length === 1)
@@ -528,6 +530,16 @@ export default function EntryForm() {
     // The words the phone heard, shown with the filled form so a mishearing is easy to spot.
     const [voiceHeard, setVoiceHeard] = useState("");
     const voiceRunRef = useRef(0);
+    // The form as it was before voice first filled it, for the note's undo (X).
+    const voiceUndoRef = useRef<typeof form | null>(null);
+    // This recording fixes what voice already filled ("make that PM").
+    const voiceFixingRef = useRef(false);
+    // What the review's voice button asked for ("amount"), sent with that fix.
+    const voiceAskingRef = useRef<string[]>([]);
+    const formRef = useRef(form);
+    formRef.current = form;
+    const voiceQuestionsRef = useRef(voiceQuestions);
+    voiceQuestionsRef.current = voiceQuestions;
     /** Puts one amount in its field. "add" keeps what's already there. */
     const applyVoiceAmount = useCallback((prev: typeof form, field: VoiceAmountField, category: IncomeCategory | null, amount: number, mode: "set" | "add"): typeof form => {
         const asText = (n: number) => String(Math.round(n * 100) / 100);
@@ -550,6 +562,14 @@ export default function EntryForm() {
         const simple = field as "tips" | "reportedCash" | "unreportedCash" | "posTips" | "cashTips";
         return { ...prev, [simple]: asText((mode === "add" ? parseMoney(prev[simple]) : 0) + amount) };
     }, []);
+    /** Empties one amount box (a fix like "no cash"). */
+    const clearVoiceAmount = useCallback((prev: typeof form, field: VoiceAmountField): typeof form => {
+        if ((PAYMENT_REPEAT_FIELDS as readonly string[]).includes(field)) {
+            const source = field as PaymentField;
+            return { ...prev, [source]: "", paymentBreakdowns: { ...prev.paymentBreakdowns, [source]: emptyBreakdownDraft() } };
+        }
+        return { ...prev, [field]: "" };
+    }, []);
     /** Outlines the filled boxes for a moment so it's clear what changed. */
     const flashVoiceFields = useCallback((ids: string[]) => {
         window.setTimeout(() => {
@@ -571,12 +591,17 @@ export default function EntryForm() {
         if (!visibility || !activeWorkspace)
             return;
         const run = ++voiceRunRef.current;
+        const fixing = voiceFixingRef.current;
+        const openQuestions = fixing ? voiceQuestionsRef.current : [];
         setVoicePhase("thinking");
         setVoiceHeard(transcript);
         setVoiceNotes([]);
-        setVoiceQuestions([]);
-        setVoiceFilled(false);
+        if (!fixing) {
+            setVoiceQuestions([]);
+            setVoiceFilled(false);
+        }
         try {
+            const current = formRef.current;
             const result = await parseVoiceEntry({
                 transcript,
                 today,
@@ -585,6 +610,21 @@ export default function EntryForm() {
                 positions: visibility.mode === "w2" && visibility.showRate
                     ? rateOptions.filter((o) => o.id !== null).map((o) => ({ id: o.id as string, title: o.title }))
                     : [],
+                ...(fixing ? {
+                    asking: voiceAskingRef.current.length > 0 ? voiceAskingRef.current : undefined,
+                    current: voiceCurrentFor({
+                        date: current.date,
+                        today,
+                        inTime: current.inTime,
+                        inPeriod: current.inPeriod,
+                        outTime: current.outTime,
+                        outPeriod: current.outPeriod,
+                        hours: visibility.mode === "w2" ? current.hours : current.independentHours,
+                        positionId: current.positionId,
+                        amounts: Object.fromEntries([...VOICE_SOURCE_FIELDS, "posTips", "cashTips", "tips", "reportedCash", "unreportedCash"]
+                            .map((field) => [field, String((current as Record<string, unknown>)[field] ?? "")])),
+                    }, openQuestions, { visibility, tipsEnabled: Boolean(tipsEnabled) }),
+                } : {}),
             });
             if (run !== voiceRunRef.current)
                 return;
@@ -593,14 +633,20 @@ export default function EntryForm() {
                 tipsEnabled: Boolean(tipsEnabled),
                 dateBounds: dateInputBounds ? { start: dateInputBounds.start, end: dateInputBounds.end } : null,
             });
-            const nothingFilled = !plan.date && !plan.hours && !plan.inOut && !plan.positionId && plan.amounts.length === 0 && plan.questions.length === 0 && !plan.notes;
+            const nothingFilled = !plan.date && !plan.hours && !plan.inOut && !plan.positionId && plan.amounts.length === 0 && plan.questions.length === 0 && !plan.notes && plan.cleared.length === 0;
             if (!result.isEntry || nothingFilled) {
-                setVoiceNotes([...plan.skipped, "Didn't catch an entry in that. Try again, like \u201c270 today, 9 to 5.\u201d"]);
+                setVoiceNotes([...plan.skipped, fixing
+                        ? "Didn't catch a change in that. Try again, like \u201cmake that 2:47 PM to 11:21 PM.\u201d"
+                        : "Didn't catch an entry in that. Try again, like \u201c270 today, 9 to 5.\u201d"]);
                 return;
             }
             const flash: string[] = [];
             setForm((prev) => {
+                if (!voiceUndoRef.current)
+                    voiceUndoRef.current = prev;
                 let next = { ...prev };
+                for (const field of plan.cleared)
+                    next = clearVoiceAmount(next, field);
                 if (plan.date) {
                     next.date = plan.date;
                     flash.push("date");
@@ -642,11 +688,17 @@ export default function EntryForm() {
                 return next;
             });
             setExpanded(true);
-            setVoiceQuestions(plan.questions);
+            // New questions get ids from this run so they never clash with ones still open.
+            const newQuestions = plan.questions.map((q) => ({ ...q, id: `${run}-${q.id}` }));
+            // On a fix, an open question stays unless the fix placed or re-asked that amount.
+            const said = new Set([...plan.amounts, ...plan.questions].map((item) => item.amount));
+            setVoiceQuestions(fixing
+                ? [...openQuestions.filter((q) => !said.has(q.amount)), ...newQuestions]
+                : newQuestions);
             setVoiceNotes(plan.skipped);
             setVoiceFilled(true);
             flashVoiceFields(flash);
-            window.setTimeout(() => document.getElementById("voice-entry-note")?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
+            scrollToVoiceReview("voice-entry-review");
         }
         catch (error) {
             if (run !== voiceRunRef.current)
@@ -660,19 +712,37 @@ export default function EntryForm() {
             if (run === voiceRunRef.current)
                 setVoicePhase("idle");
         }
-    }, [visibility, activeWorkspace, today, tipsEnabled, rateOptions, dateInputBounds, settings, applyVoiceAmount, flashVoiceFields]);
+    }, [visibility, activeWorkspace, today, tipsEnabled, rateOptions, dateInputBounds, settings, applyVoiceAmount, clearVoiceAmount, flashVoiceFields]);
     const speech = useSpeechCapture((transcript) => void handleVoiceTranscript(transcript));
-    const startVoice = useCallback(() => {
+    /** With the filled-in note showing, the mic fixes what voice filled
+     * ("make that PM") instead of starting over. */
+    const startVoice = useCallback((ask?: VoiceAsk | null) => {
         wakeVoiceEntry();
         setExpanded(true);
         setVoiceNotes([]);
-        setVoiceQuestions([]);
-        setVoiceFilled(false);
+        voiceFixingRef.current = voiceFilled;
+        voiceAskingRef.current = voiceFilled && ask ? ask.asking : [];
+        if (!voiceFilled) {
+            setVoiceQuestions([]);
+            voiceUndoRef.current = null;
+        }
         speech.resetStatus();
         void speech.start(visibility
             ? voiceHintsFor(visibility, Boolean(tipsEnabled), visibility.mode === "w2" ? rateOptions.filter((o) => o.id !== null).map((o) => o.title) : [])
             : []);
-    }, [speech, visibility, tipsEnabled, rateOptions]);
+    }, [speech, visibility, tipsEnabled, rateOptions, voiceFilled]);
+    /** The note's X: puts the form back as it was before voice filled it. */
+    const undoVoiceFill = useCallback(() => {
+        const before = voiceUndoRef.current;
+        if (before)
+            setForm(before);
+        voiceUndoRef.current = null;
+        voiceFixingRef.current = false;
+        setVoiceFilled(false);
+        setVoiceQuestions([]);
+        setVoiceNotes([]);
+        setVoiceHeard("");
+    }, []);
     const answerVoiceQuestion = useCallback((question: VoiceQuestion, choice: { field: VoiceAmountField; category: IncomeCategory | null } | null) => {
         if (choice) {
             setForm((prev) => applyVoiceAmount(prev, choice.field, choice.category, question.amount, "add"));
@@ -696,6 +766,27 @@ export default function EntryForm() {
         if (voiceRequest.listen && speech.supported)
             startVoice();
     }, [voiceRequest, activeWorkspaceId, visibility, speech.checked, speech.supported, clearVoiceRequest, startVoice]);
+    // Said to Ask 521 on Home ("made 270 today, 9 to 5"): fill from those words.
+    const voiceHandoff = useVoiceHandoffStore((s) => s.request);
+    const takeVoiceHandoff = useVoiceHandoffStore((s) => s.take);
+    useEffect(() => {
+        if (voiceHandoff?.target !== "entry" || !visibility || !activeWorkspace || (voiceHandoff.listen && !speech.checked))
+            return;
+        const taken = takeVoiceHandoff(["entry"], activeWorkspaceId);
+        if (!taken)
+            return;
+        voiceFixingRef.current = false;
+        voiceUndoRef.current = null;
+        setVoiceFilled(false);
+        setExpanded(true);
+        window.setTimeout(() => document.querySelector('[data-tour="entry-form"]')?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
+        if (taken.listen) {
+            if (speech.supported)
+                startVoice();
+            return;
+        }
+        void handleVoiceTranscript(taken.transcript);
+    }, [voiceHandoff, visibility, activeWorkspace, activeWorkspaceId, takeVoiceHandoff, handleVoiceTranscript, speech.checked, speech.supported, startVoice]);
     /** A recurring rule can only carry one number with one category. `field`
      * is eligible only when: it (or, for "custom", the single custom income
      * row) has a positive amount; a payment field has at most one category
@@ -856,6 +947,7 @@ export default function EntryForm() {
         setVoiceQuestions([]);
         setVoiceNotes([]);
         setVoiceHeard("");
+        voiceUndoRef.current = null;
         setOpenSources(new Set());
         setRepeatSourceField(null);
         setRepeatCadence({ freq: "monthly" });
@@ -1131,6 +1223,7 @@ export default function EntryForm() {
             setVoiceQuestions([]);
             setVoiceNotes([]);
             setVoiceHeard("");
+            voiceUndoRef.current = null;
             setOpenSources(new Set());
             setExpanded(false);
             setRepeatSourceField(null);
@@ -1175,6 +1268,10 @@ export default function EntryForm() {
     const independentPersonalCash = visibility.mode === "independent" ? parseMoney(form.unreportedCash) : 0;
     const voiceListening = speech.status === "listening";
     const voiceBusy = voiceListening || voicePhase === "thinking";
+    // The review's voice button asks for the amount when none is on the form yet.
+    const voiceAsk: VoiceAsk | null = visibility.mode === "independent" && independentEntryTotal <= 0 && independentPersonalCash <= 0
+        ? { label: "Say how much you made", asking: ["amount"] }
+        : null;
     return (<Card className={`relative overflow-hidden rounded-[22px] shadow-none ${expanded ? "gap-5 py-5" : "gap-0 py-4"}`}>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 px-5">
         <button type="button" onClick={() => setExpanded((current) => !current)} disabled={submitting} className="flex min-w-0 flex-col items-start gap-0.5 text-left" aria-hidden="true" tabIndex={-1}>
@@ -1183,9 +1280,13 @@ export default function EntryForm() {
         </button>
 
         <div className="flex shrink-0 items-center gap-2">
-          {speech.supported ? (<Button type="button" variant="secondary" size="icon" className="size-10 shrink-0 rounded-full" onClick={startVoice} aria-label="Say your entry" disabled={submitting || voiceBusy}>
-              <Mic />
-            </Button>) : null}
+          {speech.supported ? (voiceListening
+                ? (<Button type="button" size="icon" className="size-10 shrink-0 animate-pulse rounded-full bg-[#2FA866] text-white hover:bg-[#2FA866]/90" onClick={speech.done} aria-label="Stop and fill in">
+                    <Square className="fill-current"/>
+                  </Button>)
+                : (<Button type="button" variant="secondary" size="icon" className="size-10 shrink-0 rounded-full" onClick={() => startVoice()} aria-label="Say your entry" disabled={submitting || voiceBusy}>
+                    <Mic />
+                  </Button>)) : null}
           <Button type="button" variant={expanded ? "ghost" : "default"} size="icon" className="size-10 shrink-0 rounded-full" onClick={() => setExpanded((current) => !current)} aria-label={expanded ? "Collapse entry form" : "Expand entry form"} disabled={submitting}>
             {expanded ? <Minus /> : <Plus />}
           </Button>
@@ -1202,6 +1303,7 @@ export default function EntryForm() {
               <p className="text-base text-foreground">
                 {speech.transcript || <span className="text-muted-foreground">Say it like “270 today, 9 to 5, 40 in tips.”</span>}
               </p>
+              <p className="text-xs text-muted-foreground">Tap the green button or pause when you&apos;re done.</p>
               <div className="flex gap-2">
                 <Button type="button" size="sm" className="rounded-full" onClick={speech.done} disabled={!speech.transcript}>Done</Button>
                 <Button type="button" size="sm" variant="ghost" className="rounded-full" onClick={speech.cancel}>Cancel</Button>
@@ -1221,33 +1323,11 @@ export default function EntryForm() {
 
           {voiceHeard && !voiceFilled && !voiceListening ? (<p className="px-1 text-sm text-muted-foreground">Heard: “{voiceHeard}”</p>) : null}
 
-          {voiceQuestions.map((question) => (<div key={question.id} id={`voice-question-${question.id}`} className="space-y-2 rounded-2xl bg-muted px-4 py-3">
-              <p className="text-sm font-medium text-foreground">
-                {question.isTips ? "Where do the" : "Where does"} {formatCurrency(question.amount)}{question.isTips ? " in tips go?" : " go?"}
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {question.options.map((option) => (<button key={`${option.field}-${option.category ?? ""}`} type="button" onClick={() => answerVoiceQuestion(question, option)} className="rounded-full bg-card px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-secondary">
-                    {option.label}
-                  </button>))}
-                <button type="button" onClick={() => answerVoiceQuestion(question, null)} className="rounded-full px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-secondary">
-                  {visibility.mode === "w2" && !question.isTips ? "Skip, it's my pay" : "Skip"}
-                </button>
-              </div>
-            </div>))}
+          {voiceFilled ? <VoiceReviewLabel id="voice-entry-review"/> : null}
 
-          {voiceNotes.map((note) => (<p key={note} className="px-1 text-sm text-muted-foreground">{note}</p>))}
-
-          {voiceFilled && !voiceBusy ? (<div id="voice-entry-note" className="space-y-3 rounded-2xl bg-muted px-4 py-3">
-              {voiceHeard ? (<p className="text-sm text-muted-foreground">Heard: “{voiceHeard}”</p>) : null}
-              <p className="text-sm text-foreground">
-                {voiceQuestions.length > 0
-                    ? "Filled in from what you said. Pick where each amount goes above, then check the form."
-                    : "Filled in from what you said. Check the form, then add it."}
-              </p>
-              <Button type="submit" disabled={submitting || voiceQuestions.length > 0} className="h-12 w-full rounded-2xl text-base font-semibold">
-                {submitting ? "Saving..." : repeatSourceField ? "Add recurring income" : "Add entry"}
-              </Button>
-            </div>) : null}
+          {!voiceFilled ? (<>
+            {voiceNotes.map((note) => (<p key={note} className="px-1 text-sm text-muted-foreground">{note}</p>))}
+            </>) : null}
 
           {submitting ? (<p className="text-sm text-muted-foreground">
               Adding your entry and syncing in the background...
@@ -1553,6 +1633,23 @@ export default function EntryForm() {
               <Label htmlFor="notes" className="shrink-0 text-sm font-normal text-muted-foreground">Notes</Label>
               <Input id="notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Optional" type="text" className="h-9 border-0 bg-transparent px-0 text-right shadow-none focus-visible:ring-0"/>
             </div>)}
+
+          {voiceFilled && !voiceBusy ? (<VoiceReviewFooter heard={voiceHeard} ask={voiceAsk} onVoice={() => startVoice(voiceAsk)} onUndo={undoVoiceFill} disabled={submitting}>
+            {voiceQuestions.map((question) => (<div key={question.id} id={`voice-question-${question.id}`} className="space-y-2 rounded-2xl bg-muted px-4 py-3">
+                <p className="text-sm font-medium text-foreground">
+                  {question.isTips ? "Where do the" : "Where does"} {formatCurrency(question.amount)}{question.isTips ? " in tips go?" : " go?"}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {question.options.map((option) => (<button key={`${option.field}-${option.category ?? ""}`} type="button" onClick={() => answerVoiceQuestion(question, option)} className="rounded-full bg-card px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-secondary">
+                      {option.label}
+                    </button>))}
+                  <button type="button" onClick={() => answerVoiceQuestion(question, null)} className="rounded-full px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-secondary">
+                    {visibility.mode === "w2" && !question.isTips ? "Skip, it's my pay" : "Skip"}
+                  </button>
+                </div>
+              </div>))}
+              {voiceNotes.map((note) => (<p key={note} className="px-1 text-sm text-muted-foreground">{note}</p>))}
+            </VoiceReviewFooter>) : null}
 
           <div className="flex gap-2 pt-1">
             <Button type="button" variant="ghost" className="h-12 rounded-2xl px-5 text-muted-foreground" onClick={handleClearForm} disabled={submitting}>

@@ -1,9 +1,9 @@
 "use client"
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Mail, MessageSquare, Phone, Plus } from "lucide-react"
+import { Mail, MessageSquare, Mic, Phone, Plus, Square, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -32,6 +32,9 @@ import { currentYear, useClientsStore } from "@/lib/stores/useClientsStore"
 import { useWorkspaceQuotes } from "@/lib/stores/useQuotesStore"
 import { useWorkspaceInvoiceSchedules } from "@/lib/stores/useInvoiceSchedulesStore"
 import { cn } from "@/lib/utils"
+import { useSpeechCapture } from "@/hooks/useSpeechCapture"
+import { parseVoiceClient, wakeVoiceEntry } from "@/lib/api/voiceEntryApi"
+import { appendNote, datedNote } from "@/lib/voiceClientFill"
 import { buildClientRows, clientKey } from "@shared/clients"
 import { formatInvoiceDate, formatInvoiceMoney } from "@shared/invoiceDisplay"
 import type { ClientPayment } from "@shared/schemas/client"
@@ -65,6 +68,50 @@ function InvoiceClientPage() {
   const [mergeTarget, setMergeTarget] = useState("")
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  // "Say a note": what's said goes under the notes with today's date. It
+  // isn't saved until Save notes is tapped; X takes it back out.
+  const [notePhase, setNotePhase] = useState<"idle" | "thinking">("idle")
+  const [noteHeard, setNoteHeard] = useState("")
+  const [noteMessage, setNoteMessage] = useState<string | null>(null)
+  const notesBeforeVoice = useRef<string | null>(null)
+  const noteRunRef = useRef(0)
+  async function handleNoteTranscript(transcript: string) {
+    const run = ++noteRunRef.current
+    setNotePhase("thinking")
+    setNoteHeard(transcript)
+    setNoteMessage(null)
+    try {
+      const result = await parseVoiceClient({ kind: "client", mode: "note", transcript })
+      if (run !== noteRunRef.current) return
+      if (!result.isClient || !result.notes) {
+        setNoteMessage("Didn't catch a note in that. Try again.")
+        return
+      }
+      if (notesBeforeVoice.current === null) notesBeforeVoice.current = notes
+      setNotes((current) => appendNote(current, datedNote(localToday(), result.notes as string)))
+    } catch (err) {
+      if (run !== noteRunRef.current) return
+      const limited = (err as { status?: number })?.status === 429
+      setNoteMessage(limited && err instanceof Error ? err.message : "Couldn't add that just now. Try again or type it.")
+    } finally {
+      if (run === noteRunRef.current) setNotePhase("idle")
+    }
+  }
+  const noteSpeech = useSpeechCapture((transcript) => void handleNoteTranscript(transcript))
+  function startNote() {
+    wakeVoiceEntry()
+    setNoteMessage(null)
+    noteSpeech.resetStatus()
+    void noteSpeech.start(["note", "next time", "allergic", "prefers"])
+  }
+  function undoVoiceNote() {
+    if (notesBeforeVoice.current !== null) setNotes(notesBeforeVoice.current)
+    notesBeforeVoice.current = null
+    setNoteHeard("")
+    setNoteMessage(null)
+  }
+  const noteListening = noteSpeech.status === "listening"
 
   useEffect(() => {
     if (workspaceId) void load(workspaceId).catch(() => {})
@@ -168,6 +215,8 @@ function InvoiceClientPage() {
   const saveNotes = () => {
     if (!workspaceId || !client) return
     updateClientInBackground(workspaceId, client, { notes: notes.trim() }, "Couldn't save the notes")
+    notesBeforeVoice.current = null
+    setNoteHeard("")
   }
 
   const setArchived = (archived: boolean) => {
@@ -348,7 +397,59 @@ function InvoiceClientPage() {
               </section>
 
               <section className={cn(cardClass, "space-y-2")}>
-                <h2 className="text-sm font-semibold text-foreground">Notes</h2>
+                <div className="flex items-center justify-between gap-2">
+                  <h2 className="text-sm font-semibold text-foreground">Notes</h2>
+                  {noteSpeech.supported ? (
+                    noteListening ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="h-8 animate-pulse rounded-full bg-[#2FA866] text-white hover:bg-[#2FA866]/90"
+                        onClick={noteSpeech.done}
+                        aria-label="Stop and add the note"
+                      >
+                        <Square className="size-3.5 fill-current" /> Done
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8 rounded-full"
+                        onClick={startNote}
+                        disabled={notePhase === "thinking"}
+                      >
+                        <Mic className="size-3.5" /> Say a note
+                      </Button>
+                    )
+                  ) : null}
+                </div>
+                {noteListening ? (
+                  <p className="rounded-xl bg-muted px-3 py-2 text-sm text-foreground" aria-live="polite">
+                    {noteSpeech.transcript || <span className="text-muted-foreground">Listening… say it like &ldquo;She wants to go lighter next time.&rdquo;</span>}
+                  </p>
+                ) : null}
+                {notePhase === "thinking" ? <p className="text-sm text-muted-foreground">Adding the note…</p> : null}
+                {noteSpeech.status === "denied" ? (
+                  <p className="text-sm text-muted-foreground">The mic is off for 521. Turn on Microphone and Speech Recognition in Settings › 521.</p>
+                ) : null}
+                {noteSpeech.status === "error" ? <p className="text-sm text-muted-foreground">Couldn&apos;t hear that. Try again.</p> : null}
+                {noteMessage ? <p className="text-sm text-muted-foreground">{noteMessage}</p> : null}
+                {noteHeard && notePhase === "idle" && !noteListening && notesBeforeVoice.current !== null ? (
+                  <div className="flex items-start gap-2 rounded-xl bg-muted px-3 py-2">
+                    <p className="min-w-0 flex-1 text-sm text-muted-foreground">
+                      Heard: &ldquo;{noteHeard}&rdquo; — added below. Tap Save notes to keep it.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={undoVoiceNote}
+                      aria-label="Take the spoken note back out"
+                      className="flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-card"
+                    >
+                      <X className="size-4" />
+                    </button>
+                  </div>
+                ) : null}
                 <Textarea
                   aria-label="Notes"
                   placeholder="Preferences, allergies, the usual…"

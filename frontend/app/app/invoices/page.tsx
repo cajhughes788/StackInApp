@@ -3,7 +3,8 @@
 import { Suspense, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { BellOff, FileText, Plus, Settings2, Users } from "lucide-react"
+import { BellOff, FileText, Mic, Plus, Settings2, Users } from "lucide-react"
+import { isNativeSpeechAvailable } from "@/plugins/NativeSpeech"
 
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -104,6 +105,9 @@ function InvoicesListPage() {
   }, [loadStatus, takesPayments])
   // ?filter=overdue opens straight on that filter (the Needs you row).
   const filterParam = useQueryParam("filter")
+  // The mic shows only in the app, where the phone can listen.
+  const [canListen, setCanListen] = useState(false)
+  useEffect(() => setCanListen(isNativeSpeechAvailable()), [])
   const [filter, setFilter] = useState<Filter>(() =>
     FILTERS.some((option) => option.id === filterParam) ? (filterParam as Filter) : "all"
   )
@@ -324,6 +328,16 @@ function InvoicesListPage() {
           <Plus className="size-5" aria-hidden="true" />
           Quote
         </Link>
+        {canListen ? (
+          // Opens a new invoice (or quote, on the Quotes tab) already listening.
+          <Link
+            href={filter === "quotes" ? "/app/invoices/edit?kind=quote&voice=1" : "/app/invoices/edit?voice=1"}
+            aria-label={filter === "quotes" ? "Say a new quote" : "Say a new invoice"}
+            className="flex size-[52px] shrink-0 items-center justify-center rounded-full border border-card-border bg-card text-foreground shadow-sm"
+          >
+            <Mic className="size-5" aria-hidden="true" />
+          </Link>
+        ) : null}
       </div>
     </InvoicesPage>
   )

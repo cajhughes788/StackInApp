@@ -1,7 +1,7 @@
 "use client"
 
-import { useMemo, useRef, useState } from "react"
-import { TriangleAlert } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { Mic, Square, TriangleAlert } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
@@ -17,6 +17,19 @@ import type { AppointmentDraft } from "@/lib/domain/appointmentService"
 import type { AppointmentCreateInput } from "@shared/schemas/appointment"
 import { BOOKING_MAX_LOCATION, bookingServiceProblem, type BookingDeposit, type BookingSettings } from "@shared/schemas/booking"
 import type { ClientType } from "@shared/schemas/client"
+import type { VoiceBookingResult } from "@shared/voiceBooking"
+import { useSpeechCapture } from "@/hooks/useSpeechCapture"
+import { listWords, scrollToVoiceReview, VoiceReviewFooter, VoiceReviewLabel, type VoiceAsk } from "@/components/voice-review"
+import { parseVoiceBooking, wakeVoiceEntry } from "@/lib/api/voiceEntryApi"
+import {
+  planBookingFill,
+  voiceBookingCurrentFor,
+  voiceBookingHints,
+  type BookingClientPick,
+  type BookingFillPlan,
+  type BookingServicePick,
+  type BookingVoiceQuestion,
+} from "@/lib/voiceBookingFill"
 
 const LENGTHS = [15, 30, 45, 60, 75, 90, 120, 150, 180, 240]
 const BUFFERS = [0, 5, 10, 15, 30, 45, 60]
@@ -57,6 +70,7 @@ export function NewAppointmentForm({
   initialDate,
   initialTime,
   busy = [],
+  voiceFill = null,
   onCreate,
 }: {
   settings: BookingSettings
@@ -69,6 +83,8 @@ export function NewAppointmentForm({
   // When the owner is busy in their own calendars (Booking setup → Block
   // busy times): booking then is allowed, with a warning.
   busy?: Array<{ start: string; end: string; calendar: string }>
+  // A booking said on the Booking page: fill the form with it on open.
+  voiceFill?: { transcript: string; result: VoiceBookingResult } | null
   // Books it (in the background) and moves on, or says now why it can't.
   onCreate: (input: AppointmentCreateInput & { clientMutationId: string }) => string | null
 }) {
@@ -154,6 +170,246 @@ export function NewAppointmentForm({
     if (client.phone) setClientPhone(client.phone)
   }
 
+  /** ------------------------------------------------
+   * VOICE — say the appointment, check the filled form, tap Book. Only the
+   * typed-out words and saved client and service names go to the server
+   * (lib/api/voiceEntryApi.ts); nothing is booked by voice.
+   * ------------------------------------------------ */
+  const [voicePhase, setVoicePhase] = useState<"idle" | "thinking">("idle")
+  const [voiceQuestions, setVoiceQuestions] = useState<BookingVoiceQuestion[]>([])
+  const [voiceNotes, setVoiceNotes] = useState<string[]>([])
+  const [voiceFilled, setVoiceFilled] = useState(false)
+  const [voiceHeard, setVoiceHeard] = useState("")
+  const voiceRunRef = useRef(0)
+  // This recording fixes what voice already filled ("make it 3 instead").
+  const voiceFixingRef = useRef(false)
+  // What the review's voice button asked for ("service"), sent with that fix.
+  const voiceAskingRef = useRef<string[]>([])
+  const voiceSnapshot = () => ({
+    clientName, clientId, clientEmail, clientPhone, serviceChoice, serviceName, priceText, minutes,
+    bufferMinutes, depositType, depositText, saveAsService, date, startTime, askToConfirm, location,
+  })
+  type VoiceSnapshot = ReturnType<typeof voiceSnapshot>
+  // The form as it was before voice first filled it, for the note's undo (X).
+  const voiceUndoRef = useRef<VoiceSnapshot | null>(null)
+
+  function restoreVoiceSnapshot(snap: VoiceSnapshot) {
+    setClientName(snap.clientName)
+    setClientId(snap.clientId)
+    setClientEmail(snap.clientEmail)
+    setClientPhone(snap.clientPhone)
+    setServiceChoice(snap.serviceChoice)
+    setServiceName(snap.serviceName)
+    setPriceText(snap.priceText)
+    setMinutes(snap.minutes)
+    setBufferMinutes(snap.bufferMinutes)
+    setDepositType(snap.depositType)
+    setDepositText(snap.depositText)
+    setSaveAsService(snap.saveAsService)
+    setDate(snap.date)
+    setStartTime(snap.startTime)
+    setAskToConfirm(snap.askToConfirm)
+    setLocation(snap.location)
+  }
+
+  /** A client from voice. Contact details come from a saved client, or stay as before voice. */
+  function applyVoiceClient(pick: BookingClientPick, before: VoiceSnapshot) {
+    if (pick.kind === "saved") {
+      setClientId(pick.client.id)
+      setClientName(pick.client.name)
+      setClientEmail(pick.client.email || before.clientEmail)
+      setClientPhone(pick.client.phone || before.clientPhone)
+    } else {
+      setClientId(null)
+      setClientName(pick.name)
+      setClientEmail(before.clientEmail)
+      setClientPhone(before.clientPhone)
+    }
+  }
+
+  /** A service from voice: a saved one brings its price, length and deposit, like tapping it. */
+  function applyVoiceService(pick: BookingServicePick) {
+    if (pick.kind === "saved") {
+      pickService(pick.service.id)
+    } else {
+      pickService("custom")
+      setServiceName(pick.name)
+    }
+  }
+
+  function applyBookingPlan(plan: BookingFillPlan, before: VoiceSnapshot) {
+    setSaveError(null)
+    if (plan.client) applyVoiceClient(plan.client, before)
+    if (plan.clientEmail) setClientEmail(plan.clientEmail)
+    if (plan.clientPhone) setClientPhone(plan.clientPhone)
+    if (plan.service) applyVoiceService(plan.service)
+    // A price or length said is for this appointment only (after the service's own).
+    if (plan.price !== null) setPriceText(String(plan.price))
+    if (plan.minutes !== null) setMinutes(plan.minutes)
+    if (plan.date) setDate(plan.date)
+    if (plan.startTime) setStartTime(plan.startTime)
+    if (plan.location) setLocation(plan.location)
+    if (plan.askToConfirm !== null) setAskToConfirm(plan.askToConfirm)
+  }
+
+  function planFor(result: VoiceBookingResult, fixing: boolean, formDate: string) {
+    return planBookingFill(result, {
+      services: services.map((service) => ({ id: service.id, name: service.name })),
+      savedClients: savedClients.filter((client) => !client.archived),
+      hours: settings,
+      today,
+      currentDate: formDate || null,
+      fixing,
+    })
+  }
+
+  /** Fills the form from a reply; false when there was nothing to fill. */
+  function fillFromVoice(result: VoiceBookingResult, fixing: boolean, run: number): boolean {
+    const now = voiceSnapshot()
+    const before = voiceUndoRef.current ?? now
+    const plan = planFor(result, fixing, now.date)
+    const nothing =
+      !plan.client && !plan.service && plan.questions.length === 0 && !plan.clientEmail && !plan.clientPhone &&
+      plan.price === null && plan.minutes === null && !plan.date && !plan.startTime && !plan.location && plan.askToConfirm === null
+    if (result.action !== "book" || nothing) {
+      setVoiceNotes([
+        ...plan.skipped,
+        fixing
+          ? "Didn't catch a change in that. Try again, like \u201cmake it 3 instead.\u201d"
+          : "Didn't catch an appointment in that. Try again, like \u201cBook Jenna Thursday at 2 for a cut.\u201d",
+      ])
+      return false
+    }
+    if (!voiceUndoRef.current) voiceUndoRef.current = now
+    applyBookingPlan(plan, before)
+    // New questions get ids from this run so they never clash with ones still open.
+    const newQuestions = plan.questions.map((q) => ({ ...q, id: `${run}-${q.id}` }) as BookingVoiceQuestion)
+    setVoiceQuestions((open) =>
+      fixing
+        ? [
+            // A fix that names the client (or service) answers its open question.
+            ...open.filter(
+              (q) => !(q.kind === "client" && (plan.client || newQuestions.some((n) => n.kind === "client"))) &&
+                !(q.kind === "service" && (plan.service || newQuestions.some((n) => n.kind === "service")))
+            ),
+            ...newQuestions,
+          ]
+        : newQuestions
+    )
+    setVoiceNotes(plan.skipped)
+    setVoiceFilled(true)
+    scrollToVoiceReview("voice-booking-review")
+    return true
+  }
+
+  async function handleVoiceTranscript(transcript: string) {
+    const run = ++voiceRunRef.current
+    const fixing = voiceFixingRef.current
+    const now = voiceSnapshot()
+    setVoicePhase("thinking")
+    setVoiceHeard(transcript)
+    setVoiceNotes([])
+    if (!fixing) {
+      setVoiceQuestions([])
+      setVoiceFilled(false)
+    }
+    try {
+      const result = await parseVoiceBooking({
+        kind: "booking",
+        mode: "book",
+        transcript,
+        today,
+        clients: savedClients.filter((c) => !c.archived).map((c) => c.name).slice(0, 300),
+        services: services.map((service) => service.name).slice(0, 100),
+        ...(fixing
+          ? {
+              asking: voiceAskingRef.current.length > 0 ? voiceAskingRef.current : undefined,
+              current: voiceBookingCurrentFor({
+                clientName: now.clientName,
+                clientEmail: now.clientEmail,
+                clientPhone: now.clientPhone,
+                serviceName: now.serviceName,
+                priceText: now.priceText,
+                minutes: now.minutes,
+                date: now.date,
+                startTime: now.startTime,
+                location: now.location === settings.location ? "" : now.location,
+              }),
+            }
+          : {}),
+      })
+      if (run !== voiceRunRef.current) return
+      fillFromVoice(result, fixing, run)
+    } catch (error) {
+      if (run !== voiceRunRef.current) return
+      console.warn("[VoiceBooking] fill failed", error)
+      // 429 = today's voice limit (server message says so); anything else is a plain failure.
+      const limited = (error as { status?: number })?.status === 429
+      setVoiceNotes([limited && error instanceof Error ? error.message : "Couldn't fill in the form just now. Try again or type it in."])
+    } finally {
+      if (run === voiceRunRef.current) setVoicePhase("idle")
+    }
+  }
+  const speech = useSpeechCapture((transcript) => void handleVoiceTranscript(transcript))
+
+  /** With the filled-in note showing, the mic fixes what voice filled instead of starting over. */
+  function startVoice(ask?: VoiceAsk | null) {
+    wakeVoiceEntry()
+    setVoiceNotes([])
+    voiceFixingRef.current = voiceFilled
+    voiceAskingRef.current = voiceFilled && ask ? ask.asking : []
+    if (!voiceFilled) {
+      setVoiceQuestions([])
+      voiceUndoRef.current = null
+    }
+    speech.resetStatus()
+    void speech.start(voiceBookingHints(savedClients.filter((c) => !c.archived).map((c) => c.name), services.map((s) => s.name)))
+  }
+
+  /** The note's X: puts the form back as it was before voice filled it. */
+  function undoVoiceFill() {
+    if (voiceUndoRef.current) restoreVoiceSnapshot(voiceUndoRef.current)
+    voiceRunRef.current += 1
+    voiceUndoRef.current = null
+    voiceFixingRef.current = false
+    setVoicePhase("idle")
+    setVoiceFilled(false)
+    setVoiceQuestions([])
+    setVoiceNotes([])
+    setVoiceHeard("")
+  }
+
+  function answerVoiceQuestion(question: BookingVoiceQuestion, pick: BookingClientPick | BookingServicePick) {
+    if (question.kind === "client") applyVoiceClient(pick as BookingClientPick, voiceUndoRef.current ?? voiceSnapshot())
+    else applyVoiceService(pick as BookingServicePick)
+    setVoiceQuestions((current) => current.filter((q) => q.id !== question.id))
+  }
+
+  // Said on the Booking page: fill the form with it once, on open.
+  const voiceFillApplied = useRef(false)
+  useEffect(() => {
+    if (!voiceFill || voiceFillApplied.current) return
+    voiceFillApplied.current = true
+    voiceFixingRef.current = false
+    setVoiceHeard(voiceFill.transcript)
+    fillFromVoice(voiceFill.result, false, ++voiceRunRef.current)
+    // Only once, on open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceFill])
+
+  const voiceListening = speech.status === "listening"
+  const voiceBusy = voiceListening || voicePhase === "thinking"
+  // The review's voice button asks for whatever the appointment still needs.
+  const voiceMissing: { word: string; asking: string }[] = []
+  if (!clientName.trim() && !voiceQuestions.some((q) => q.kind === "client")) voiceMissing.push({ word: "client's name", asking: "client name" })
+  if (!clientEmail.trim() && !clientPhone.trim()) voiceMissing.push({ word: "client's email or phone", asking: "client email or phone" })
+  if (!serviceName.trim() && !voiceQuestions.some((q) => q.kind === "service")) voiceMissing.push({ word: "service", asking: "service" })
+  if (!date || !startTime) voiceMissing.push({ word: "day and time", asking: "date and start time" })
+  const voiceAsk: VoiceAsk | null =
+    voiceMissing.length > 0
+      ? { label: `Say the ${listWords(voiceMissing.map((m) => m.word))}`, asking: voiceMissing.map((m) => m.asking) }
+      : null
+
   const deposit: BookingDeposit =
     depositType === "none" ? { type: "none", value: 0 } : { type: depositType, value: parseAmount(depositText) ?? 0 }
 
@@ -193,6 +449,12 @@ export function NewAppointmentForm({
   }, [busy, date, startTime, settings.timeZone, minutes, bufferMinutes])
 
   async function submit() {
+    // A client or service voice is still asking about isn't on the form yet.
+    if (voiceQuestions.length > 0) {
+      setVoiceNotes(["Answer the question above, then book it."])
+      document.getElementById(`voice-question-${voiceQuestions[0].id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })
+      return
+    }
     setShowErrors(true)
     if (hasErrors || saving || price === null) return
     setSaving(true)
@@ -241,6 +503,83 @@ export function NewAppointmentForm({
         void submit()
       }}
     >
+      {speech.supported && !voiceListening && voicePhase !== "thinking" && !voiceFilled ? (
+        <button
+          type="button"
+          onClick={() => startVoice()}
+          disabled={saving}
+          className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-muted text-base font-medium text-foreground transition-colors hover:bg-secondary"
+        >
+          <Mic className="size-5" aria-hidden="true" />
+          Say the appointment
+        </button>
+      ) : null}
+
+      {voiceListening ? (
+        <div className="space-y-3 rounded-2xl bg-muted px-4 py-3" aria-live="polite">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+              <span className="size-2.5 shrink-0 animate-pulse rounded-full bg-primary" aria-hidden="true" />
+              Listening…
+            </div>
+            <Button
+              type="button"
+              size="icon"
+              className="size-10 shrink-0 animate-pulse rounded-full bg-[#2FA866] text-white hover:bg-[#2FA866]/90"
+              onClick={speech.done}
+              aria-label="Stop and fill in"
+            >
+              <Square className="fill-current" />
+            </Button>
+          </div>
+          <p className="text-base text-foreground">
+            {speech.transcript || (
+              <span className="text-muted-foreground">Say it like &ldquo;Book Jenna Thursday at 2 for a cut.&rdquo;</span>
+            )}
+          </p>
+          <p className="text-xs text-muted-foreground">Tap the green button or pause when you&apos;re done.</p>
+          <div className="flex gap-2">
+            <Button type="button" size="sm" className="rounded-full" onClick={speech.done} disabled={!speech.transcript}>
+              Done
+            </Button>
+            <Button type="button" size="sm" variant="ghost" className="rounded-full" onClick={speech.cancel}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {voicePhase === "thinking" ? (
+        <p className="rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground" aria-live="polite">
+          Filling in the form…
+        </p>
+      ) : null}
+
+      {speech.status === "denied" ? (
+        <p className="rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">
+          The mic is off for 521. Turn on Microphone and Speech Recognition in Settings › 521, or fill in the appointment below.
+        </p>
+      ) : null}
+      {speech.status === "error" ? (
+        <p className="rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">
+          Couldn&apos;t hear that. Tap the mic to try again, or fill in the appointment below.
+        </p>
+      ) : null}
+
+      {voiceHeard && !voiceFilled && !voiceListening ? (
+        <p className="px-1 text-sm text-muted-foreground">Heard: &ldquo;{voiceHeard}&rdquo;</p>
+      ) : null}
+
+      {voiceFilled ? <VoiceReviewLabel id="voice-booking-review" /> : null}
+
+      {!voiceFilled
+        ? voiceNotes.map((text) => (
+            <p key={text} className="px-1 text-sm text-muted-foreground">
+              {text}
+            </p>
+          ))
+        : null}
+
       <section className={cn(cardClass, "space-y-3")}>
         <h2 className="text-sm font-semibold text-muted-foreground">Client</h2>
         <label className={fieldLabelClass}>
@@ -545,6 +884,62 @@ export function NewAppointmentForm({
               : "Confirmed now — you've already agreed on it with them."}
         </p>
       </section>
+
+      {voiceFilled && !voiceBusy ? (
+        <VoiceReviewFooter
+          heard={voiceHeard}
+          ask={voiceAsk}
+          onVoice={() => startVoice(voiceAsk)}
+          onUndo={undoVoiceFill}
+          disabled={saving}
+        >
+          {voiceQuestions.map((question) => (
+            <div key={question.id} id={`voice-question-${question.id}`} className="space-y-2 rounded-2xl bg-muted px-4 py-3">
+              <p className="text-sm font-medium text-foreground">{question.prompt}</p>
+              <div className="flex flex-wrap gap-2">
+                {question.kind === "client"
+                  ? question.options.map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => answerVoiceQuestion(question, { kind: "saved", client: option })}
+                        className="rounded-full bg-card px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-secondary"
+                      >
+                        {option.name}
+                      </button>
+                    ))
+                  : question.options.map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => answerVoiceQuestion(question, { kind: "saved", service: option })}
+                        className="rounded-full bg-card px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-secondary"
+                      >
+                        {option.name}
+                      </button>
+                    ))}
+                <button
+                  type="button"
+                  onClick={() =>
+                    answerVoiceQuestion(
+                      question,
+                      question.kind === "client" ? { kind: "new", name: question.spokenName } : { kind: "custom", name: question.spokenName }
+                    )
+                  }
+                  className="rounded-full px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-secondary"
+                >
+                  {question.kind === "client" ? `New client: ${question.spokenName}` : `Custom: ${question.spokenName}`}
+                </button>
+              </div>
+            </div>
+          ))}
+          {voiceNotes.map((text) => (
+            <p key={text} className="px-1 text-sm text-muted-foreground">
+              {text}
+            </p>
+          ))}
+        </VoiceReviewFooter>
+      ) : null}
 
       {saveError ? <p className="text-sm text-destructive">{saveError}</p> : null}
       {showErrors && hasErrors ? <p className="text-sm text-destructive">Fix the highlighted fields above.</p> : null}

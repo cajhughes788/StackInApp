@@ -1,0 +1,590 @@
+{
+  "_about": "Real-style sentences for voice on Add expense, scored by scripts/eval-voice-expense.cjs. Today is fixed at 2026-11-16 (a Monday). In 'expect', a list means any of those is fine; date, amount, vendor, category, categorySource, miles and parkingAndTolls left out must come back null, roundTrip false, isExpense true. 'paid' means that amount in either amount or parkingAndTolls (the other null). Vendors compare ignoring case. 'amountAsWhole' left out must come back null. Description isn't scored (free words). 'learned' stands in for past bank-review decisions (plaidMerchantMemory keys). Add a case whenever someone's real sentence fills the form wrong.",
+  "today": "2026-11-16",
+  "learned": {
+    "sally beauty": "Supplies",
+    "the home depot": "Equipment"
+  },
+  "forms": {
+    "vehicle": {
+      "categories": [
+        "Supplies",
+        "Rent / Booth Rent",
+        "Equipment",
+        "Marketing & Advertising",
+        "Software & Subscriptions",
+        "Insurance",
+        "Interest on Loan",
+        "Travel",
+        "Utilities",
+        "Professional Fees",
+        "Subcontractor Work",
+        "Cleaning & Sanitation",
+        "Education & Training",
+        "Work Clothing",
+        "Payment Processing Fees",
+        "Taxes & Licenses",
+        "Office Expenses",
+        "Miscellaneous/ Other",
+        "Vehicle & Transportation"
+      ],
+      "vehicleCategory": "Vehicle & Transportation"
+    },
+    "nomiles": {
+      "categories": [
+        "Supplies",
+        "Rent / Booth Rent",
+        "Equipment",
+        "Marketing & Advertising",
+        "Software & Subscriptions",
+        "Insurance",
+        "Interest on Loan",
+        "Travel",
+        "Utilities",
+        "Professional Fees",
+        "Subcontractor Work",
+        "Cleaning & Sanitation",
+        "Education & Training",
+        "Work Clothing",
+        "Payment Processing Fees",
+        "Taxes & Licenses",
+        "Office Expenses",
+        "Miscellaneous/ Other"
+      ],
+      "vehicleCategory": null
+    }
+  },
+  "cases": [
+    {
+      "say": "spent 42 on gas at Shell yesterday",
+      "expect": {
+        "date": "2026-11-15",
+        "amount": 42,
+        "vendor": "Shell",
+        "category": "Vehicle & Transportation",
+        "categorySource": "suggested"
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "42.50 at Chevron for gas",
+      "expect": {
+        "amount": 42.5,
+        "vendor": "Chevron",
+        "category": "Vehicle & Transportation",
+        "categorySource": [
+          "suggested",
+          "said"
+        ]
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "spent forty-two bucks on gas",
+      "expect": {
+        "amount": 42,
+        "category": "Vehicle & Transportation",
+        "categorySource": [
+          "suggested",
+          "said"
+        ]
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "86 at Sally Beauty",
+      "expect": {
+        "amount": 86,
+        "vendor": "Sally Beauty",
+        "category": "Supplies",
+        "categorySource": "learned"
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "bought color supplies at Sally Beauty for 86",
+      "expect": {
+        "amount": 86,
+        "vendor": "Sally Beauty",
+        "category": "Supplies",
+        "categorySource": [
+          "said",
+          "learned"
+        ]
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "64 at Target",
+      "expect": {
+        "amount": 64,
+        "vendor": "Target"
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "Target 30 bucks, cleaning stuff for the studio",
+      "expect": {
+        "amount": 30,
+        "vendor": "Target",
+        "category": [
+          "Cleaning & Sanitation",
+          "Supplies"
+        ],
+        "categorySource": [
+          "said",
+          "suggested"
+        ]
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "Home Depot 120 for a new chair for the shop",
+      "expect": {
+        "amount": 120,
+        "vendor": "Home Depot",
+        "category": "Equipment",
+        "categorySource": [
+          "learned",
+          "said"
+        ]
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "40 dollars at Joe's Corner Store",
+      "expect": {
+        "amount": 40,
+        "vendor": [
+          "Joe's Corner Store",
+          "Joes Corner Store"
+        ]
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "Canva subscription 12.99",
+      "expect": {
+        "amount": 12.99,
+        "vendor": "Canva",
+        "category": "Software & Subscriptions",
+        "categorySource": [
+          "said",
+          "suggested"
+        ]
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "spent 200 on Instagram ads Friday",
+      "expect": {
+        "date": "2026-11-13",
+        "amount": 200,
+        "vendor": [
+          "Instagram",
+          "Meta",
+          null
+        ],
+        "category": "Marketing & Advertising",
+        "categorySource": [
+          "said",
+          "suggested"
+        ]
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "booth rent 300 to Salon Lofts on the first",
+      "expect": {
+        "date": "2026-11-01",
+        "amount": 300,
+        "vendor": "Salon Lofts",
+        "category": "Rent / Booth Rent",
+        "categorySource": "said"
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "insurance 89",
+      "expect": {
+        "amount": 89,
+        "category": "Insurance",
+        "categorySource": "said"
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "1.2k for a new chair",
+      "expect": {
+        "amount": 1200,
+        "category": "Equipment",
+        "categorySource": [
+          "suggested",
+          "said"
+        ]
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "last Friday 25 at Office Depot for printer paper",
+      "expect": {
+        "date": "2026-11-13",
+        "amount": 25,
+        "vendor": "Office Depot",
+        "category": [
+          "Office Expenses",
+          "Supplies"
+        ],
+        "categorySource": [
+          "suggested",
+          "said"
+        ]
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "lunch with a client 34 at Chipotle",
+      "expect": {
+        "amount": 34,
+        "vendor": "Chipotle",
+        "category": [
+          null,
+          "Miscellaneous/ Other",
+          "Travel"
+        ],
+        "categorySource": [
+          null,
+          "suggested"
+        ]
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "drove 18 miles to a client",
+      "expect": {
+        "miles": 18,
+        "category": "Vehicle & Transportation",
+        "categorySource": "said"
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "9 miles each way to the Johnson house",
+      "expect": {
+        "miles": 9,
+        "roundTrip": true,
+        "category": "Vehicle & Transportation",
+        "categorySource": "said"
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "36 miles round trip to Spokane",
+      "expect": {
+        "miles": 36,
+        "category": "Vehicle & Transportation",
+        "categorySource": "said"
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "drove 22 miles and paid 12 for parking downtown",
+      "expect": {
+        "miles": 22,
+        "parkingAndTolls": 12,
+        "category": "Vehicle & Transportation",
+        "categorySource": "said"
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "tolls were 6.50 on the way to the Bellevue client, 14 miles",
+      "expect": {
+        "miles": 14,
+        "parkingAndTolls": 6.5,
+        "category": "Vehicle & Transportation",
+        "categorySource": "said"
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "paid 15 for parking",
+      "expect": {
+        "paid": 15,
+        "category": "Vehicle & Transportation",
+        "categorySource": [
+          "said",
+          "suggested"
+        ]
+      },
+      "form": "vehicle"
+    },
+    {
+      "form": "nomiles",
+      "say": "paid 15 for parking",
+      "expect": {
+        "paid": 15,
+        "category": [
+          null,
+          "Travel",
+          "Miscellaneous/ Other"
+        ],
+        "categorySource": [
+          null,
+          "said",
+          "suggested"
+        ]
+      }
+    },
+    {
+      "form": "nomiles",
+      "say": "drove 12 miles to a client",
+      "expect": {
+        "miles": 12,
+        "category": [
+          null,
+          "Travel"
+        ],
+        "categorySource": [
+          null,
+          "suggested"
+        ]
+      }
+    },
+    {
+      "say": "I made 300 today",
+      "expect": {
+        "isExpense": false
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "remind me to call Jenna tomorrow",
+      "expect": {
+        "isExpense": false
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "make that 52",
+      "current": {
+        "date": null,
+        "amount": 42,
+        "vendor": "Shell",
+        "description": "Gas",
+        "category": "Vehicle & Transportation",
+        "miles": null,
+        "parkingAndTolls": null
+      },
+      "expect": {
+        "amount": 52
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "it was Chevron",
+      "current": {
+        "date": null,
+        "amount": 42,
+        "vendor": "Shell",
+        "description": "Gas",
+        "category": "Vehicle & Transportation",
+        "miles": null,
+        "parkingAndTolls": null
+      },
+      "expect": {
+        "vendor": "Chevron",
+        "category": [
+          null,
+          "Vehicle & Transportation"
+        ],
+        "categorySource": [
+          null,
+          "suggested",
+          "said"
+        ]
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "it was yesterday",
+      "current": {
+        "date": null,
+        "amount": 42,
+        "vendor": "Shell",
+        "description": "Gas",
+        "category": "Vehicle & Transportation",
+        "miles": null,
+        "parkingAndTolls": null
+      },
+      "expect": {
+        "date": "2026-11-15"
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "that was supplies",
+      "current": {
+        "date": null,
+        "amount": 30,
+        "vendor": "Target",
+        "description": null,
+        "category": null,
+        "miles": null,
+        "parkingAndTolls": null
+      },
+      "expect": {
+        "category": "Supplies",
+        "categorySource": "said"
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "it was for cleaning supplies",
+      "current": {
+        "date": null,
+        "amount": 64,
+        "vendor": "Target",
+        "description": null,
+        "category": null,
+        "miles": null,
+        "parkingAndTolls": null
+      },
+      "expect": {
+        "category": [
+          "Cleaning & Sanitation",
+          "Supplies"
+        ],
+        "categorySource": "said"
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "actually 20 miles",
+      "current": {
+        "date": null,
+        "amount": null,
+        "vendor": null,
+        "description": "Client visit",
+        "category": "Vehicle & Transportation",
+        "miles": 18,
+        "parkingAndTolls": null
+      },
+      "expect": {
+        "miles": 20,
+        "category": "Vehicle & Transportation",
+        "categorySource": "said"
+      },
+      "form": "vehicle"
+    },
+    {
+      "form": "vehicle",
+      "say": "9121 for supplies at Winco foods",
+      "expect": {
+        "amount": 91.21,
+        "amountAsWhole": 9121,
+        "vendor": [
+          "Winco Foods",
+          "WinCo"
+        ],
+        "category": "Supplies",
+        "categorySource": "said"
+      }
+    },
+    {
+      "form": "vehicle",
+      "say": "4599 at Shell for gas yesterday",
+      "expect": {
+        "date": "2026-11-15",
+        "amount": 45.99,
+        "amountAsWhole": 4599,
+        "vendor": "Shell",
+        "category": "Vehicle & Transportation",
+        "categorySource": [
+          "said",
+          "suggested"
+        ]
+      }
+    },
+    {
+      "form": "vehicle",
+      "say": "1200 for a new chair",
+      "expect": {
+        "amount": 1200,
+        "category": "Equipment",
+        "categorySource": [
+          "said",
+          "suggested"
+        ]
+      }
+    },
+    {
+      "form": "vehicle",
+      "say": "9121 dollars for a laptop",
+      "expect": {
+        "amount": 9121,
+        "category": "Equipment",
+        "categorySource": [
+          "said",
+          "suggested"
+        ]
+      }
+    },
+    {
+      "form": "vehicle",
+      "say": "make that 2350",
+      "current": {
+        "date": null,
+        "amount": 42,
+        "vendor": "Shell",
+        "description": "Gas",
+        "category": "Vehicle & Transportation",
+        "miles": null,
+        "parkingAndTolls": null
+      },
+      "expect": {
+        "amount": 23.5,
+        "amountAsWhole": 2350
+      }
+    },
+    {
+      "say": "supplies",
+      "asking": [
+        "category"
+      ],
+      "current": {
+        "date": null,
+        "amount": 25.36,
+        "vendor": "Walmart",
+        "description": "Paint and concealer",
+        "category": null,
+        "miles": null,
+        "parkingAndTolls": null
+      },
+      "expect": {
+        "category": "Supplies",
+        "categorySource": "said"
+      },
+      "form": "vehicle"
+    },
+    {
+      "say": "25.36",
+      "asking": [
+        "amount"
+      ],
+      "current": {
+        "date": null,
+        "amount": null,
+        "vendor": "Walmart",
+        "description": "Paint and concealer",
+        "category": "Supplies",
+        "miles": null,
+        "parkingAndTolls": null
+      },
+      "expect": {
+        "amount": 25.36
+      },
+      "form": "vehicle"
+    }
+  ]
+}

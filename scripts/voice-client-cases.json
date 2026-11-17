@@ -1,0 +1,328 @@
+{
+  "_about": "Real-style sentences for clients by voice, scored by scripts/eval-voice-client.cjs. mode 'add' = the Add client form; 'note' = Say a note on a client's page. Fields left out of 'expect' must come back null (remove and others empty; for notes, 'notesHas' lists words that must all appear; 'addressHas' likewise). Names and emails compare ignoring case; phones by digits. Add a case whenever someone's real sentence fills it wrong.",
+  "cases": [
+    {
+      "mode": "add",
+      "say": "New client Jenna Morales, 509 555 0142, jenna at gmail dot com",
+      "expect": {
+        "name": "Jenna Morales",
+        "phone": "5095550142",
+        "email": "jenna@gmail.com"
+      }
+    },
+    {
+      "mode": "add",
+      "say": "Add Marcus Lee, his number is 208-555-0199",
+      "expect": {
+        "name": "Marcus Lee",
+        "phone": "2085550199"
+      }
+    },
+    {
+      "mode": "add",
+      "say": "new client Priya Patel email priya dot patel at outlook dot com she lives at 12 Oak Street Spokane",
+      "expect": {
+        "name": "Priya Patel",
+        "email": "priya.patel@outlook.com",
+        "addressHas": [
+          "12 Oak",
+          "Spokane"
+        ]
+      }
+    },
+    {
+      "mode": "add",
+      "say": "Add Olivia Chen, allergic to ammonia, prefers Tuesdays, referred by Marcus",
+      "expect": {
+        "name": "Olivia Chen",
+        "notesHas": [
+          "ammonia",
+          "Tuesday",
+          "Marcus"
+        ]
+      }
+    },
+    {
+      "mode": "add",
+      "say": "New client Dana Fox, email d a n a f o x at yahoo dot com",
+      "expect": {
+        "name": "Dana Fox",
+        "email": "danafox@yahoo.com"
+      }
+    },
+    {
+      "mode": "add",
+      "say": "Add Sam Nguyen, Nguyen is spelled N G U Y E N, phone 5095550111",
+      "expect": {
+        "name": "Sam Nguyen",
+        "phone": "5095550111"
+      }
+    },
+    {
+      "mode": "add",
+      "say": "new client Bright Smiles Dental, office manager is Karen, 509 555 0100, front desk at bright smiles dental dot com",
+      "expect": {
+        "name": "Bright Smiles Dental",
+        "phone": "5095550100",
+        "email": "frontdesk@brightsmilesdental.com",
+        "notesHas": [
+          "Karen"
+        ]
+      }
+    },
+    {
+      "mode": "add",
+      "say": "Add Jenna and her sister Mia Lopez",
+      "expect": {
+        "name": [
+          "Jenna",
+          "Jenna Lopez"
+        ],
+        "others": [
+          [
+            "Mia Lopez"
+          ]
+        ]
+      }
+    },
+    {
+      "mode": "add",
+      "say": "New client Tom Baker, he wants a quote for a deck, lives on 5th Street",
+      "expect": {
+        "name": "Tom Baker",
+        "addressHas": [
+          "5th"
+        ],
+        "notesHas": [
+          "deck"
+        ]
+      }
+    },
+    {
+      "mode": "add",
+      "say": "add Lucy O'Brien phone number is five oh nine five five five oh one three three",
+      "expect": {
+        "name": "Lucy O'Brien",
+        "phone": "5095550133"
+      }
+    },
+    {
+      "mode": "add",
+      "say": "New client Kim, jenna underscore kim at gmail dot com",
+      "expect": {
+        "name": "Kim",
+        "email": "jenna_kim@gmail.com"
+      }
+    },
+    {
+      "mode": "add",
+      "say": "Add Rosa Diaz, 1 509 555 0177, birthday is March 3rd",
+      "expect": {
+        "name": "Rosa Diaz",
+        "phone": "5095550177",
+        "notesHas": [
+          "March"
+        ]
+      }
+    },
+    {
+      "mode": "add",
+      "say": "what's my total for this month",
+      "expect": {
+        "isClient": false
+      }
+    },
+    {
+      "mode": "add",
+      "say": "Book Jenna Thursday at 2",
+      "expect": {
+        "isClient": [
+          false,
+          true
+        ],
+        "nameOk": true
+      }
+    },
+    {
+      "mode": "add",
+      "say": "her last name is spelled M O R R A L E S",
+      "expect": {
+        "name": "Jenna Morrales"
+      },
+      "current": {
+        "name": "Jenna Morales",
+        "phone": "(509) 555-0142",
+        "email": "jenna@gmail.com",
+        "address": null,
+        "notes": null
+      }
+    },
+    {
+      "mode": "add",
+      "say": "the number is 509 555 0124",
+      "expect": {
+        "phone": "5095550124"
+      },
+      "current": {
+        "name": "Jenna Morales",
+        "phone": "(509) 555-0142",
+        "email": "jenna@gmail.com",
+        "address": null,
+        "notes": null
+      }
+    },
+    {
+      "mode": "add",
+      "say": "remove the email",
+      "expect": {
+        "remove": [
+          "email"
+        ]
+      },
+      "current": {
+        "name": "Jenna Morales",
+        "phone": "(509) 555-0142",
+        "email": "jenna@gmail.com",
+        "address": null,
+        "notes": null
+      }
+    },
+    {
+      "mode": "add",
+      "say": "add a note, prefers mornings",
+      "expect": {
+        "notesHas": [
+          "morning"
+        ]
+      },
+      "current": {
+        "name": "Jenna Morales",
+        "phone": "(509) 555-0142",
+        "email": "jenna@gmail.com",
+        "address": null,
+        "notes": null
+      }
+    },
+    {
+      "mode": "add",
+      "say": "her email is actually jenna dot m at yahoo dot com",
+      "expect": {
+        "email": "jenna.m@yahoo.com"
+      },
+      "current": {
+        "name": "Jenna Morales",
+        "phone": "(509) 555-0142",
+        "email": "jenna@gmail.com",
+        "address": null,
+        "notes": null
+      }
+    },
+    {
+      "mode": "add",
+      "say": "she lives at 44 Pine Avenue",
+      "expect": {
+        "addressHas": [
+          "44 Pine"
+        ]
+      },
+      "current": {
+        "name": "Jenna Morales",
+        "phone": "(509) 555-0142",
+        "email": "jenna@gmail.com",
+        "address": null,
+        "notes": null
+      }
+    },
+    {
+      "mode": "note",
+      "say": "She wants to go lighter next time, used 7N with 20 volume",
+      "expect": {
+        "notesHas": [
+          "lighter",
+          "7N",
+          "20 volume"
+        ]
+      }
+    },
+    {
+      "mode": "note",
+      "say": "add a note that he's allergic to latex",
+      "expect": {
+        "notesHas": [
+          "latex"
+        ]
+      }
+    },
+    {
+      "mode": "note",
+      "say": "Paid with cash last time and tipped 20, prefers Saturday mornings",
+      "expect": {
+        "notesHas": [
+          "cash",
+          "20",
+          "Saturday"
+        ]
+      }
+    },
+    {
+      "mode": "note",
+      "say": "um",
+      "expect": {
+        "isClient": false
+      }
+    },
+    {
+      "mode": "note",
+      "say": "Remember she has a dog named Max, keep the gate closed",
+      "expect": {
+        "notesHas": [
+          "Max",
+          "gate"
+        ]
+      }
+    },
+    {
+      "mode": "note",
+      "say": "the kids' room needs extra time, about 30 minutes",
+      "expect": {
+        "notesHas": [
+          "30"
+        ]
+      }
+    },
+    {
+      "mode": "add",
+      "say": "509 555 0142",
+      "asking": [
+        "phone or email"
+      ],
+      "current": {
+        "name": "Priya Patel",
+        "phone": null,
+        "email": null,
+        "address": null,
+        "notes": null
+      },
+      "expect": {
+        "phone": "5095550142"
+      }
+    },
+    {
+      "mode": "add",
+      "say": "priya at gmail dot com",
+      "asking": [
+        "phone or email"
+      ],
+      "current": {
+        "name": "Priya Patel",
+        "phone": null,
+        "email": null,
+        "address": null,
+        "notes": null
+      },
+      "expect": {
+        "email": "priya@gmail.com"
+      }
+    }
+  ]
+}

@@ -22,6 +22,8 @@ import { reportFailure } from "@/lib/observability/failureReports"
 import { useAppBootstrap } from "@/hooks/useAppBootstrap"
 import { AppBootstrapProvider } from "@/contexts/app-bootstrap-context"
 import DeepLinkHandler from "@/components/deep-link-handler"
+import VoiceLaunchHandler from "@/components/voice-launch-handler"
+import AskFocusLayer from "@/components/ask-focus-layer"
 
 export default function AppLayout({
   children,
@@ -187,6 +189,8 @@ export default function AppLayout({
       <LocationRemindersOffDialog />
       <Toaster />
       <DeepLinkHandler />
+      <VoiceLaunchHandler />
+      <AskFocusLayer />
       {shouldBlock ? <AppLoader label="Loading your workspace..." /> : children}
     </AppBootstrapProvider>
   )

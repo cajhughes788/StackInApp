@@ -23,6 +23,7 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion"
+import { useAskFocusStore } from "@/lib/stores/useAskFocusStore"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/contexts/auth-context"
 import { exportCsvFile, escapeCsvField } from "@/lib/documentExport"
@@ -168,6 +169,8 @@ function StatementDetailList({ items, emptyLabel }: {
       {items.map((item) => (
         <li
           key={item.id}
+          data-ask-line={item.id}
+          data-ask-pad=""
           className="flex items-start justify-between gap-3 py-2.5 text-sm"
         >
           <div className="min-w-0">
@@ -247,7 +250,7 @@ function StatementCategoryRow({
 
   if (!expandable) {
     return (
-      <div className="flex items-center justify-between gap-3 border-b border-border/70 py-3 text-sm">
+      <div data-ask-spot={rowKey} className="flex items-center justify-between gap-3 border-b border-border/70 py-3 text-sm">
         <div className="font-medium text-foreground">{label}</div>
         <div className="font-medium tabular-nums text-foreground">{formatCurrency(amount)}</div>
       </div>
@@ -255,7 +258,7 @@ function StatementCategoryRow({
   }
 
   return (
-    <AccordionItem value={rowKey} className="border-b border-border/70">
+    <AccordionItem value={rowKey} data-ask-spot={rowKey} className="border-b border-border/70">
       <AccordionTrigger className="items-center gap-3 py-3 hover:no-underline">
         <div className="min-w-0 flex-1 text-left">
           <div className="font-medium text-foreground">{label}</div>
@@ -311,6 +314,10 @@ function StatementSection({
   totalLabel: string
   total: number
 }) {
+  const askFocus = useAskFocusStore((s) => s.focus)
+  // Remount (to open rows) only for a new "Show me", not when it's cleared.
+  const askNonce = useRef(0)
+  if (askFocus) askNonce.current = askFocus.nonce
   return (
     <section className="rounded-[22px] bg-card border border-card-border px-4 pb-4 pt-4">
       <h2 className="text-lg font-semibold text-foreground">{title}</h2>
@@ -319,7 +326,13 @@ function StatementSection({
           {emptyLabel}
         </div>
       ) : (
-        <Accordion type="multiple" className="w-full">
+        <Accordion
+          // Ask 521's "Show me" opens the rows whose lines it lights up.
+          key={askNonce.current}
+          type="multiple"
+          defaultValue={askFocus ? [...rows, ...trailingRows].map((row) => row.rowKey).filter((key) => askFocus.open.includes(key)) : undefined}
+          className="w-full"
+        >
           {rows.map((row) => (
             <StatementCategoryRow key={row.rowKey} {...row} />
           ))}
@@ -435,6 +448,18 @@ export default function ProfitLossPage() {
   const { user, authLoading } = useAuth()
   const [periodType, setPeriodType] = useState<ProfitLossPeriodType>("month")
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // ?type=month&key=2026-10 (Ask 521's "Show me"): open on that statement.
+  // Reads window.location so this page needs no Suspense boundary.
+  const [linkedKey, setLinkedKey] = useState<string | null>(null)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const type = params.get("type")
+    const key = params.get("key")
+    if ((type === "month" || type === "quarter" || type === "year") && key) {
+      setPeriodType(type)
+      setLinkedKey(key)
+    }
+  }, [])
 
   const workspaceState = useWorkspaceStore((s) => s.state)
   const activeWorkspace =
@@ -519,6 +544,14 @@ export default function ProfitLossPage() {
     yearEntry?.hasHydrated,
     refreshFromBackend,
   ])
+
+  useEffect(() => {
+    if (!linkedKey) return
+    const linked = statements.find((statement) => statement.periodKey === linkedKey)
+    if (!linked) return
+    setSelectedId(linked.id)
+    setLinkedKey(null)
+  }, [linkedKey, statements])
 
   useEffect(() => {
     setSelectedId((current) => {
@@ -950,17 +983,17 @@ export default function ProfitLossPage() {
               </h1>
               <p className="mt-1 text-lg font-semibold text-foreground">{selected.label}</p>
               <p className="mt-3 text-sm text-muted-foreground">Net income</p>
-              <div className="text-4xl font-semibold tracking-tight tabular-nums text-foreground sm:text-5xl">
+              <div data-ask-spot="net" className="text-4xl font-semibold tracking-tight tabular-nums text-foreground sm:text-5xl">
                 <StatementValue value={selected.netProfit} />
               </div>
               <dl className="mt-4 grid grid-cols-2 gap-4 border-t border-border/70 pt-4">
-                <div>
+                <div data-ask-spot="income">
                   <dt className="text-xs text-muted-foreground">Income</dt>
                   <dd className="mt-0.5 text-base font-semibold tabular-nums text-foreground">
                     <StatementValue value={selected.income.total} />
                   </dd>
                 </div>
-                <div>
+                <div data-ask-spot="expenses-total">
                   <dt className="text-xs text-muted-foreground">Expenses</dt>
                   <dd className="mt-0.5 text-base font-semibold tabular-nums text-foreground">
                     <StatementValue value={selected.expenses.total} />

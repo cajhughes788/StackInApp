@@ -21,6 +21,9 @@ type NativeSpeechPlugin = {
   start(options: { hints?: string[]; silenceMs?: number; firstWordsMs?: number; limitMs?: number }): Promise<{ onDevice: boolean }>
   stop(): Promise<void>
   cancel(): Promise<void>
+  // Ask 521: reads a short answer aloud with the iPhone's own voice.
+  speak(options: { text: string }): Promise<void>
+  stopSpeaking(): Promise<void>
   addListener(event: "partial", listener: (data: { text: string }) => void): Promise<PluginListenerHandle>
   addListener(
     event: "finished",
@@ -37,4 +40,15 @@ export function isNativeSpeechAvailable(): boolean {
     Capacitor.getPlatform() === "ios" &&
     Capacitor.isPluginAvailable("NativeSpeech")
   )
+}
+
+/** Reads a short answer aloud (iPhone only); quietly does nothing elsewhere. */
+export function speakAloud(text: string): void {
+  if (!isNativeSpeechAvailable() || !text.trim()) return
+  void NativeSpeech.speak({ text: text.slice(0, 600) }).catch(() => {})
+}
+
+export function stopSpeakingAloud(): void {
+  if (!isNativeSpeechAvailable()) return
+  void NativeSpeech.stopSpeaking().catch(() => {})
 }

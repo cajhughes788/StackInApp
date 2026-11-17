@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Plus, X } from "lucide-react"
+import { Mic, Plus, Square, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
@@ -36,6 +36,17 @@ import type { IncomeCategory } from "@shared/schemas/entry"
 import { invoiceDepositOutstanding } from "@shared/invoicePayments"
 import type { InvoiceTerms, InvoiceType } from "@shared/schemas/invoice"
 import { DEFAULT_QUOTE_VALID_DAYS, addQuoteDays, quoteInvoicePrefill, quoteNumberLabel } from "@shared/quotes"
+import { useSpeechCapture } from "@/hooks/useSpeechCapture"
+import { listWords, scrollToVoiceReview, VoiceReviewFooter, VoiceReviewLabel, type VoiceAsk } from "@/components/voice-review"
+import { useVoiceHandoffStore } from "@/lib/stores/useVoiceHandoffStore"
+import { parseVoiceInvoice, wakeVoiceEntry } from "@/lib/api/voiceEntryApi"
+import {
+  planInvoiceFill,
+  voiceInvoiceCurrentFor,
+  voiceInvoiceHints,
+  type InvoiceClientPick,
+  type InvoiceVoiceQuestion,
+} from "@/lib/voiceInvoiceFill"
 
 // A line as typed: quantity × rate (the rate as dollars and cents).
 type DraftLine = { key: number; description: string; quantity: string; rate: string; category: IncomeCategory }
@@ -80,6 +91,19 @@ function addDays(date: string, days: number): string {
 // A deposit that's been paid or waived can't change any more.
 function depositSettled(invoice: InvoiceType | null): boolean {
   return !!invoice?.deposit && (invoice.deposit.waivedAt !== null || invoiceDepositOutstanding(invoice) === 0)
+}
+
+// The form as it was before voice first filled it, for the voice note's undo (X).
+type VoiceFormSnapshot = {
+  clientName: string
+  clientId: string | null
+  clientEmail: string
+  clientPhone: string
+  clientAddress: string
+  lines: DraftLine[]
+  issueDate: string
+  dueDate: string
+  note: string
 }
 
 // What the form sends for a quote (its "due date" is the valid-until date).
@@ -174,6 +198,7 @@ function InvoiceFormPage() {
   const [repeat, setRepeat] = useState<RepeatDraft>(newRepeatDraft)
   const [showErrors, setShowErrors] = useState(false)
   const initialized = useRef(false)
+  const [formInitialized, setFormInitialized] = useState(false)
 
   // Fill the form once: from the invoice being edited, or from settings.
   useEffect(() => {
@@ -182,6 +207,7 @@ function InvoiceFormPage() {
     if (fromQuoteId && !sourceQuote && quotesStatus !== "error") return
     if (isSchedule && !existingSchedule) return
     initialized.current = true
+    setFormInitialized(true)
     if (existingSchedule) {
       setClientName(existingSchedule.clientName)
       setClientId(existingSchedule.clientId ?? null)
@@ -404,12 +430,260 @@ function InvoiceFormPage() {
   const repeatError = repeatResult && "error" in repeatResult ? repeatResult.error : null
   const valid = !errors.client && !errors.lines && !errors.dates && !errors.email && (repeating || !depositError) && !repeatError
 
+  /** ------------------------------------------------
+   * VOICE — say the invoice or quote, check the filled form, tap its own
+   * buttons. Only the typed-out words and saved client names go to the
+   * server (lib/api/voiceEntryApi.ts); nothing is saved or sent by voice.
+   * ------------------------------------------------ */
+  const [voicePhase, setVoicePhase] = useState<"idle" | "thinking">("idle")
+  const [voiceQuestions, setVoiceQuestions] = useState<InvoiceVoiceQuestion[]>([])
+  const [voiceNotes, setVoiceNotes] = useState<string[]>([])
+  const [voiceFilled, setVoiceFilled] = useState(false)
+  const [voiceHeard, setVoiceHeard] = useState("")
+  const voiceRunRef = useRef(0)
+  const voiceUndoRef = useRef<VoiceFormSnapshot | null>(null)
+  // This recording fixes what voice already filled ("make the gloss 45").
+  const voiceFixingRef = useRef(false)
+  // What the review's voice button asked for ("client name"), sent with that fix.
+  const voiceAskingRef = useRef<string[]>([])
+  const voiceSnapshot = (): VoiceFormSnapshot => ({
+    clientName,
+    clientId,
+    clientEmail,
+    clientPhone,
+    clientAddress,
+    lines,
+    issueDate,
+    dueDate,
+    note,
+  })
+
+  function restoreVoiceSnapshot(snap: VoiceFormSnapshot) {
+    setClientName(snap.clientName)
+    setClientId(snap.clientId)
+    setClientEmail(snap.clientEmail)
+    setClientPhone(snap.clientPhone)
+    setClientAddress(snap.clientAddress)
+    setLines(snap.lines)
+    setIssueDate(snap.issueDate)
+    setDueDate(snap.dueDate)
+    setNote(snap.note)
+  }
+
+  /** Puts a client on the form. Contact details come from a saved client,
+   * or stay as they were before voice filled anything. */
+  function applyVoiceClient(pick: InvoiceClientPick, before: VoiceFormSnapshot) {
+    if (pick.kind === "saved") {
+      setClientName(pick.client.name)
+      setClientId(pick.client.id)
+      setClientEmail(pick.client.email || before.clientEmail)
+      setClientPhone(pick.client.phone || before.clientPhone)
+      setClientAddress(pick.client.address || before.clientAddress)
+    } else {
+      setClientName(pick.name)
+      setClientId(null)
+      setClientEmail(before.clientEmail)
+      setClientPhone(before.clientPhone)
+      setClientAddress(before.clientAddress)
+    }
+  }
+
+  // When only the date moves, the terms (or quote length) chosen stay.
+  function keepDueFor(nextIssueDate: string): string {
+    if (isQuote) return selectedValidDays ? addQuoteDays(nextIssueDate, selectedValidDays) : dueDate
+    return selectedTerms ? dueDateForTerms(nextIssueDate, selectedTerms) : dueDate
+  }
+
+  async function handleVoiceTranscript(transcript: string) {
+    const run = ++voiceRunRef.current
+    const fixing = voiceFixingRef.current
+    const openQuestions = fixing ? voiceQuestions : []
+    const now = voiceSnapshot()
+    const before = voiceUndoRef.current ?? now
+    setVoicePhase("thinking")
+    setVoiceHeard(transcript)
+    setVoiceNotes([])
+    if (!fixing) {
+      setVoiceQuestions([])
+      setVoiceFilled(false)
+    }
+    try {
+      const result = await parseVoiceInvoice({
+        kind: "invoice",
+        document: isQuote ? "quote" : "invoice",
+        transcript,
+        today: localToday(),
+        clients: savedClients.map((c) => c.name).slice(0, 300),
+        ...(fixing
+          ? {
+              asking: voiceAskingRef.current.length > 0 ? voiceAskingRef.current : undefined,
+              current: voiceInvoiceCurrentFor({
+                clientName: now.clientName,
+                clientEmail: now.clientEmail,
+                clientPhone: now.clientPhone,
+                lines: now.lines,
+                issueDate: now.issueDate,
+                dueDate: now.dueDate,
+                // The spoken part only; the note from settings stays put.
+                note: now.note === before.note ? "" : now.note.slice(0, Math.max(0, now.note.length - before.note.length)).trim(),
+              }),
+            }
+          : {}),
+      })
+      if (run !== voiceRunRef.current) return
+      const plan = planInvoiceFill(result, {
+        isQuote,
+        savedClients,
+        issueDate: now.issueDate,
+        dueDate: now.dueDate,
+        keepDue: keepDueFor,
+        fixing,
+      })
+      const nothingFilled =
+        !plan.client && plan.questions.length === 0 && !plan.clientEmail && !plan.clientPhone &&
+        !plan.lines && !plan.issueDate && !plan.dueDate && !plan.note
+      if (!result.isInvoice || nothingFilled) {
+        setVoiceNotes([
+          ...plan.skipped,
+          fixing
+            ? "Didn't catch a change in that. Try again, like \u201cmake the gloss 45.\u201d"
+            : `Didn't catch ${isQuote ? "a quote" : "an invoice"} in that. Try again, like \u201c${isQuote ? "Quote" : "Invoice"} Jenna 120 for a cut and color.\u201d`,
+        ])
+        return
+      }
+
+      if (!voiceUndoRef.current) voiceUndoRef.current = now
+      if (plan.client) applyVoiceClient(plan.client, before)
+      if (plan.clientEmail) setClientEmail(plan.clientEmail)
+      if (plan.clientPhone) setClientPhone(plan.clientPhone)
+      if (plan.lines) {
+        setLines(
+          plan.lines.length > 0
+            ? plan.lines.map((line) => ({
+                ...newLine(line.category),
+                description: line.description,
+                quantity: String(line.quantity),
+                rate: line.rate.toFixed(2),
+              }))
+            : [newLine()]
+        )
+      }
+      if (plan.issueDate) setIssueDate(plan.issueDate)
+      if (plan.dueDate) setDueDate(plan.dueDate)
+      // What they said goes first; the note from settings (how to pay) stays under it.
+      if (plan.note) setNote([plan.note, before.note].filter((text) => text.trim()).join("\n\n"))
+
+      // New questions get ids from this run so they never clash with ones still open.
+      const newQuestions = plan.questions.map((q) => ({ ...q, id: `${run}-${q.id}` }))
+      setVoiceQuestions(
+        fixing
+          ? // A fix that names the client answers the open "Which Jenna?".
+            [...(plan.client || newQuestions.length > 0 ? [] : openQuestions), ...newQuestions]
+          : newQuestions
+      )
+      setVoiceNotes(plan.skipped)
+      setVoiceFilled(true)
+      scrollToVoiceReview("voice-invoice-review")
+    } catch (error) {
+      if (run !== voiceRunRef.current) return
+      console.warn("[VoiceInvoice] fill failed", error)
+      // 429 = today's voice limit (server message says so); anything else is a plain failure.
+      const limited = (error as { status?: number })?.status === 429
+      setVoiceNotes([limited && error instanceof Error ? error.message : "Couldn't fill in the form just now. Try again or type it in."])
+    } finally {
+      if (run === voiceRunRef.current) setVoicePhase("idle")
+    }
+  }
+  const speech = useSpeechCapture((transcript) => void handleVoiceTranscript(transcript))
+
+  /** With the filled-in note showing, the mic fixes what voice filled instead of starting over. */
+  function startVoice(ask?: VoiceAsk | null) {
+    wakeVoiceEntry()
+    setVoiceNotes([])
+    voiceFixingRef.current = voiceFilled
+    voiceAskingRef.current = voiceFilled && ask ? ask.asking : []
+    if (!voiceFilled) {
+      setVoiceQuestions([])
+      voiceUndoRef.current = null
+    }
+    speech.resetStatus()
+    void speech.start(voiceInvoiceHints(savedClients.map((c) => c.name)))
+  }
+
+  /** The note's X: puts the form back as it was before voice filled it. */
+  function undoVoiceFill() {
+    if (voiceUndoRef.current) restoreVoiceSnapshot(voiceUndoRef.current)
+    voiceRunRef.current += 1
+    voiceUndoRef.current = null
+    voiceFixingRef.current = false
+    setVoicePhase("idle")
+    setVoiceFilled(false)
+    setVoiceQuestions([])
+    setVoiceNotes([])
+    setVoiceHeard("")
+  }
+
+  function answerVoiceQuestion(question: InvoiceVoiceQuestion, pick: InvoiceClientPick) {
+    applyVoiceClient(pick, voiceUndoRef.current ?? voiceSnapshot())
+    setVoiceQuestions((current) => current.filter((q) => q.id !== question.id))
+  }
+
+  // ?voice=1 (the mic on the Invoices list): start listening once the form is ready.
+  const listenOnOpen = useQueryParam("voice") === "1"
+  const listenedOnOpen = useRef(false)
+  const formReady = formInitialized && loadStatus === "ready"
+  useEffect(() => {
+    if (!listenOnOpen || listenedOnOpen.current || !formReady || !speech.checked) return
+    listenedOnOpen.current = true
+    if (speech.supported) startVoice()
+    // startVoice reads the latest form each render; only the readiness matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listenOnOpen, formReady, speech.checked, speech.supported])
+
+  // Said to Ask 521 on Home ("invoice Jenna 120 for a cut"): fill from those words once the form is ready.
+  const voiceHandoff = useVoiceHandoffStore((state) => state.request)
+  const takeVoiceHandoff = useVoiceHandoffStore((state) => state.take)
+  useEffect(() => {
+    if (!voiceHandoff || !formReady || isSchedule || (voiceHandoff.listen && !speech.checked)) return
+    const taken = takeVoiceHandoff(isQuote ? ["quote"] : ["invoice"], workspaceId)
+    if (!taken) return
+    voiceFixingRef.current = false
+    voiceUndoRef.current = null
+    if (taken.listen) {
+      if (speech.supported) startVoice()
+      return
+    }
+    void handleVoiceTranscript(taken.transcript)
+    // handleVoiceTranscript reads the latest form each render; readiness is what matters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceHandoff, formReady, isQuote, isSchedule, workspaceId, takeVoiceHandoff, speech.checked])
+
+  const voiceListening = speech.status === "listening"
+  const voiceBusy = voiceListening || voicePhase === "thinking"
+  // The review's voice button asks for whatever the invoice or quote still needs.
+  const voiceMissing: { words: string[]; asking: string }[] = []
+  if (!clientName.trim() && voiceQuestions.length === 0) voiceMissing.push({ words: ["who it's for"], asking: "client name" })
+  if (!lines.some((line) => Number(line.rate) > 0)) {
+    voiceMissing.push({ words: ["what it's for", "how much"], asking: "line items (what it's for and the price)" })
+  }
+  const voiceAsk: VoiceAsk | null =
+    voiceMissing.length > 0
+      ? { label: `Say ${listWords(voiceMissing.flatMap((m) => m.words))}`, asking: voiceMissing.map((m) => m.asking) }
+      : null
+  const voiceAllowed = speech.supported && !isSchedule
+
   function updateLine(key: number, patch: Partial<DraftLine>) {
     setLines((current) => current.map((line) => (line.key === key ? { ...line, ...patch } : line)))
   }
 
   function save(mode: "draft" | "share") {
     if (!workspaceId) return
+    // A client voice is still asking about isn't on the form yet.
+    if (voiceQuestions.length > 0) {
+      setVoiceNotes([`Pick who this ${noun} is for above, then save.`])
+      document.getElementById(`voice-question-${voiceQuestions[0].id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })
+      return
+    }
     if (!valid) {
       setShowErrors(true)
       return
@@ -617,6 +891,87 @@ function InvoiceFormPage() {
             void save("share")
           }}
         >
+          {voiceAllowed && !voiceListening && voicePhase !== "thinking" && !voiceFilled ? (
+            <button
+              type="button"
+              onClick={() => startVoice()}
+              disabled={saving !== null}
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-muted text-base font-medium text-foreground transition-colors hover:bg-secondary"
+            >
+              <Mic className="size-5" aria-hidden="true" />
+              Say the {noun}
+            </button>
+          ) : null}
+
+          {voiceListening ? (
+            <div className="space-y-3 rounded-2xl bg-muted px-4 py-3" aria-live="polite">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <span className="size-2.5 shrink-0 animate-pulse rounded-full bg-primary" aria-hidden="true" />
+                  Listening…
+                </div>
+                <Button
+                  type="button"
+                  size="icon"
+                  className="size-10 shrink-0 animate-pulse rounded-full bg-[#2FA866] text-white hover:bg-[#2FA866]/90"
+                  onClick={speech.done}
+                  aria-label="Stop and fill in"
+                >
+                  <Square className="fill-current" />
+                </Button>
+              </div>
+              <p className="text-base text-foreground">
+                {speech.transcript || (
+                  <span className="text-muted-foreground">
+                    {isQuote
+                      ? "Say it like \u201cQuote Jenna 450 for a full bathroom clean, good for 30 days.\u201d"
+                      : "Say it like \u201cInvoice Jenna 120 for a cut and color and 40 for a gloss, due Friday.\u201d"}
+                  </span>
+                )}
+              </p>
+              <p className="text-xs text-muted-foreground">Tap the green button or pause when you&apos;re done.</p>
+              <div className="flex gap-2">
+                <Button type="button" size="sm" className="rounded-full" onClick={speech.done} disabled={!speech.transcript}>
+                  Done
+                </Button>
+                <Button type="button" size="sm" variant="ghost" className="rounded-full" onClick={speech.cancel}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
+          {voicePhase === "thinking" ? (
+            <p className="rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground" aria-live="polite">
+              Filling in the form…
+            </p>
+          ) : null}
+
+          {speech.status === "denied" ? (
+            <p className="rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">
+              The mic is off for 521. Turn on Microphone and Speech Recognition in Settings › 521, or type the {noun} below.
+            </p>
+          ) : null}
+          {speech.status === "error" ? (
+            <p className="rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">
+              Couldn&apos;t hear that. Tap the mic to try again, or type the {noun} below.
+            </p>
+          ) : null}
+
+          {voiceHeard && !voiceFilled && !voiceListening ? (
+            <p className="px-1 text-sm text-muted-foreground">Heard: &ldquo;{voiceHeard}&rdquo;</p>
+          ) : null}
+
+          {voiceFilled ? <VoiceReviewLabel id="voice-invoice-review" /> : null}
+
+          {!voiceFilled
+            ? voiceNotes.map((text) => (
+                <p key={text} className="px-1 text-sm text-muted-foreground">
+                  {text}
+                </p>
+              ))
+            : null}
+
           <section className={cn(cardClass, "space-y-3")}>
             <label className={fieldLabelClass}>
               {isQuote ? "Quote for" : "Bill to"}
@@ -1030,6 +1385,46 @@ function InvoiceFormPage() {
                 </>
               ) : null}
             </section>
+          ) : null}
+
+          {voiceFilled && !voiceBusy ? (
+            <VoiceReviewFooter
+              heard={voiceHeard}
+              ask={voiceAsk}
+              onVoice={() => startVoice(voiceAsk)}
+              onUndo={undoVoiceFill}
+              disabled={saving !== null}
+            >
+              {voiceQuestions.map((question) => (
+                <div key={question.id} id={`voice-question-${question.id}`} className="space-y-2 rounded-2xl bg-muted px-4 py-3">
+                  <p className="text-sm font-medium text-foreground">{question.prompt}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {question.options.map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => answerVoiceQuestion(question, { kind: "saved", client: option })}
+                        className="rounded-full bg-card px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-secondary"
+                      >
+                        {option.name}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => answerVoiceQuestion(question, { kind: "new", name: question.spokenName })}
+                      className="rounded-full px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-secondary"
+                    >
+                      New client: {question.spokenName}
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {voiceNotes.map((text) => (
+                <p key={text} className="px-1 text-sm text-muted-foreground">
+                  {text}
+                </p>
+              ))}
+            </VoiceReviewFooter>
           ) : null}
 
           <div className="flex gap-2.5 pt-1">

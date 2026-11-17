@@ -48,6 +48,8 @@ import { useWarmRecordSaving, wakeRecordSaving } from "@/hooks/useWarmRecordSavi
 import HomeTour from "@/components/onboarding/home-tour";
 import HomeTourOffer from "@/components/onboarding/home-tour-offer";
 import AllIncomeCard from "@/components/all-income-card";
+import Ask521 from "@/components/ask-521";
+import { useVoiceLaunchStore } from "@/lib/stores/useVoiceLaunchStore";
 
 export default function HomePage() {
     const router = useRouter();
@@ -117,6 +119,23 @@ export default function HomePage() {
         focusStore.setHighlight(expenseFocusRequest.expenseId);
         focusStore.clearRequest();
     }, [expenseFocusRequest, settings, activeWorkspace, activeWorkspaceId]);
+    // Siri / the Action Button: "Log in 521" shows Income (Add entry takes
+    // its own listen request), "Add an expense in 521" shows Expenses.
+    const voiceLaunch = useVoiceLaunchStore((s) => s.request);
+    useEffect(() => {
+        if (voiceLaunch?.target === "entry") {
+            useVoiceLaunchStore.getState().take("entry");
+            setMode("income");
+        }
+        else if (voiceLaunch?.target === "expense") {
+            setMode("expenses");
+        }
+    }, [voiceLaunch]);
+    // Ask 521's "log": show that form (the form takes the words itself).
+    const showVoiceForm = (form: "entry" | "expense") => {
+        setMode(form === "expense" ? "expenses" : "income");
+        window.setTimeout(() => document.querySelector('[data-tour="entry-form"]')?.scrollIntoView({ behavior: "smooth", block: "start" }), 150);
+    };
     // ---- ENTRIES STORE ----
     const entries = useEntriesData(activeWorkspaceId);
     const entriesState = useEntriesRenderState(activeWorkspaceId);
@@ -329,6 +348,7 @@ export default function HomePage() {
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-5 px-4 pb-10 pt-4">
         <HomeTourOffer className="order-0"/>
         <AllIncomeCard className="order-0"/>
+        <Ask521 className="order-0" onShowForm={showVoiceForm}/>
         <div className="order-0 grid grid-cols-2 rounded-full bg-secondary p-1 dark:bg-muted" role="group" aria-label="Show income or expenses" data-tour="mode-switch">
           {(["income", "expenses"] as const).map((tab) => (<button key={tab} type="button" aria-pressed={mode === tab} onClick={() => setMode(tab)} className={`rounded-full py-2 text-sm font-medium transition-colors ${mode === tab
                 ? "bg-foreground text-background shadow-sm"
@@ -371,6 +391,7 @@ export default function HomePage() {
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-5 px-4 pb-10 pt-4">
         <HomeTourOffer />
         <AllIncomeCard />
+        <Ask521 onShowForm={showVoiceForm}/>
         <div data-tour="total">
           <IncomeGauge />
         </div>

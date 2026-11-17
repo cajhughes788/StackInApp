@@ -6,7 +6,7 @@
 
 import type { EntryFormVisibility } from "@shared/entryVisibility"
 import type { IncomeCategory } from "@shared/schemas/entry"
-import type { VoiceAmountTarget, VoiceEntryResult } from "@shared/voiceEntry"
+import type { VoiceAmountTarget, VoiceEntryCurrent, VoiceEntryResult } from "@shared/voiceEntry"
 import { getSplitCategories, paymentCategoryConfig } from "@/lib/incomeBreakdown"
 
 export const VOICE_SOURCE_FIELDS = ["venmo", "appleCash", "zelle", "checks", "cashApp", "posSales", "cashSales"] as const
@@ -40,6 +40,8 @@ export type VoiceFillPlan = {
   amounts: Array<VoiceAmountPlacement & { amount: number }>
   questions: VoiceQuestion[]
   notes: string | null
+  // Fields to empty (a fix like "no cash").
+  cleared: VoiceAmountField[]
   // Short notes for the person about what was left out and why.
   skipped: string[]
 }
@@ -63,6 +65,16 @@ export function toTwelveHour(time24: string): { time: string; period: "AM" | "PM
   const period = hour >= 12 ? "PM" : "AM"
   const hour12 = hour % 12 === 0 ? 12 : hour % 12
   return { time: `${hour12}:${minute}`, period }
+}
+
+/** "2:47" + "PM" → "14:47"; null when the box isn't a full time. */
+export function toTwentyFourHour(time: string, period: string): string | null {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(time.trim())
+  if (!match) return null
+  const hour = Number(match[1])
+  if (hour < 1 || hour > 12 || Number(match[2]) > 59) return null
+  const hour24 = (hour % 12) + (period === "PM" ? 12 : 0)
+  return `${String(hour24).padStart(2, "0")}:${match[2]}`
 }
 
 /** Hours between two 24-hour times; past midnight counts into the next day. */
@@ -199,6 +211,13 @@ export function planVoiceFill(result: VoiceEntryResult, ctx: VoiceFillContext): 
     }
   }
 
+  // Times were said but couldn't be made out, or only one came through: say so
+  // rather than leave the boxes quietly empty.
+  const oneTimeOnly = Boolean(result.inTime) !== Boolean(result.outTime)
+  if ((hasInOut || hasHoursBox) && !inOut && !hours && (result.timesUnclear || oneTimeOnly)) {
+    skipped.push("Didn't catch the times. Tap Fix by voice and say them again, or type them in.")
+  }
+
   const positionId = visibility.mode === "w2" && visibility.showRate ? result.positionId : null
 
   // Amounts: placed ones are put together per field (and category); the rest become questions.
@@ -238,7 +257,65 @@ export function planVoiceFill(result: VoiceEntryResult, ctx: VoiceFillContext): 
 
   const notes = visibility.showNotes && result.notes ? result.notes : null
 
-  return { date, hours, inOut, positionId, amounts: [...placed.values()], questions, notes, skipped }
+  const cleared: VoiceAmountField[] = []
+  for (const target of result.remove ?? []) {
+    const placement = placementFor(target, null, ctx)
+    if (placement && !cleared.includes(placement.field)) cleared.push(placement.field)
+  }
+
+  return { date, hours, inOut, positionId, amounts: [...placed.values()], questions, notes, cleared, skipped }
+}
+
+/** A form box's key as the server's target name. */
+function targetFor(field: VoiceAmountField): VoiceAmountTarget {
+  if (field === "tips") return "cardTips"
+  if (field === "unreportedCash") return "personalCash"
+  return field
+}
+
+export type VoiceFormSnapshot = {
+  date: string
+  today: string
+  inTime: string
+  inPeriod: string
+  outTime: string
+  outPeriod: string
+  hours: string
+  positionId: string | null
+  amounts: Partial<Record<VoiceAmountField, string>>
+}
+
+/** What's on the form now, for a "Fix by voice" request: only boxes this form
+ * shows and that have something in them, plus amounts still waiting on a
+ * "where does it go?" answer. */
+export function voiceCurrentFor(
+  form: VoiceFormSnapshot,
+  openQuestions: VoiceQuestion[],
+  ctx: Pick<VoiceFillContext, "visibility" | "tipsEnabled">
+): VoiceEntryCurrent {
+  const { visibility } = ctx
+  const shown = new Set(voiceFieldsFor(visibility, ctx.tipsEnabled))
+  const hasInOut = visibility.mode === "w2" && visibility.showInOutTimes
+  const inTime = hasInOut ? toTwentyFourHour(form.inTime, form.inPeriod) : null
+  const outTime = hasInOut ? toTwentyFourHour(form.outTime, form.outPeriod) : null
+  const hours = Number(form.hours)
+  const amounts: VoiceEntryCurrent["amounts"] = []
+  for (const [field, value] of Object.entries(form.amounts) as Array<[VoiceAmountField, string | undefined]>) {
+    const amount = Math.round(Number(value ?? "") * 100) / 100
+    const target = targetFor(field)
+    if (shown.has(target) && Number.isFinite(amount) && amount > 0) amounts.push({ target, category: null, amount })
+  }
+  for (const question of openQuestions) {
+    amounts.push({ target: question.isTips ? "tipsUnsure" : "unsure", category: null, amount: question.amount })
+  }
+  return {
+    date: form.date && form.date !== form.today ? form.date : null,
+    inTime: inTime && outTime ? inTime : null,
+    outTime: inTime && outTime ? outTime : null,
+    hours: Number.isFinite(hours) && hours > 0 && hours <= 24 ? hours : null,
+    positionId: visibility.mode === "w2" && visibility.showRate ? form.positionId : null,
+    amounts: amounts.slice(0, 20),
+  }
 }
 
 /** Words for the phone's speech recognition to listen for on this form, so
